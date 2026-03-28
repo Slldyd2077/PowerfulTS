@@ -1,0 +1,14 @@
+[project]
+name = "PowerfulTS"
+version = "0.1.0"
+description = ""
+readme = "README.md"
+requires-python = ">=3.11"
+license = "AGPL-3.0-or-later"
+authors = [
+    { name = "Slldyd2077" },
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
