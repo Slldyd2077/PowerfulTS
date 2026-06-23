@@ -1,0 +1,197 @@
+@import './variables.css';
+
+/* ── Google Fonts：JetBrains Mono（数据）+ Noto Sans SC（正文）── */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: 'Noto Sans SC', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background-color: var(--surface-0);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.6;
+}
+
+/* ── 数据/数字专用字体 ── */
+.mono,
+[data-mono] {
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Element Plus 暗色深度覆盖 ── */
+.el-card {
+  --el-card-bg-color: var(--surface-3);
+  --el-card-border-color: var(--border-subtle);
+}
+
+.el-menu {
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: var(--text-muted);
+  --el-menu-active-color: var(--color-primary);
+  --el-menu-hover-bg-color: var(--surface-4);
+  border-right: none !important;
+}
+
+.el-menu-item {
+  border-radius: var(--radius-sm) !important;
+  margin: 2px 0 !important;
+  height: 44px !important;
+  font-weight: 500;
+  transition: all 0.2s var(--ease-out-expo);
+}
+
+.el-menu-item.is-active {
+  background: var(--gradient-brand-subtle) !important;
+  color: var(--color-primary) !important;
+  box-shadow: var(--glow-primary);
+}
+
+.el-button--primary {
+  --el-button-bg-color: var(--color-primary-dim);
+  --el-button-border-color: var(--color-primary-dim);
+  background: var(--gradient-brand) !important;
+  border: none !important;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.el-button--primary:hover {
+  filter: brightness(1.15);
+  box-shadow: var(--glow-primary-strong);
+}
+
+.el-input__wrapper {
+  background: var(--surface-3) !important;
+  border: 1px solid var(--border-subtle) !important;
+  box-shadow: none !important;
+  border-radius: var(--radius-sm) !important;
+  transition: border-color 0.2s;
+}
+
+.el-input__wrapper:hover,
+.el-input__wrapper.is-focus {
+  border-color: var(--color-primary) !important;
+  box-shadow: var(--glow-primary) !important;
+}
+
+.el-input__inner {
+  color: var(--text-primary) !important;
+}
+
+.el-input__inner::placeholder {
+  color: var(--text-muted) !important;
+}
+
+.el-form-item__label {
+  color: var(--text-secondary) !important;
+  font-weight: 500;
+  font-size: 0.85em;
+}
+
+.el-tag {
+  border: none;
+}
+
+.el-tag--info {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+}
+
+.el-tag--success {
+  background: rgba(105, 240, 174, 0.12);
+  color: var(--color-success);
+}
+
+.el-tag--danger {
+  background: rgba(255, 82, 82, 0.12);
+  color: var(--color-danger);
+}
+
+.el-slider__bar {
+  background: var(--gradient-brand) !important;
+}
+
+.el-slider__button {
+  border-color: var(--color-primary) !important;
+  box-shadow: var(--glow-primary);
+}
+
+/* ── 滚动条 ── */
+::-webkit-scrollbar {
+  width: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* ── 全局动画 ── */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ── 实用类 ── */
+.animate-in {
+  animation: fade-in-up 0.4s var(--ease-out-expo) both;
+}
+
+.animate-delay-1 { animation-delay: 0.05s; }
+.animate-delay-2 { animation-delay: 0.1s; }
+.animate-delay-3 { animation-delay: 0.15s; }
+.animate-delay-4 { animation-delay: 0.2s; }
+
+/* 侧边栏渐变分割线 */
+.divider-glow {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-primary), var(--color-secondary), transparent);
+  opacity: 0.3;
+  margin: 8px 0;
+}

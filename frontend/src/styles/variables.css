@@ -1,0 +1,93 @@
+:root {
+  /* ── 主色调：霓虹蓝紫 ── */
+  --color-primary: #00e5ff;
+  --color-primary-dim: #0097a7;
+  --color-primary-rgb: 0, 229, 255;
+
+  --color-secondary: #b388ff;
+  --color-secondary-dim: #7c4dff;
+  --color-secondary-rgb: 179, 136, 255;
+
+  --color-accent: #ffab00;
+  --color-accent-rgb: 255, 171, 0;
+
+  --color-success: #69f0ae;
+  --color-success-rgb: 105, 240, 174;
+
+  --color-danger: #ff5252;
+  --color-danger-rgb: 255, 82, 82;
+
+  /* ── 表面层级（由深到浅）── */
+  --surface-0: #060610;       /* 最深底色 */
+  --surface-1: #0c0c1d;       /* 主背景 */
+  --surface-2: #13132a;       /* 侧边栏/顶栏 */
+  --surface-3: rgba(255, 255, 255, 0.04);  /* 卡片 */
+  --surface-3-hover: rgba(255, 255, 255, 0.07);
+  --surface-4: rgba(255, 255, 255, 0.08);  /* 行 hover */
+
+  /* ── 边框 & 分隔 ── */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-emphasis: rgba(255, 255, 255, 0.16);
+
+  /* ── 文字层级 ── */
+  --text-primary: #eceff1;
+  --text-secondary: #90a4ae;
+  --text-muted: #546e7a;
+  --text-inverse: #0c0c1d;
+
+  /* ── 圆角 ── */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  /* ── 辉光 ── */
+  --glow-primary: 0 0 20px rgba(0, 229, 255, 0.15);
+  --glow-primary-strong: 0 0 30px rgba(0, 229, 255, 0.3);
+  --glow-secondary: 0 0 20px rgba(179, 136, 255, 0.15);
+  --glow-accent: 0 0 16px rgba(255, 171, 0, 0.2);
+
+  /* ── 阴影 ── */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 24px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.6);
+
+  /* ── 渐变 ── */
+  --gradient-brand: linear-gradient(135deg, #00e5ff, #b388ff);
+  --gradient-brand-subtle: linear-gradient(135deg, rgba(0, 229, 255, 0.15), rgba(179, 136, 255, 0.15));
+  --gradient-gold: linear-gradient(135deg, #ffab00, #ff6d00);
+  --gradient-danger: linear-gradient(135deg, #ff5252, #d32f2f);
+  --gradient-surface: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%);
+
+  /* ── 间距节奏 ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* ── 动画曲线 ── */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ── 兼容旧变量 ── */
+  --bg-primary: var(--surface-1);
+  --bg-secondary: var(--surface-2);
+  --bg-card: var(--surface-3);
+  --bg-card-hover: var(--surface-3-hover);
+  --border-color: var(--border-default);
+  --border-radius: var(--radius-md);
+  --gradient-primary: var(--gradient-brand);
+  --gradient-gold: var(--gradient-gold);
+  --gradient-danger: var(--gradient-danger);
+  --shadow-card: var(--shadow-md);
+  --shadow-hover: var(--shadow-lg);
+  --spacing-xs: var(--space-1);
+  --spacing-sm: var(--space-2);
+  --spacing-md: var(--space-4);
+  --spacing-lg: var(--space-6);
+  --spacing-xl: var(--space-8);
+}

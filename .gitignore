@@ -16,3 +16,14 @@ build/
 # OS
 Thumbs.db
 .DS_Store
+
+# Env (含 TS3AudioBot token 等密钥, 禁止提交)
+.env
+.env.*
+!.env.example
+
+# Node.js
+node_modules/
+
+# 临时工作文件 (如 TS3AudioBot 插件下载/解包, 勿提交)
+.tmp_*/
