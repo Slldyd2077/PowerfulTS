@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 160" width="560" height="160" role="img" aria-label="PowerfulTS">
+  <defs>
+    <!-- 图标背景主渐变: indigo → violet → cyan -->
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="0.55" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#06b6d4"/>
+    </linearGradient>
+    <!-- 容器顶部玻璃高光 -->
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.40"/>
+      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <!-- 主标题文字渐变 -->
+    <linearGradient id="textGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="0.55" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#06b6d4"/>
+    </linearGradient>
+    <!-- 脉冲点发光 -->
+    <filter id="glow" x="-120%" y="-120%" width="340%" height="340%">
+      <feGaussianBlur stdDeviation="3.2" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- 图标柔和落影 -->
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="5"/>
+      <feOffset dy="5" result="o"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.28"/></feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- ── 图标 mark ── -->
+  <g transform="translate(8,16)" filter="url(#shadow)">
+    <!-- 圆角渐变背景 -->
+    <rect x="6" y="6" width="116" height="116" rx="26" fill="url(#bg)"/>
+    <!-- 顶部玻璃高光 -->
+    <rect x="6" y="6" width="116" height="116" rx="26" fill="url(#gloss)"/>
+
+    <!-- 声波频谱柱 (TS3 语音音量), 山峰形, 底对齐 y=104 -->
+    <g fill="#ffffff">
+      <rect x="27.5" y="76" width="9" height="28" rx="4.5" opacity="0.72"/>
+      <rect x="43.5" y="58" width="9" height="46" rx="4.5" opacity="0.90"/>
+      <rect x="59.5" y="40" width="9" height="64" rx="4.5"/>
+      <rect x="75.5" y="58" width="9" height="46" rx="4.5" opacity="0.90"/>
+      <rect x="91.5" y="76" width="9" height="28" rx="4.5" opacity="0.72"/>
+    </g>
+
+    <!-- 扩散波纹 (实时监控脉冲) -->
+    <g fill="none" stroke="#ffffff" stroke-width="1.6">
+      <circle cx="64" cy="26" r="12" opacity="0.30"/>
+      <circle cx="64" cy="26" r="18" opacity="0.14"/>
+    </g>
+    <!-- 发光脉冲点 -->
+    <circle cx="64" cy="26" r="5.6" fill="#cffafe" filter="url(#glow)"/>
+  </g>
+
+  <!-- ── 文字 ── -->
+  <text x="172" y="82" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="58" font-weight="800" letter-spacing="-1.5" fill="url(#textGrad)">PowerfulTS</text>
+  <text x="175" y="112" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="18" font-weight="600" letter-spacing="4" fill="#64748b">TS3 · MONITORING DASHBOARD</text>
+</svg>
