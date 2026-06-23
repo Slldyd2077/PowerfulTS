@@ -217,14 +217,7 @@ async function handleRegister() {
 
       <!-- 品牌层 -->
       <div class="brand-layer">
-        <div class="brand-badge">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-            <line x1="12" y1="19" x2="12" y2="23"/>
-            <line x1="8" y1="23" x2="16" y2="23"/>
-          </svg>
-        </div>
+        <img class="brand-logo" src="/logo-mark.svg" alt="PowerfulTS" />
         <h1 class="brand-title">
           <span class="brand-title-line">Powerful</span>
           <span class="brand-title-line brand-title-accent">TS</span>
@@ -420,17 +413,12 @@ async function handleRegister() {
   margin-top: -8vh;
 }
 
-.brand-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  background: rgba(0, 229, 255, 0.1);
-  border: 1px solid rgba(0, 229, 255, 0.2);
-  color: var(--color-primary);
+.brand-logo {
+  width: 64px;
+  height: 64px;
   margin-bottom: 28px;
+  border-radius: 18px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
   animation: badge-pulse 3s ease-in-out infinite;
 }
 

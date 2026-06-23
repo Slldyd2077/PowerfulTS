@@ -25,5 +25,5 @@ Thumbs.db
 # Node.js
 node_modules/
 
-# 临时工作文件 (如 TS3AudioBot 插件下载/解包, 勿提交)
-.tmp_*/
+# 临时工作文件 (如 TS3AudioBot 插件下载/解包, 截图验证等, 勿提交)
+.tmp_*
