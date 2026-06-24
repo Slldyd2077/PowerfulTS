@@ -51,7 +51,7 @@ def send_verify_code(settings: Settings, nickname: str, code: str) -> str | None
             client_login_password=settings.ts3_query_password,
         )
         conn.send("use", sid=settings.ts3_sid)
-        clients = conn.send("clientlist")
+        clients = conn.send("clientlist", uid=True)
         for cl in clients:
             if str(cl.get("client_type", "0")) == "1":
                 continue
@@ -60,7 +60,7 @@ def send_verify_code(settings: Settings, nickname: str, code: str) -> str | None
                 uid = str(cl.get("client_unique_identifier", ""))
                 conn.send(
                     "sendtextmessage",
-                    target_mode=1,
+                    targetmode=1,
                     target=clid,
                     msg=f"【PowerfulTS】你的验证码是: {code} (5 分钟内有效)",
                 )

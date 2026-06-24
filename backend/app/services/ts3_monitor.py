@@ -176,6 +176,12 @@ class TS3Monitor:
     # ─────────────────────── 生命周期 ───────────────────────
 
     def start(self) -> None:
+        if not self.settings.ts3_query_user or not self.settings.ts3_query_password:
+            logger.warning(
+                "TS3 ServerQuery 凭据未配置 (TS3_QUERY_USER/PASSWORD)，监控不启动 "
+                "— 在 .env 配置后重启即可启用（避免空凭据反复登录被 ban）"
+            )
+            return
         if self._thread and self._thread.is_alive():
             return
         self._stop_event.clear()

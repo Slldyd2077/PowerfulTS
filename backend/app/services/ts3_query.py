@@ -104,7 +104,7 @@ class TS3QueryClient:
         parts = [command]
         for key, value in params.items():
             if value is True:
-                parts.append(key)  # flag 参数
+                parts.append(f"-{key}")  # TS3 选项用 - 前缀（如 clientlist -uid）
             elif value is False or value is None:
                 continue
             else:

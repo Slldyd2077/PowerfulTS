@@ -156,10 +156,13 @@ async function handleSendCode() {
       return
     }
 
-    const onlineRes = await checkOnline(registerForm.value.tsNickname)
-
-    await sendCode(registerForm.value.tsNickname)
-    ElMessage.success(onlineRes.online ? '验证码已通过 TS 私聊发送' : '该昵称当前不在线，请先登录 TS 服务器')
+    const codeRes = await sendCode(registerForm.value.tsNickname)
+    if (codeRes.success) {
+      ElMessage.success('验证码已通过 TS 私聊发送')
+    } else {
+      ElMessage.error(codeRes.error || '验证码发送失败')
+      return
+    }
     codeSent.value = true
 
     codeCountdown.value = 60
