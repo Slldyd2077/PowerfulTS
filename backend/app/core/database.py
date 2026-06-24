@@ -61,9 +61,13 @@ def _set_sqlite_pragma(dbapi_connection, _connection_record):  # type: ignore[no
 
 
 async def get_db() -> AsyncIterator[AsyncSession]:
-    """FastAPI 依赖：提供一个异步数据库会话。"""
+    """FastAPI 依赖：提供一个异步数据库会话（异常时回滚）。"""
     async with AsyncSessionLocal() as session:
-        yield session
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
 
 
 async def init_db() -> None:

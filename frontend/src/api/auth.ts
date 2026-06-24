@@ -4,16 +4,14 @@ export interface LoginResponse {
   success: boolean
   token?: string
   ts_nickname?: string
-  qq_number?: string
   is_admin?: boolean
   error?: string
 }
 
 export interface SessionData {
-  qq_number: string
   ts_nickname: string
   is_admin: boolean
-  steam_id?: string
+  role?: string
 }
 
 export interface SessionResponse {
@@ -23,22 +21,22 @@ export interface SessionResponse {
   error?: string
 }
 
-/** 登录 */
-export async function login(qqNumber: string, password: string, ip: string = 'unknown'): Promise<LoginResponse> {
+/** 登录（TS 昵称 + 密码） */
+export async function login(tsNickname: string, password: string, ip: string = 'unknown'): Promise<LoginResponse> {
   const { data } = await apiClient.post('/auth/login', {
-    qq_number: qqNumber,
+    ts_nickname: tsNickname,
     password,
     ip,
   })
   return data
 }
 
-/** 注册 */
-export async function register(qqNumber: string, password: string, tsNickname: string, ip: string = 'unknown') {
+/** 注册（TS 昵称 + 密码 + 验证码；需先 sendCode 在 TS 私聊收码） */
+export async function register(tsNickname: string, password: string, code: string, ip: string = 'unknown') {
   const { data } = await apiClient.post('/auth/register', {
-    qq_number: qqNumber,
-    password,
     ts_nickname: tsNickname,
+    password,
+    code,
     ip,
   })
   return data
@@ -62,42 +60,26 @@ export async function getClientIp(): Promise<string> {
   return data.ip || 'unknown'
 }
 
-/** 发送验证码 */
-export async function sendCode(qqNumber: string, tsNickname: string) {
-  const { data } = await apiClient.post('/auth/send_code', {
-    qq_number: qqNumber,
-    ts_nickname: tsNickname,
-  })
+/** 发送验证码（向在线 TS 客户端私聊下发） */
+export async function sendCode(tsNickname: string) {
+  const { data } = await apiClient.post('/auth/send_code', { ts_nickname: tsNickname })
   return data
 }
 
-/** 验证验证码 */
-export async function verifyCode(qqNumber: string, code: string, tsNickname: string) {
-  const { data } = await apiClient.post('/auth/verify_code', {
-    qq_number: qqNumber,
-    code,
-    ts_nickname: tsNickname,
-  })
+/** 校验验证码（可选；register 已内置校验） */
+export async function verifyCode(tsNickname: string, code: string) {
+  const { data } = await apiClient.post('/auth/verify_code', { ts_nickname: tsNickname, code })
   return data
 }
 
-/** 检查 QQ 绑定 */
-export async function checkBinding(qqNumber: string) {
-  const { data } = await apiClient.get('/auth/check_binding', { params: { qq_number: qqNumber } })
+/** 检查昵称是否已注册 */
+export async function checkBinding(tsNickname: string) {
+  const { data } = await apiClient.get('/auth/check_binding', { params: { ts_nickname: tsNickname } })
   return data
 }
 
 /** 检查 TS 用户是否在线 */
 export async function checkOnline(tsNickname: string) {
   const { data } = await apiClient.post('/auth/check_online', { ts_nickname: tsNickname })
-  return data
-}
-
-/** 检查 TS 昵称绑定状态 */
-export async function checkTsBinding(tsNickname: string, qqNumber: string) {
-  const { data } = await apiClient.post('/auth/check_ts_binding', {
-    ts_nickname: tsNickname,
-    qq_number: qqNumber,
-  })
   return data
 }

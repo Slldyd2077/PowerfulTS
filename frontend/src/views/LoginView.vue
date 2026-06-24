@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { login as apiLogin, register as apiRegister, getClientIp, sendCode, checkBinding, checkOnline, verifyCode } from '@/api/auth'
+import { login as apiLogin, register as apiRegister, getClientIp, sendCode, checkBinding, checkOnline } from '@/api/auth'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()
@@ -13,25 +13,24 @@ const loading = ref(false)
 const formVisible = ref(false)
 
 // 登录表单
-const loginForm = ref({ qq: '', password: '' })
+const loginForm = ref({ tsNickname: '', password: '' })
 
 // 注册表单
 const registerForm = ref({
-  qq: '',
+  tsNickname: '',
   password: '',
   confirmPassword: '',
-  tsNickname: '',
   code: '',
 })
 const codeSent = ref(false)
 const codeCountdown = ref(0)
 
-const canLogin = computed(() => loginForm.value.qq.trim() && loginForm.value.password.trim())
+const canLogin = computed(() => loginForm.value.tsNickname.trim() && loginForm.value.password.trim())
 const canRegister = computed(() =>
-  registerForm.value.qq.trim() &&
+  registerForm.value.tsNickname.trim() &&
   registerForm.value.password.trim() &&
   registerForm.value.password === registerForm.value.confirmPassword &&
-  registerForm.value.tsNickname.trim(),
+  registerForm.value.code.trim(),
 )
 
 // ── 音频频谱可视化 ──
@@ -121,11 +120,10 @@ async function handleLogin() {
   loading.value = true
   try {
     const ip = await getClientIp()
-    const result = await apiLogin(loginForm.value.qq, loginForm.value.password, ip)
+    const result = await apiLogin(loginForm.value.tsNickname, loginForm.value.password, ip)
     if (result.success && result.token) {
       auth.setToken(result.token)
       auth.setUser({
-        qq_number: result.qq_number || '',
         ts_nickname: result.ts_nickname || '',
         is_admin: result.is_admin || false,
       })
@@ -144,24 +142,24 @@ async function handleLogin() {
 
 /** 发送验证码 */
 async function handleSendCode() {
-  if (!registerForm.value.qq.trim() || !registerForm.value.tsNickname.trim()) {
-    ElMessage.warning('请先填写 QQ 号和 TS 昵称')
+  if (!registerForm.value.tsNickname.trim()) {
+    ElMessage.warning('请先填写 TS 昵称')
     return
   }
 
   try {
-    const bind = await checkBinding(registerForm.value.qq)
+    const bind = await checkBinding(registerForm.value.tsNickname)
     if (bind.bound) {
-      ElMessage.info('该 QQ 已绑定，请直接登录')
+      ElMessage.info('该昵称已注册，请直接登录')
       mode.value = 'login'
-      loginForm.value.qq = registerForm.value.qq
+      loginForm.value.tsNickname = registerForm.value.tsNickname
       return
     }
 
     const onlineRes = await checkOnline(registerForm.value.tsNickname)
 
-    await sendCode(registerForm.value.qq, registerForm.value.tsNickname)
-    ElMessage.success(onlineRes.online ? '验证码已发送到 QQ' : '验证码已发送（你当前不在线，点歌时需要 TS 在线）')
+    await sendCode(registerForm.value.tsNickname)
+    ElMessage.success(onlineRes.online ? '验证码已通过 TS 私聊发送' : '该昵称当前不在线，请先登录 TS 服务器')
     codeSent.value = true
 
     codeCountdown.value = 60
@@ -179,21 +177,17 @@ async function handleRegister() {
   if (!canRegister.value) return
   loading.value = true
   try {
-    if (registerForm.value.code) {
-      await verifyCode(registerForm.value.qq, registerForm.value.code, registerForm.value.tsNickname)
-    }
-
     const ip = await getClientIp()
     const res = await apiRegister(
-      registerForm.value.qq,
-      registerForm.value.password,
       registerForm.value.tsNickname,
+      registerForm.value.password,
+      registerForm.value.code,
       ip,
     )
     if (res.success) {
       ElMessage.success('注册成功，请登录')
       mode.value = 'login'
-      loginForm.value.qq = registerForm.value.qq
+      loginForm.value.tsNickname = registerForm.value.tsNickname
     } else {
       ElMessage.error(res.error || '注册失败')
     }
@@ -255,10 +249,10 @@ async function handleRegister() {
 
             <el-form @submit.prevent="handleLogin" label-position="top" class="styled-form">
               <div class="field-group field-1">
-                <label class="field-label">QQ 号</label>
+                <label class="field-label">TS 昵称</label>
                 <el-input
-                  v-model="loginForm.qq"
-                  placeholder="请输入 QQ 号"
+                  v-model="loginForm.tsNickname"
+                  placeholder="请输入 TS 昵称"
                   size="large"
                   prefix-icon="User"
                 />
@@ -294,15 +288,11 @@ async function handleRegister() {
           <div v-else key="register" class="form-body">
             <div class="form-header">
               <h2 class="form-title">创建账号</h2>
-              <p class="form-desc">绑定 QQ 和 TS 昵称以开始使用</p>
+              <p class="form-desc">使用 TS 昵称注册，验证码通过 TS 私聊发送</p>
             </div>
 
             <el-form @submit.prevent="handleRegister" label-position="top" class="styled-form">
               <div class="field-group field-1">
-                <label class="field-label">QQ 号</label>
-                <el-input v-model="registerForm.qq" placeholder="请输入 QQ 号" size="large" />
-              </div>
-              <div class="field-group field-2">
                 <label class="field-label">TS 昵称</label>
                 <el-input v-model="registerForm.tsNickname" placeholder="TS 服务器中的昵称" size="large" />
               </div>
@@ -321,12 +311,12 @@ async function handleRegister() {
                 />
               </div>
               <div class="field-group field-5">
-                <label class="field-label">验证码（发送到 QQ 私信）</label>
+                <label class="field-label">验证码（发送到 TS 私聊）</label>
                 <div class="code-row">
                   <el-input v-model="registerForm.code" placeholder="6 位验证码" size="large" maxlength="6" />
                   <button
                     class="code-btn"
-                    :disabled="codeCountdown > 0 || !registerForm.qq.trim() || !registerForm.tsNickname.trim()"
+                    :disabled="codeCountdown > 0 || !registerForm.tsNickname.trim()"
                     @click="handleSendCode"
                   >
                     {{ codeCountdown > 0 ? `${codeCountdown}s` : '获取验证码' }}

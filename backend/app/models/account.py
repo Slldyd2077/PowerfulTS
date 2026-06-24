@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..core.database import Base
@@ -20,6 +20,8 @@ class Account(Base):
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[str] = mapped_column(String(16), default="member", server_default="member")
     status: Mapped[str] = mapped_column(String(16), default="active", server_default="active")
+    failed_login_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -38,12 +40,18 @@ class Session(Base):
 
 
 class VerifyCode(Base):
-    """注册验证码（TS 身份认证：经 ServerQuery 私聊下发，5min 过期）。"""
+    """注册验证码（TS 身份认证）。
+
+    expected_uid: 发码目标的 unique_identifier（防注册时昵称换人冒名）。
+    attempts: 校验失败累计，达上限即失效（防暴力枚举）。
+    """
 
     __tablename__ = "verify_codes"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     key: Mapped[str] = mapped_column(String(128), index=True)
     code: Mapped[str] = mapped_column(String(16))
+    expected_uid: Mapped[str] = mapped_column(String(128), default="", server_default="")
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
