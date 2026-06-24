@@ -27,3 +27,9 @@ node_modules/
 
 # 临时工作文件 (如 TS3AudioBot 插件下载/解包, 截图验证等, 勿提交)
 .tmp_*
+
+# SQLite 数据库文件 (本地运行数据, 勿提交)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
