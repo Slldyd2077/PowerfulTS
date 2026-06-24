@@ -32,9 +32,13 @@ def is_online(monitor: TS3Monitor, nickname: str) -> bool:
 
 
 def get_online_uid(monitor: TS3Monitor, nickname: str) -> str | None:
-    """在线则返回其 unique_identifier（不可伪造的身份锚点）。"""
-    entry = _find_online_entry(monitor, nickname)
-    return entry.get("unique_identifier") if entry else None
+    """在线则返回其 unique_identifier（client_data 的 key，不可伪造的身份锚点）。"""
+    now = time.time()
+    with monitor._lock:
+        for uid, entry in monitor.client_data.items():
+            if entry["nickname"] == nickname and now - entry["last_seen"] <= ONLINE_WINDOW:
+                return uid
+    return None
 
 
 def send_verify_code(settings: Settings, nickname: str, code: str) -> str | None:
