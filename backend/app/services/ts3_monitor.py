@@ -230,3 +230,17 @@ class TS3Monitor:
         with self._lock:
             channels = {str(cid): name for cid, name in self.channel_map.items()}
         return {"channels": channels, "count": len(channels)}
+
+    def get_status(self, nickname: str) -> tuple[str, str | None]:
+        """返回该昵称的 (online_status, game)。
+
+        online_status: '游戏中' / '在线' / '离线'；game 为所在频道名（在线时）。
+        供好友列表的在线状态展示复用。
+        """
+        now = time.time()
+        with self._lock:
+            for entry in self.client_data.values():
+                if entry["nickname"] == nickname and now - entry["last_seen"] <= ONLINE_WINDOW:
+                    game = self.channel_map.get(entry["cid"])
+                    return ("游戏中" if game else "在线", game)
+        return ("离线", None)

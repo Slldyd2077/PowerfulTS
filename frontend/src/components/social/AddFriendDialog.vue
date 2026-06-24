@@ -6,21 +6,21 @@ import { ElMessage } from 'element-plus'
 const emit = defineEmits<{ added: [] }>()
 
 const visible = defineModel<boolean>('visible', { default: false })
-const friendQq = ref('')
+const friendTsNickname = ref('')
 const loading = ref(false)
 
 async function handleAdd() {
-  if (!friendQq.value.trim()) {
-    ElMessage.warning('请输入好友 QQ 号')
+  if (!friendTsNickname.value.trim()) {
+    ElMessage.warning('请输入好友 TS 昵称')
     return
   }
 
   loading.value = true
   try {
-    const res = await addFriend(friendQq.value.trim())
+    const res = await addFriend(friendTsNickname.value.trim())
     if (res.success) {
       ElMessage.success('好友添加成功')
-      friendQq.value = ''
+      friendTsNickname.value = ''
       visible.value = false
       emit('added')
     } else {
@@ -37,8 +37,8 @@ async function handleAdd() {
 <template>
   <el-dialog v-model="visible" title="添加好友" width="400px" :close-on-click-modal="false">
     <el-form @submit.prevent="handleAdd" label-position="top">
-      <el-form-item label="好友 QQ 号">
-        <el-input v-model="friendQq" placeholder="输入好友的 QQ 号" size="large" />
+      <el-form-item label="好友 TS 昵称">
+        <el-input v-model="friendTsNickname" placeholder="输入好友的 TS 昵称" size="large" />
       </el-form-item>
     </el-form>
     <template #footer>

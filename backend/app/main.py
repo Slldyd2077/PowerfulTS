@@ -20,7 +20,7 @@ from .core.database import dispose_db, init_db
 from .services.ts3audio_client import TS3AudioBotClient
 from .services.bilibili import BiliClient
 from .services.ts3_monitor import TS3Monitor
-from .routers import music, bilibili, monitor, auth
+from .routers import music, bilibili, monitor, auth, friends
 
 settings = get_settings()
 
@@ -74,6 +74,8 @@ app.include_router(bilibili.router, prefix="/api")
 app.include_router(monitor.router, prefix="/api")
 # 原生认证：/api/auth/* (P1，TS 身份认证)
 app.include_router(auth.router, prefix="/api")
+# 原生好友：/api/friends/* (P1b)
+app.include_router(friends.router, prefix="/api")
 
 
 # ─────────────────────────────────────────────────────

@@ -26,7 +26,7 @@ async function handleDelete(friend: Friend) {
       '删除好友',
       { type: 'warning' },
     )
-    await deleteFriend(friend.qq)
+    await deleteFriend(friend.ts_nickname)
     ElMessage.success('已删除好友')
     await fetchFriends()
   } catch {
@@ -53,7 +53,7 @@ async function handleDelete(friend: Friend) {
     <div v-else class="friends-list">
       <div
         v-for="friend in friends"
-        :key="friend.qq"
+        :key="friend.ts_nickname"
         class="friend-item"
         @contextmenu.prevent="handleDelete(friend)"
       >

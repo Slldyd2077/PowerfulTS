@@ -1,7 +1,6 @@
 import apiClient from './client'
 
 export interface Friend {
-  qq: string
   ts_nickname: string
   online_status: string
   game?: string
@@ -12,29 +11,20 @@ export interface FriendsResponse {
   friends: Friend[]
 }
 
-/** 获取好友列表 */
+/** 获取好友列表（含在线状态） */
 export async function getFriends(): Promise<FriendsResponse> {
-  const token = localStorage.getItem('session_token') || ''
-  const { data } = await apiClient.get('/friends', { params: { token } })
+  const { data } = await apiClient.get('/friends')
   return data
 }
 
-/** 添加好友 */
-export async function addFriend(friendQq: string) {
-  const token = localStorage.getItem('session_token') || ''
-  const { data } = await apiClient.post('/friends/add', {
-    friend_qq: friendQq,
-    token,
-  })
+/** 添加好友（按 TS 昵称） */
+export async function addFriend(friendTsNickname: string) {
+  const { data } = await apiClient.post('/friends/add', { friend_ts_nickname: friendTsNickname })
   return data
 }
 
-/** 删除好友 */
-export async function deleteFriend(friendQq: string) {
-  const token = localStorage.getItem('session_token') || ''
-  const { data } = await apiClient.post('/friends/delete', {
-    friend_qq: friendQq,
-    token,
-  })
+/** 删除好友（按 TS 昵称） */
+export async function deleteFriend(friendTsNickname: string) {
+  const { data } = await apiClient.post('/friends/delete', { friend_ts_nickname: friendTsNickname })
   return data
 }
