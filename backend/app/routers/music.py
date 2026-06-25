@@ -1,316 +1,151 @@
-"""音乐控制路由。
+"""音乐路由 — 代理 TSMusicBot API。
 
-对前端暴露语义化的 POST/GET，内部转调 TS3AudioBot。
-挂在 /api/music 前缀，在 main.py 的 catch-all 之前注册以优先匹配。
+用户只与 PowerfulTS 交互（统一认证 X-Session-Token，由 get_current_account 校验），
+后端代理到 TSMusicBot (:3000)，用户看不到 TSMusicBot WebUI。
 """
 from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from ..core.database import get_db
 from ..deps import get_current_account
 from ..models import Account
-from ..services.netease import NeteaseClient
-from ..services.ts3audio_client import TS3AudioBotClient, TS3AudioBotError
+from ..services.tsmusic_client import TSMusicClient
 
 router = APIRouter(prefix="/music", tags=["music"])
-
-# 普通用户音量上限；TS3AB 支持到 200，管理员可后续放开
-MAX_VOLUME = 100
 
 
 # ───────────────────────── 依赖 ─────────────────────────
 
-def get_ts3ab(request: Request) -> TS3AudioBotClient:
-    return request.app.state.ts3ab
+def get_tsmusic(request: Request) -> TSMusicClient:
+    return request.app.state.tsmusic
 
 
-async def require_session(
-    x_session_token: Annotated[str | None, Header(alias="X-Session-Token")] = None,
-) -> str:
-    """校验登录态。
-
-    MVP 阶段仅校验 X-Session-Token 存在；真正的有效性校验后续接入 S-QC-Bot。
-    """
-    if not x_session_token:
-        raise HTTPException(status_code=401, detail="未登录")
-    return x_session_token
-
-
-def _handle_error(exc: TS3AudioBotError) -> HTTPException:
-    status = {
-        0: 502, 2: 401, 10: 422, 11: 403,
-        12: 400, 13: 400, 15: 404, 17: 409,
-    }.get(exc.code, 502)
-    return HTTPException(status_code=status, detail=exc.message)
+TsmusicDep = Annotated[TSMusicClient, Depends(get_tsmusic)]
+AccountDep = Annotated[Account, Depends(get_current_account)]
 
 
 # ───────────────────────── 请求模型 ─────────────────────────
 
+class SearchRequest(BaseModel):
+    q: str = Field(description="搜索关键词")
+
+
 class PlayRequest(BaseModel):
-    resource: str | None = Field(default=None, description="音源 URL 或搜索词")
-    song_url: str | None = None  # 兼容前端旧字段
-    queue: bool = Field(default=True, description="True=加队列(共享bot安全), False=立即播放")
+    query: str = Field(description="歌名或 'id:xxx' 精确播放")
+    queue: bool = Field(default=False, description="True=加入队列, False=立即播放")
+    platform: str | None = Field(default=None, description="音源平台 netease/qq/bilibili")
 
 
 class VolumeRequest(BaseModel):
-    volume: int = Field(ge=0, le=MAX_VOLUME)
+    volume: int = Field(ge=0, le=100)
 
 
-class SeekRequest(BaseModel):
-    position: str
+class ModeRequest(BaseModel):
+    mode: str = Field(description="seq | loop | random | rloop")
 
 
 # ───────────────────────── 端点 ─────────────────────────
 
-Ts3abDep = Annotated[TS3AudioBotClient, Depends(get_ts3ab)]
-SessionDep = Annotated[str, Depends(require_session)]
+@router.get("/search")
+async def search(
+    q: str,
+    tsmusic: TsmusicDep,
+    _account: AccountDep,
+    platform: str | None = None,
+):
+    """搜索歌曲（可指定平台 netease/qq/bilibili）。"""
+    results = await tsmusic.search(q, platform=platform)
+    return {"count": len(results), "results": results}
 
 
 @router.post("/play")
-async def play(body: PlayRequest, client: Ts3abDep, _: SessionDep):
-    resource = body.resource or body.song_url
-    if not resource:
-        raise HTTPException(status_code=422, detail="需要 resource 或 song_url")
-    try:
-        if body.queue:
-            await client.add(resource)
-        else:
-            await client.play(resource)
-    except TS3AudioBotError as exc:
-        raise _handle_error(exc) from exc
-    return {"success": True, "queued": body.queue}
+async def play(body: PlayRequest, tsmusic: TsmusicDep, _account: AccountDep):
+    """播放（query 可以是歌名或 'id:xxx'，platform 指定音源）。"""
+    if body.queue:
+        result = await tsmusic.add(body.query, platform=body.platform)
+    else:
+        result = await tsmusic.play(body.query, platform=body.platform)
+    return result
 
 
 @router.post("/pause")
-async def pause(client: Ts3abDep, _: SessionDep):
-    try:
-        paused = await client.pause()
-    except TS3AudioBotError as exc:
-        raise _handle_error(exc) from exc
-    return {"success": True, "paused": paused}
+async def pause(tsmusic: TsmusicDep, _account: AccountDep):
+    return await tsmusic.pause()
 
 
 @router.post("/resume")
-async def resume(client: Ts3abDep, _: SessionDep):
-    try:
-        await client.resume()
-    except TS3AudioBotError as exc:
-        raise _handle_error(exc) from exc
-    return {"success": True}
-
-
-@router.post("/stop")
-async def stop(client: Ts3abDep, _: SessionDep):
-    try:
-        await client.stop()
-    except TS3AudioBotError as exc:
-        raise _handle_error(exc) from exc
-    return {"success": True}
+async def resume(tsmusic: TsmusicDep, _account: AccountDep):
+    return await tsmusic.resume()
 
 
 @router.post("/next")
-async def next_track(client: Ts3abDep, _: SessionDep):
-    try:
-        await client.next_song()
-    except TS3AudioBotError as exc:
-        raise _handle_error(exc) from exc
-    return {"success": True}
+async def next_track(tsmusic: TsmusicDep, _account: AccountDep):
+    return await tsmusic.next()
 
 
-@router.post("/previous")
-async def previous_track(client: Ts3abDep, _: SessionDep):
-    try:
-        await client.previous()
-    except TS3AudioBotError as exc:
-        raise _handle_error(exc) from exc
-    return {"success": True}
-
-
-@router.post("/clear")
-async def clear(client: Ts3abDep, _: SessionDep):
-    try:
-        await client.clear()
-    except TS3AudioBotError as exc:
-        raise _handle_error(exc) from exc
-    return {"success": True}
+@router.post("/stop")
+async def stop(tsmusic: TsmusicDep, _account: AccountDep):
+    return await tsmusic.stop()
 
 
 @router.post("/seek")
-async def seek(body: SeekRequest, client: Ts3abDep, _: SessionDep):
-    try:
-        await client.seek(body.position)
-    except TS3AudioBotError as exc:
-        raise _handle_error(exc) from exc
-    return {"success": True}
-
-
-@router.get("/nowplaying")
-async def now_playing(client: Ts3abDep, _: SessionDep):
-    try:
-        song = await client.get_song()
-    except TS3AudioBotError as exc:
-        raise _handle_error(exc) from exc
-    if not song:
-        return {"playing": False}
-    return {
-        "playing": not bool(song.get("Paused", False)),
-        "title": song.get("Title"),
-        "link": song.get("Link"),
-        "audio_type": song.get("AudioType"),
-        "position": song.get("Position"),
-        "length": song.get("Length"),
-    }
-
-
-@router.get("/queue")
-async def queue(client: Ts3abDep, _: SessionDep):
-    try:
-        data = await client.get_queue()
-    except TS3AudioBotError as exc:
-        raise _handle_error(exc) from exc
-    if not data:
-        return {"items": [], "index": None}
-    return {
-        "items": data.get("Items") or [],
-        "index": data.get("PlaybackIndex"),
-        "count": data.get("SongCount", 0),
-    }
-
-
-@router.get("/volume")
-async def get_volume(client: Ts3abDep, _: SessionDep):
-    try:
-        value = await client.get_volume()
-    except TS3AudioBotError as exc:
-        raise _handle_error(exc) from exc
-    return {"volume": int(value)}
+async def seek(body: SeekRequest, tsmusic: TsmusicDep, _account: AccountDep):
+    return await tsmusic.seek(body.position)
 
 
 @router.post("/volume")
-async def set_volume(body: VolumeRequest, client: Ts3abDep, _: SessionDep):
-    try:
-        value = await client.set_volume(body.volume)
-    except TS3AudioBotError as exc:
-        raise _handle_error(exc) from exc
-    return {"volume": int(value)}
+async def set_volume(body: VolumeRequest, tsmusic: TsmusicDep, _account: AccountDep):
+    return await tsmusic.set_volume(body.volume)
 
 
-# ───────────────────────── 网易云音源 (PowerfulTS 自研) ─────────────────────────
-# 调本地 NeteaseCloudMusicApi (:3000) 搜歌取 URL，交 TS3AudioBot 标准 play 播放。
-# 不依赖任何 TS3AudioBot 插件，绕开 .NET 兼容问题。
-
-def get_netease(request: Request) -> NeteaseClient:
-    return request.app.state.netease
+@router.post("/mode")
+async def set_mode(body: ModeRequest, tsmusic: TsmusicDep, _account: AccountDep):
+    return await tsmusic.set_mode(body.mode)
 
 
-NeteaseDep = Annotated[NeteaseClient, Depends(get_netease)]
+@router.post("/clear")
+async def clear(tsmusic: TsmusicDep, _account: AccountDep):
+    return await tsmusic.clear()
 
 
-@router.get("/netease/search")
-async def netease_search(keyword: str, netease: NeteaseDep, _: SessionDep, limit: int = 10):
-    """搜索网易云音乐，返回 [{song_id, name, artist, album}]。"""
-    results = await netease.search(keyword, limit)
-    return {"keyword": keyword, "count": len(results), "results": results}
+@router.get("/nowplaying")
+async def now_playing(tsmusic: TsmusicDep, _account: AccountDep):
+    """当前播放状态（歌名/歌手/进度/封面/音量）。"""
+    return await tsmusic.get_bot_status()
 
 
-class NeteasePlayRequest(BaseModel):
-    song_id: str
-    queue: bool = True
+@router.get("/queue")
+async def queue(tsmusic: TsmusicDep, _account: AccountDep):
+    """播放队列。"""
+    items = await tsmusic.get_queue()
+    return {"count": len(items), "items": items}
 
 
-@router.post("/netease/play")
-async def netease_play(body: NeteasePlayRequest, netease: NeteaseDep, client: Ts3abDep, _: SessionDep):
-    """播放网易云歌曲：取可播放 URL → 交 TS3AudioBot 播放。"""
-    url = await netease.song_url(body.song_id)
-    if not url:
-        raise HTTPException(status_code=404, detail="无法获取歌曲 URL（可能需 VIP 或版权限制）")
-    try:
-        if body.queue:
-            await client.add(url)
-        else:
-            await client.play(url)
-    except TS3AudioBotError as exc:
-        raise _handle_error(exc) from exc
-    return {"success": True, "queued": body.queue}
+# ───────────────────────── 平台账号登录 ─────────────────────────
 
 
-# ───────────────────────── 网易云账号 (扫码登录 + 我的歌单) ─────────────────────────
-
-AccountDep = Annotated[Account, Depends(get_current_account)]
-
-
-@router.get("/netease/qr/key")
-async def netease_qr_key(netease: NeteaseDep, _: SessionDep):
-    """生成扫码登录 unikey。"""
-    unikey = await netease.qr_key()
-    if not unikey:
-        raise HTTPException(status_code=500, detail="生成扫码 key 失败")
-    return {"unikey": unikey}
+@router.get("/auth/status")
+async def auth_status(platform: str, tsmusic: TsmusicDep, _account: AccountDep):
+    """获取某平台登录状态。"""
+    return await tsmusic.get_auth_status(platform)
 
 
-class QrRequest(BaseModel):
-    unikey: str
+@router.post("/auth/qrcode")
+async def auth_qrcode(body: dict, tsmusic: TsmusicDep, _account: AccountDep):
+    """获取某平台登录二维码。"""
+    platform = body.get("platform", "netease")
+    return await tsmusic.get_qrcode(platform)
 
 
-@router.post("/netease/qr/create")
-async def netease_qr_create(body: QrRequest, netease: NeteaseDep, _: SessionDep):
-    """生成二维码图片。"""
-    qrimg = await netease.qr_create(body.unikey)
-    if not qrimg:
-        raise HTTPException(status_code=500, detail="生成二维码失败")
-    return {"qrimg": qrimg}
-
-
-@router.post("/netease/qr/check")
-async def netease_qr_check(body: QrRequest, netease: NeteaseDep, _: SessionDep):
-    """轮询扫码状态。803=已登录(带 cookie)。"""
-    return await netease.qr_check(body.unikey)
-
-
-class NeteaseBindRequest(BaseModel):
+class CookieRequest(BaseModel):
+    platform: str
     cookie: str
 
 
-@router.post("/netease/bind")
-async def netease_bind(
-    body: NeteaseBindRequest,
-    account: AccountDep,
-    netease: NeteaseDep,
-    db: AsyncSession = Depends(get_db),
-):
-    """扫码登录成功后，绑定网易云 cookie 到当前账号（每用户独立）。"""
-    info = await netease.account_info(body.cookie)
-    if not info:
-        raise HTTPException(status_code=400, detail="cookie 无效或未登录网易云")
-    account.netease_cookie = body.cookie
-    account.netease_uid = info["uid"]
-    await db.commit()
-    return {"success": True, "nickname": info["nickname"], "uid": info["uid"]}
-
-
-@router.get("/netease/my/playlists")
-async def netease_my_playlists(account: AccountDep, netease: NeteaseDep):
-    """我的网易云歌单（自建 + 收藏）。"""
-    if not account.netease_cookie or not account.netease_uid:
-        raise HTTPException(status_code=400, detail="未绑定网易云账号，请先扫码登录")
-    playlists = await netease.user_playlists(account.netease_uid, account.netease_cookie)
-    return {"playlists": playlists}
-
-
-class PlaylistTracksRequest(BaseModel):
-    playlist_id: str
-
-
-@router.post("/netease/playlist/tracks")
-async def netease_playlist_tracks(body: PlaylistTracksRequest, account: AccountDep, netease: NeteaseDep):
-    """歌单内歌曲（用于播放清单 / 整单播放）。"""
-    if not account.netease_cookie:
-        raise HTTPException(status_code=400, detail="未绑定网易云账号")
-    tracks = await netease.playlist_tracks(body.playlist_id, account.netease_cookie)
-    return {"tracks": tracks}
+@router.post("/auth/cookie")
+async def auth_cookie(body: CookieRequest, tsmusic: TsmusicDep, _account: AccountDep):
+    """手动设置某平台 cookie。"""
+    return await tsmusic.set_cookie(body.platform, body.cookie)

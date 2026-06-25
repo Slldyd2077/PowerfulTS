@@ -6,15 +6,33 @@ import { ElMessage } from 'element-plus'
 const music = useMusicStore()
 const keyword = ref('')
 
+const platforms = [
+  { value: 'all', label: '全部' },
+  { value: 'netease', label: '网易云' },
+  { value: 'qq', label: 'QQ音乐' },
+  { value: 'bilibili', label: 'B站' },
+] as const
+
+const platformLabels: Record<string, string> = {
+  netease: '网易云',
+  qq: 'QQ音乐',
+  bilibili: 'B站',
+}
+const platformColors: Record<string, string> = {
+  netease: '#e60026',
+  qq: '#31c27c',
+  bilibili: '#fb7299',
+}
+
 async function handleSearch() {
   if (!keyword.value.trim()) return
   await music.search(keyword.value)
 }
 
-async function handlePlay(songId: string, songName: string) {
+async function handlePlay(song: { id: string; name: string; platform?: string }, queued = false) {
   try {
-    await music.play(songId, songName)
-    ElMessage.success(`正在播放: ${songName}`)
+    await music.play(`id:${song.id}`, queued, song.platform)
+    ElMessage.success(queued ? `加入队列: ${song.name}` : `正在播放: ${song.name}`)
   } catch (e: unknown) {
     ElMessage.error(e instanceof Error ? e.message : '播放失败')
   }
@@ -23,21 +41,31 @@ async function handlePlay(songId: string, songName: string) {
 
 <template>
   <div class="panel">
-    <h2 class="panel-title">🎵 点歌</h2>
+    <div class="panel-header">
+      <div class="panel-title-group">
+        <h2 class="panel-title">点歌</h2>
+        <span class="panel-sub label-mono">SEARCH</span>
+      </div>
+    </div>
 
-    <!-- 音源切换 -->
-    <div class="source-row">
-      <el-radio-group v-model="music.source" size="small">
-        <el-radio-button value="netease">网易云</el-radio-button>
-        <el-radio-button value="default">默认</el-radio-button>
-      </el-radio-group>
+    <!-- 平台切换 -->
+    <div class="platform-tabs">
+      <button
+        v-for="p in platforms"
+        :key="p.value"
+        class="platform-tab"
+        :class="{ active: music.searchPlatform === p.value }"
+        @click="music.searchPlatform = p.value"
+      >
+        {{ p.label }}
+      </button>
     </div>
 
     <!-- 搜索框 -->
     <div class="search-row">
       <el-input
         v-model="keyword"
-        placeholder="搜索歌曲名或歌手..."
+        :placeholder="music.searchPlatform === 'all' ? '搜索网易云 / QQ / B站…' : `搜索 ${platforms.find((p) => p.value === music.searchPlatform)?.label}…`"
         size="large"
         clearable
         @keyup.enter="handleSearch"
@@ -48,30 +76,44 @@ async function handlePlay(songId: string, songName: string) {
       </el-input>
     </div>
 
-    <!-- 搜索结果 -->
+    <!-- 结果 -->
     <div class="results">
       <div v-if="music.searchResults.length === 0 && !music.searching" class="no-data">
         输入关键词搜索歌曲
       </div>
-      <div v-if="music.searching" class="loading">搜索中...</div>
+      <div v-if="music.searching" class="loading-shimmer">搜索中…{{ music.searchPlatform === 'all' ? '（三平台并行）' : '' }}</div>
 
       <div
         v-for="song in music.searchResults"
-        :key="song.song_id"
-        class="song-item"
+        :key="song.platform + song.id"
+        class="song-item row-scan"
       >
+        <img v-if="song.coverUrl" :src="song.coverUrl" class="cover" loading="lazy" referrerpolicy="no-referrer" />
+        <span v-else class="cover cover--fallback" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 17V7l8-1.5v7" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.5" cy="17" r="2"/><circle cx="14" cy="15" r="2"/></svg>
+        </span>
+
         <div class="song-info">
-          <span class="song-name">{{ song.song_name }}</span>
-          <span class="song-artist">{{ song.artist }}</span>
+          <div class="song-name-row">
+            <span class="song-name">{{ song.name }}</span>
+            <span
+              v-if="song.platform && platformColors[song.platform]"
+              class="platform-dot"
+              :style="{ background: platformColors[song.platform] }"
+              :title="platformLabels[song.platform] || song.platform"
+            ></span>
+          </div>
+          <span class="song-artist">{{ song.artist }}{{ song.album ? ' · ' + song.album : '' }}</span>
         </div>
-        <el-button
-          type="warning"
-          size="small"
-          plain
-          @click="handlePlay(song.song_id, song.song_name)"
-        >
-          播放
-        </el-button>
+
+        <div class="song-actions">
+          <button class="act act--play" title="播放" @click="handlePlay(song, false)">
+            <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>
+          </button>
+          <button class="act" title="加入队列" @click="handlePlay(song, true)">
+            <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -79,79 +121,196 @@ async function handlePlay(songId: string, songName: string) {
 
 <style scoped>
 .panel {
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius);
-  padding: 20px;
+  background: var(--gradient-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 18px;
 }
 
-.panel-title {
-  font-size: 1.1em;
-  margin-bottom: 16px;
+.panel-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 14px;
   padding-bottom: 12px;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.panel-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.panel-title {
+  font-size: 1em;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+.panel-sub {
+  font-size: 0.66em;
+  color: var(--text-muted);
+}
+
+/* 平台切换 */
+.platform-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.platform-tab {
+  padding: 5px 14px;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.78em;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+.platform-tab:hover {
+  background: var(--surface-4);
   color: var(--text-primary);
 }
-
-.source-row {
-  margin-bottom: 12px;
+.platform-tab.active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--text-inverse);
 }
 
 .search-row {
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
 .results {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-height: 360px;
+  gap: 2px;
+  max-height: 560px;
   overflow-y: auto;
 }
 
 .song-item {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: 8px;
-  transition: background 0.2s;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background 0.15s;
+}
+.song-item:hover {
+  background: var(--surface-4);
 }
 
-.song-item:hover {
-  background: var(--bg-card-hover);
+.cover {
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  object-fit: cover;
+  background: var(--surface-4);
+}
+.cover--fallback {
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+}
+.cover--fallback svg {
+  width: 22px;
+  height: 22px;
 }
 
 .song-info {
   display: flex;
   flex-direction: column;
+  gap: 3px;
   min-width: 0;
   flex: 1;
 }
-
+.song-name-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
 .song-name {
   font-weight: 600;
+  font-size: 0.86em;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.platform-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.song-artist {
+  font-size: 0.72em;
+  color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.song-artist {
-  font-size: 0.85em;
+.song-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.song-item:hover .song-actions,
+.song-item:focus-within .song-actions {
+  opacity: 1;
+}
+@media (hover: none) {
+  .song-actions {
+    opacity: 1;
+  }
+}
+
+.act {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--border-emphasis);
+  background: transparent;
   color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s, transform 0.12s;
+}
+.act svg {
+  width: 15px;
+  height: 15px;
+}
+.act:hover {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+.act:active {
+  transform: scale(0.92);
+}
+.act--play {
+  border: none;
+  background: var(--gradient-brand);
+  color: var(--text-inverse);
+}
+.act--play:hover {
+  color: var(--text-inverse);
+  border: none;
+  filter: brightness(1.08);
 }
 
 .no-data {
   text-align: center;
   color: var(--text-muted);
-  padding: 30px;
-  font-style: italic;
-}
-
-.loading {
-  text-align: center;
-  color: var(--text-secondary);
-  padding: 20px;
+  padding: 36px;
+  font-size: 0.86em;
 }
 </style>

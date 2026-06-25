@@ -1,7 +1,7 @@
 """网易云音乐客户端。
 
 调用本地部署的 NeteaseCloudMusicApi 服务 (Node.js, 默认 :3000)。
-搜索 (/search) + 取播放 URL (/song/url)。URL 交给 TS3AudioBot 标准 play 播放。
+搜索 (/search) + 取播放 URL (/song/url)。播放交由 TSMusicBot（网易云平台）代理。
 """
 from __future__ import annotations
 

@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+data/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log
+.tmp_*
+Dockerfile
+.dockerignore

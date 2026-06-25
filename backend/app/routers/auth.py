@@ -1,6 +1,6 @@
 """原生认证路由（TS 身份认证）。
 
-替换透传 S-QC-Bot 的 /api/auth/*。身份以 TS unique_identifier 为锚点：
+身份以 TS unique_identifier 为锚点：
 注册需 TS 在线（ServerQuery 私聊下发验证码 + 绑定 expected_uid，注册时校验一致防冒名）。
 登录用 ts_nickname + 密码（失败计数锁定 + 统一错误消息防枚举）。
 """

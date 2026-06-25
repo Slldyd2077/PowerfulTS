@@ -1,6 +1,6 @@
 """原生好友路由。
 
-替换透传 S-QC-Bot 的 /api/friends。用 X-Session-Token 鉴权（get_current_account），
+用 X-Session-Token 鉴权（get_current_account），
 好友关系存 friends 表，在线状态从 ts3_monitor 内存查询。
 """
 from __future__ import annotations

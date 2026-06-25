@@ -1,57 +1,78 @@
 import apiClient from './client'
 
 export interface Song {
-  song_id: string
-  song_name: string
+  id: string
+  name: string
   artist: string
   album?: string
-  song_url?: string
+  duration?: number
+  coverUrl?: string
+  platform?: string
 }
 
 export interface MusicSearchResult {
-  keyword: string
   count: number
   results: Song[]
 }
 
-/** 搜索歌曲 */
-export async function searchMusic(keyword: string, limit: number = 10): Promise<MusicSearchResult> {
-  const { data } = await apiClient.get('/music/search', { params: { keyword, limit } })
+export interface NowPlaying {
+  playing: boolean
+  paused: boolean
+  volume: number
+  playMode: string
+  title: string
+  artist: string
+  album: string
+  duration: number
+  position: number
+  cover: string
+  platform: string
+}
+
+/** 搜索歌曲（可指定平台） */
+export async function searchMusic(q: string, platform?: string): Promise<MusicSearchResult> {
+  const params: Record<string, string> = { q }
+  if (platform) params.platform = platform
+  const { data } = await apiClient.get('/music/search', { params })
   return data
 }
 
-/** 播放歌曲 */
-export async function playMusic(songId: string) {
-  const token = localStorage.getItem('session_token') || ''
-  const { data } = await apiClient.post('/music/play', { song_id: songId, token })
+/** 播放（query=歌名 或 'id:xxx'） */
+export async function playMusic(query: string, queue = false, platform?: string) {
+  const payload: Record<string, unknown> = { query, queue }
+  if (platform) payload.platform = platform
+  const { data } = await apiClient.post('/music/play', payload)
   return data
 }
 
-/** 暂停/恢复 */
+/** 暂停 */
 export async function pauseMusic() {
-  const token = localStorage.getItem('session_token') || ''
-  const { data } = await apiClient.post('/music/pause', { token })
+  const { data } = await apiClient.post('/music/pause')
   return data
 }
 
-/** 跳过 */
-export async function skipMusic() {
-  const token = localStorage.getItem('session_token') || ''
-  const { data } = await apiClient.post('/music/skip', { token })
+/** 恢复 */
+export async function resumeMusic() {
+  const { data } = await apiClient.post('/music/resume')
+  return data
+}
+
+/** 下一首 */
+export async function nextMusic() {
+  const { data } = await apiClient.post('/music/next')
   return data
 }
 
 /** 停止 */
 export async function stopMusic() {
-  const token = localStorage.getItem('session_token') || ''
-  const { data } = await apiClient.post('/music/stop', { token })
+  const { data } = await apiClient.post('/music/stop')
   return data
 }
 
-/** 获取音量 */
-export async function getVolume(): Promise<number> {
-  const { data } = await apiClient.get('/music/volume')
-  return data.volume ?? 50
+/** 跳转进度 */
+export async function seekMusic(position: number) {
+  const { data } = await apiClient.post('/music/seek', { position })
+  return data
 }
 
 /** 设置音量 */
@@ -60,90 +81,46 @@ export async function setVolume(volume: number) {
   return data
 }
 
-/** 呼叫强基计划（音乐电台） */
-export async function callRadio() {
-  const token = localStorage.getItem('session_token') || ''
-  const { data } = await apiClient.post('/music/call_radio', { token })
+/** 播放模式 */
+export async function setMode(mode: string) {
+  const { data } = await apiClient.post('/music/mode', { mode })
   return data
 }
 
-/** 获取播放队列（TS3AudioBot 当前队列） */
+/** 清空队列 */
+export async function clearQueue() {
+  const { data } = await apiClient.post('/music/clear')
+  return data
+}
+
+/** 当前播放 */
+export async function getNowplaying(): Promise<NowPlaying> {
+  const { data } = await apiClient.get('/music/nowplaying')
+  return data
+}
+
+/** 播放队列 */
 export async function getQueue() {
   const { data } = await apiClient.get('/music/queue')
   return data
 }
 
-/** 清空播放队列 */
-export async function clearQueue() {
-  const token = localStorage.getItem('session_token') || ''
-  const { data } = await apiClient.post('/music/clear', { token })
+// ───────────────────────── 平台账号登录 ─────────────────────────
+
+/** 获取某平台登录状态 */
+export async function getAuthStatus(platform: string) {
+  const { data } = await apiClient.get('/music/auth/status', { params: { platform } })
   return data
 }
 
-/** 当前播放状态 */
-export async function getNowplaying() {
-  const { data } = await apiClient.get('/music/nowplaying')
+/** 获取某平台登录二维码 */
+export async function getQrcode(platform: string) {
+  const { data } = await apiClient.post('/music/auth/qrcode', { platform })
   return data
 }
 
-/** 跳转播放进度（秒） */
-export async function seekMusic(position: number) {
-  const token = localStorage.getItem('session_token') || ''
-  const { data } = await apiClient.post('/music/seek', { position: String(Math.floor(position)), token })
-  return data
-}
-
-/** 搜索网易云音乐（后端调本地网易云 API :3000，取 URL 交 TS3AudioBot 播放） */
-export async function searchNetease(keyword: string, limit = 10): Promise<MusicSearchResult> {
-  const { data } = await apiClient.get('/music/netease/search', { params: { keyword, limit } })
-  return {
-    keyword: data.keyword,
-    count: data.count,
-    results: (data.results || []).map((s: { song_id: string; name: string; artist: string; album?: string }) => ({
-      song_id: s.song_id,
-      song_name: s.name,
-      artist: s.artist,
-      album: s.album,
-    })),
-  }
-}
-
-/** 播放网易云音乐（取可播放 URL → TS3AudioBot 标准 play） */
-export async function playNetease(songId: string) {
-  const token = localStorage.getItem('session_token') || ''
-  const { data } = await apiClient.post('/music/netease/play', { song_id: songId, token })
-  return data
-}
-
-// ───────────────────────── 网易云账号（扫码登录 + 我的歌单）─────────────────────────
-
-/** 生成扫码登录 key */
-export async function neteaseQrKey() {
-  const { data } = await apiClient.get('/music/netease/qr/key')
-  return data
-}
-/** 生成二维码图片 */
-export async function neteaseQrCreate(unikey: string) {
-  const { data } = await apiClient.post('/music/netease/qr/create', { unikey })
-  return data
-}
-/** 轮询扫码状态（803=已登录, 带 cookie） */
-export async function neteaseQrCheck(unikey: string) {
-  const { data } = await apiClient.post('/music/netease/qr/check', { unikey })
-  return data
-}
-/** 绑定网易云 cookie 到当前账号 */
-export async function neteaseBind(cookie: string) {
-  const { data } = await apiClient.post('/music/netease/bind', { cookie })
-  return data
-}
-/** 我的网易云歌单 */
-export async function neteaseMyPlaylists() {
-  const { data } = await apiClient.get('/music/netease/my/playlists')
-  return data
-}
-/** 歌单内歌曲（播放清单） */
-export async function neteasePlaylistTracks(playlistId: string) {
-  const { data } = await apiClient.post('/music/netease/playlist/tracks', { playlist_id: playlistId })
+/** 手动设置某平台 cookie */
+export async function setCookie(platform: string, cookie: string) {
+  const { data } = await apiClient.post('/music/auth/cookie', { platform, cookie })
   return data
 }

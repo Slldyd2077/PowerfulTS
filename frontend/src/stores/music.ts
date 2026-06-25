@@ -4,44 +4,54 @@ import {
   searchMusic as apiSearch,
   playMusic as apiPlay,
   pauseMusic as apiPause,
-  skipMusic as apiSkip,
+  resumeMusic as apiResume,
+  nextMusic as apiNext,
   stopMusic as apiStop,
-  getVolume as apiGetVolume,
+  seekMusic as apiSeek,
   setVolume as apiSetVolume,
-  callRadio as apiCallRadio,
-  getQueue as apiGetQueue,
+  setMode as apiSetMode,
   clearQueue as apiClear,
   getNowplaying as apiGetNowplaying,
-  seekMusic as apiSeek,
-  searchNetease as apiSearchNetease,
-  playNetease as apiPlayNetease,
+  getQueue as apiGetQueue,
   type Song,
+  type NowPlaying,
 } from '@/api/music'
-
-export type MusicSource = 'netease' | 'default'
 
 export const useMusicStore = defineStore('music', () => {
   const searchResults = ref<Song[]>([])
   const searching = ref(false)
-  const playing = ref(false)
-  const volume = ref(50)
   const searchKeyword = ref('')
-  const source = ref<MusicSource>('netease')
-  const queue = ref<Record<string, unknown>[]>([])
-  const currentIndex = ref<number | null>(null)
-  const nowplaying = ref<{ playing?: boolean; title?: string; position?: number; length?: number } | null>(null)
-  // 当前播放的「歌名」（点歌时前端记录，比 TS3AudioBot 返回的 URL 友好）
-  const currentTitle = ref('')
+  const nowplaying = ref<NowPlaying | null>(null)
+  const queue = ref<Song[]>([])
+  const volume = ref(50)
+  const playMode = ref('seq')
+  // 本地进度（每秒递增，轮询校正）
+  const localPosition = ref(0)
 
-  async function search(keyword: string) {
-    if (!keyword.trim()) return
+  const searchPlatform = ref<'all' | 'netease' | 'qq' | 'bilibili'>('all')
+
+  /** 搜索（按当前平台；all=三平台并行） */
+  async function search(q: string) {
+    if (!q.trim()) return
     searching.value = true
-    searchKeyword.value = keyword
+    searchKeyword.value = q
     try {
-      const res = source.value === 'netease'
-        ? await apiSearchNetease(keyword)
-        : await apiSearch(keyword)
-      searchResults.value = res.results || []
+      if (searchPlatform.value === 'all') {
+        // 三平台并行搜索，合并结果
+        const [ne, qq, bili] = await Promise.allSettled([
+          apiSearch(q, 'netease'),
+          apiSearch(q, 'qq'),
+          apiSearch(q, 'bilibili'),
+        ])
+        const all: Song[] = []
+        for (const r of [ne, qq, bili]) {
+          if (r.status === 'fulfilled') all.push(...(r.value.results || []))
+        }
+        searchResults.value = all
+      } else {
+        const res = await apiSearch(q, searchPlatform.value)
+        searchResults.value = res.results || []
+      }
     } catch {
       searchResults.value = []
     } finally {
@@ -49,106 +59,115 @@ export const useMusicStore = defineStore('music', () => {
     }
   }
 
-  /** 播放（可传歌名，用于显示） */
-  async function play(songId: string, name?: string) {
-    if (name) currentTitle.value = name
-    if (source.value === 'netease') await apiPlayNetease(songId)
-    else await apiPlay(songId)
-    playing.value = true
-    await fetchQueue()
+  /** 播放（query=歌名 或 'id:xxx'，platform 指定音源） */
+  async function play(query: string, queued = false, platform?: string) {
+    const res = await apiPlay(query, queued, platform)
     await fetchNowplaying()
+    await fetchQueue()
+    return res
   }
 
+  /** 暂停 */
   async function pause() {
     await apiPause()
-    playing.value = !playing.value
     await fetchNowplaying()
   }
 
-  async function skip() {
-    await apiSkip()
-    currentTitle.value = ''  // 下一首标题未知，清空由轮询填充
+  /** 恢复 */
+  async function resume() {
+    await apiResume()
+    await fetchNowplaying()
+  }
+
+  /** 下一首 */
+  async function next() {
+    await apiNext()
+    await fetchNowplaying()
     await fetchQueue()
-    await fetchNowplaying()
   }
 
+  /** 停止 */
   async function stop() {
     await apiStop()
-    playing.value = false
-    currentTitle.value = ''
+    await fetchNowplaying()
     await fetchQueue()
+  }
+
+  /** 跳转 */
+  async function seek(position: number) {
+    await apiSeek(position)
+    localPosition.value = position
     await fetchNowplaying()
   }
 
-  async function fetchVolume() {
-    try {
-      volume.value = await apiGetVolume()
-    } catch {
-      // 静默
-    }
-  }
-
+  /** 音量（防抖发送，避免频繁请求） */
+  let volTimer: ReturnType<typeof setTimeout> | null = null
   async function updateVolume(val: number) {
     volume.value = val
-    await apiSetVolume(val)
+    // 防抖：拖动结束后 300ms 才发送
+    if (volTimer) clearTimeout(volTimer)
+    volTimer = setTimeout(async () => {
+      try { await apiSetVolume(val) } catch { /* 静默 */ }
+    }, 300)
   }
 
-  async function fetchQueue() {
-    try {
-      const res = await apiGetQueue()
-      queue.value = (res.items || []) as Record<string, unknown>[]
-      currentIndex.value = res.index ?? null
-    } catch {
-      // 静默
-    }
-  }
-
+  /** 清空队列 */
   async function clear() {
     await apiClear()
     await fetchQueue()
   }
 
+  /** 当前播放 */
   async function fetchNowplaying() {
     try {
-      nowplaying.value = await apiGetNowplaying()
-      // 若前端没记歌名，回退用 nowplaying.title（URL 截断）
+      const np = await apiGetNowplaying()
+      nowplaying.value = np
+      volume.value = np.volume ?? 50
+      playMode.value = np.playMode || 'seq'
+      if (typeof np.position === 'number') localPosition.value = np.position
     } catch {
-      nowplaying.value = null
+      // 静默
     }
   }
 
-  /** 跳转播放进度 */
-  async function seek(position: number) {
-    await apiSeek(position)
-    await fetchNowplaying()
+  /** 队列 */
+  async function fetchQueue() {
+    try {
+      const res = await apiGetQueue()
+      queue.value = (res.items || []) as Song[]
+    } catch {
+      queue.value = []
+    }
   }
 
-  async function callRadio() {
-    await apiCallRadio()
+  /** 播放模式 */
+  async function setMode(mode: string) {
+    playMode.value = mode
+    try { await apiSetMode(mode) } catch { /* 静默 */ }
+    await fetchNowplaying()
   }
 
   return {
     searchResults,
     searching,
-    playing,
-    volume,
     searchKeyword,
-    source,
-    queue,
-    currentIndex,
+    searchPlatform,
     nowplaying,
-    currentTitle,
+    queue,
+    volume,
+    playMode,
+    localPosition,
     search,
     play,
     pause,
-    skip,
+    resume,
+    next,
     stop,
     seek,
-    fetchVolume,
     updateVolume,
-    fetchQueue,
     clear,
+    setMode,
     fetchNowplaying,
-    callRadio,
+    fetchQueue,
   }
 })

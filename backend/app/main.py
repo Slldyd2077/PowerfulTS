@@ -1,157 +1,81 @@
 """
 PowerfulTS 后端 — FastAPI
 
-架构演进中（分阶段原生化）：
-  /api/music/*        → TS3AudioBot (:58913)  音乐引擎 (原生)
-  /api/bilibili/*     → Bilibili API           B 站浏览/播放 (原生)
-  /api/stats|channels → 原生 TS3 ServerQuery   (P0 已接入)
-  /api/* (其余)       → S-QC-Bot (:8080)       过渡期透传 (逐模块替换, 高危端点已拉黑)
+架构（原生直连 + TSMusicBot 多媒体代理）：
+  /api/music/*        → TSMusicBot (:3000)      音乐引擎（网易云 / QQ / B 站 多平台）
+  /api/bili/*         → TSMusicBot (:3000)      B 站搜索/点播（多平台）+ 图片代理
+  /api/stats|channels → 原生 TS3 ServerQuery    监控 / 频道（直读）
+  /api/auth|friends   → 原生 TS3 ServerQuery    认证 / 好友 + SQLite
 
 原生数据层: SQLite + SQLAlchemy async (core.database)
 原生 TS3 监控: services.ts3_monitor (ServerQuery 长连接轮询)
 """
-import httpx
-from fastapi import FastAPI, Request, Response
-from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import get_settings
 from .core.database import dispose_db, init_db
-from .services.ts3audio_client import TS3AudioBotClient
-from .services.bilibili import BiliClient
+from .routers import auth, bilibili, friends, monitor, music
 from .services.netease import NeteaseClient
+from .services.tsmusic_client import TSMusicClient
 from .services.ts3_monitor import TS3Monitor
-from .routers import music, bilibili, monitor, auth, friends
 
 settings = get_settings()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期：原生数据层 + TS3 监控 + 桥接客户端。"""
+    """应用生命周期：原生数据层 + TS3 监控 + 多媒体代理客户端。"""
     # 原生数据层: 建表 (SQLite + SQLAlchemy async)
     await init_db()
     # 原生 TS3 监控 (后台线程 ServerQuery 轮询; 未配置则优雅降级)
     app.state.ts3_monitor = TS3Monitor(settings)
     app.state.ts3_monitor.start()
-    # 通道 1: S-QC-Bot 透传客户端 (过渡期)
-    app.state.sqc_client = httpx.AsyncClient(
-        base_url=settings.sqc_bot_url,
-        timeout=httpx.Timeout(15.0),
-    )
-    # 通道 2: TS3AudioBot 音乐引擎客户端
-    app.state.ts3ab = TS3AudioBotClient(settings)
-    # B 站 API 客户端 (后端自取音频流)
-    app.state.bili = BiliClient()
-    # 网易云音乐 API 客户端 (本地 NeteaseCloudMusicApi 服务)
+    # 网易云音乐 API 客户端 (本地 NeteaseCloudMusicApi 服务, 账号/歌单)
     app.state.netease = NeteaseClient(settings.netease_api_url)
+    # TSMusicBot 音乐引擎代理客户端 (网易云 / QQ / B 站 多平台)
+    app.state.tsmusic = TSMusicClient(settings)
     try:
         yield
     finally:
         app.state.ts3_monitor.stop()
-        await app.state.sqc_client.aclose()
-        await app.state.ts3ab.close()
-        await app.state.bili.close()
         await app.state.netease.close()
+        await app.state.tsmusic.close()
         await dispose_db()
 
 
 app = FastAPI(
     title="PowerfulTS Backend",
     version="2.0.0",
-    description="TS3 监控面板后端 — 分阶段原生化 (TS3 直连 + SQLite)",
+    description="TS3 监控面板后端 — 原生 TS3 直连 + TSMusicBot 多媒体代理",
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.cors_origins,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allow_headers=["X-Session-Token", "Content-Type"],
 )
 
-# 音乐通道：具体路由，必须在 catch-all 之前注册以优先匹配
+# 音乐通道：TSMusicBot 多平台音乐引擎（网易云 / QQ / B 站）
 app.include_router(music.router, prefix="/api")
-# B 站通道：浏览与播放 (后端自取音频流, 不依赖 TS3AudioBot 插件)
+# B 站通道：搜索/点播 (TSMusicBot 多平台) + 图片代理
 app.include_router(bilibili.router, prefix="/api")
-# 原生监控：/api/stats、/api/channels (P0，从 TS3 ServerQuery 直读)
+# 原生监控：/api/stats、/api/channels (从 TS3 ServerQuery 直读)
 app.include_router(monitor.router, prefix="/api")
-# 原生认证：/api/auth/* (P1，TS 身份认证)
+# 原生认证：/api/auth/* (TS 身份认证)
 app.include_router(auth.router, prefix="/api")
-# 原生好友：/api/friends/* (P1b)
+# 原生好友：/api/friends/*
 app.include_router(friends.router, prefix="/api")
-
-
-# ─────────────────────────────────────────────────────
-#  通用代理：其余 /api/* 请求转发到 S-QC-Bot (过渡期)
-# ─────────────────────────────────────────────────────
-
-# 过渡期透传代理: 拉黑 S-QC-Bot 中的高危无鉴权端点
-# (远程桌面控制等; 完整鉴权在 P1 接入账号体系时统一处理)
-_PROXY_BLOCKLIST = ("desktop/exec", "desktop", "heart/tick")
-
-
-@app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
-async def proxy_api(path: str, request: Request):
-    """通用 API 代理：将未原生化请求转发到 S-QC-Bot。
-
-    随原生化推进，/api/stats、/api/channels 等已由原生路由接管，不再进入这里。
-    """
-    normalized = path.rstrip("/")
-    if any(normalized == b or normalized.startswith(b + "/") for b in _PROXY_BLOCKLIST):
-        return Response(
-            content='{"error": "该端点已被安全策略禁用"}',
-            status_code=403,
-            media_type="application/json",
-        )
-
-    client: httpx.AsyncClient = request.app.state.sqc_client
-
-    target_path = f"/api/{path}"
-    if request.url.query:
-        target_path += f"?{request.url.query}"
-
-    body = await request.body()
-
-    headers = dict(request.headers)
-    headers.pop("host", None)
-    headers.pop("content-length", None)
-    headers.pop("transfer-encoding", None)
-
-    try:
-        upstream_resp = await client.request(
-            method=request.method,
-            url=target_path,
-            content=body if body else None,
-            headers=headers,
-        )
-
-        response_headers = dict(upstream_resp.headers)
-        for h in ["content-encoding", "transfer-encoding", "content-length"]:
-            response_headers.pop(h, None)
-
-        return Response(
-            content=upstream_resp.content,
-            status_code=upstream_resp.status_code,
-            headers=response_headers,
-        )
-    except httpx.ConnectError:
-        return Response(
-            content='{"error": "无法连接到 S-QC-Bot 服务，请确保 bot_main_v2.py 已启动"}',
-            status_code=502,
-            media_type="application/json",
-        )
-    except httpx.TimeoutException:
-        return Response(
-            content='{"error": "S-QC-Bot 服务响应超时"}',
-            status_code=504,
-            media_type="application/json",
-        )
 
 
 # ─────────────────────────────────────────────────────
 #  健康检查
 # ─────────────────────────────────────────────────────
+
 
 @app.get("/health")
 async def health():

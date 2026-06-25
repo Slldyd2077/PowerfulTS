@@ -1,0 +1,46 @@
+# PowerfulTS — Docker Compose 一键部署
+#
+#   启动：docker compose up -d --build
+#   访问：http://localhost:8080
+#   日志：docker compose logs -f
+#   停止：docker compose down
+#
+# 上游依赖（需另行部署，详见 README「接入上游服务」）：
+#   - TSMusicBot（音乐/点播引擎，默认 :3000）
+#   - TS3 服务端（开启 ServerQuery，默认 :10011）
+
+services:
+  backend:
+    build: ./backend
+    image: powerfults-backend:latest
+    container_name: powerfults-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - powerfults-data:/app/data   # SQLite 持久化
+    ports:
+      - "9090:9090"                 # 后端直接暴露（健康检查/调试；仅前端访问可删除此行）
+    networks:
+      - powerfults
+
+  frontend:
+    build: ./frontend
+    image: powerfults-frontend:latest
+    container_name: powerfults-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"                   # 面板入口 → http://localhost:8080
+    networks:
+      - powerfults
+
+volumes:
+  powerfults-data:
+
+networks:
+  powerfults:
+    driver: bridge

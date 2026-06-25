@@ -1,8 +1,6 @@
 """原生 TS3 监控路由。
 
-替代透传 S-QC-Bot 的 /api/stats、/api/channels，
-直接从 app.state.ts3_monitor 的内存快照返回（前端契约不变）。
-必须在 catch-all 代理之前注册。
+/api/stats、/api/channels 直接从 app.state.ts3_monitor 的内存快照返回（前端契约不变）。
 """
 from __future__ import annotations
 

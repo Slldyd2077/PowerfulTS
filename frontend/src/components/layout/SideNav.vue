@@ -20,7 +20,7 @@ const activeIndex = computed(() => {
 
 function navigate(key: string) {
   if (key === 'dashboard') router.push('/')
-  else if (key === 'music') window.open('http://localhost:3000', '_blank')
+  else if (key === 'music') router.push('/music')
   else if (key === 'friends') router.push('/friends')
 }
 </script>
