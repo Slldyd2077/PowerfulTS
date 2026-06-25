@@ -10,6 +10,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from pydantic import BaseModel, Field
 
+from ..services.netease import NeteaseClient
 from ..services.ts3audio_client import TS3AudioBotClient, TS3AudioBotError
 
 router = APIRouter(prefix="/music", tags=["music"])
@@ -193,3 +194,42 @@ async def set_volume(body: VolumeRequest, client: Ts3abDep, _: SessionDep):
     except TS3AudioBotError as exc:
         raise _handle_error(exc) from exc
     return {"volume": int(value)}
+
+
+# ───────────────────────── 网易云音源 (PowerfulTS 自研) ─────────────────────────
+# 调本地 NeteaseCloudMusicApi (:3000) 搜歌取 URL，交 TS3AudioBot 标准 play 播放。
+# 不依赖任何 TS3AudioBot 插件，绕开 .NET 兼容问题。
+
+def get_netease(request: Request) -> NeteaseClient:
+    return request.app.state.netease
+
+
+NeteaseDep = Annotated[NeteaseClient, Depends(get_netease)]
+
+
+@router.get("/netease/search")
+async def netease_search(keyword: str, netease: NeteaseDep, _: SessionDep, limit: int = 10):
+    """搜索网易云音乐，返回 [{song_id, name, artist, album}]。"""
+    results = await netease.search(keyword, limit)
+    return {"keyword": keyword, "count": len(results), "results": results}
+
+
+class NeteasePlayRequest(BaseModel):
+    song_id: str
+    queue: bool = True
+
+
+@router.post("/netease/play")
+async def netease_play(body: NeteasePlayRequest, netease: NeteaseDep, client: Ts3abDep, _: SessionDep):
+    """播放网易云歌曲：取可播放 URL → 交 TS3AudioBot 播放。"""
+    url = await netease.song_url(body.song_id)
+    if not url:
+        raise HTTPException(status_code=404, detail="无法获取歌曲 URL（可能需 VIP 或版权限制）")
+    try:
+        if body.queue:
+            await client.add(url)
+        else:
+            await client.play(url)
+    except TS3AudioBotError as exc:
+        raise _handle_error(exc) from exc
+    return {"success": True, "queued": body.queue}

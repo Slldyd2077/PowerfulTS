@@ -19,6 +19,7 @@ from .core.config import get_settings
 from .core.database import dispose_db, init_db
 from .services.ts3audio_client import TS3AudioBotClient
 from .services.bilibili import BiliClient
+from .services.netease import NeteaseClient
 from .services.ts3_monitor import TS3Monitor
 from .routers import music, bilibili, monitor, auth, friends
 
@@ -42,6 +43,8 @@ async def lifespan(app: FastAPI):
     app.state.ts3ab = TS3AudioBotClient(settings)
     # B 站 API 客户端 (后端自取音频流)
     app.state.bili = BiliClient()
+    # 网易云音乐 API 客户端 (本地 NeteaseCloudMusicApi 服务)
+    app.state.netease = NeteaseClient(settings.netease_api_url)
     try:
         yield
     finally:
@@ -49,6 +52,7 @@ async def lifespan(app: FastAPI):
         await app.state.sqc_client.aclose()
         await app.state.ts3ab.close()
         await app.state.bili.close()
+        await app.state.netease.close()
         await dispose_db()
 
 

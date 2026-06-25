@@ -4,6 +4,7 @@
   - 过渡期桥接通道 (S-QC-Bot 透传 / TS3AudioBot 音乐)
   - 原生数据层 (SQLite + SQLAlchemy async)
   - 原生 TS3 ServerQuery 直连 (监控 / 频道租赁)
+  - 网易云音乐 API (本地 NeteaseCloudMusicApi 服务)
 
 复制 .env.example 为 .env 并填入实际值。
 """
@@ -35,6 +36,9 @@ class Settings:
     # ── 原生数据层 (SQLite + SQLAlchemy async, 默认零依赖文件库) ──
     database_url: str
 
+    # ── 网易云音乐 API (本地 NeteaseCloudMusicApi 服务) ──
+    netease_api_url: str
+
     # ── 原生 TS3 ServerQuery 直连 (监控 / 频道租赁写操作) ──
     ts3_host: str
     ts3_query_port: int           # ServerQuery 端口 (默认 10011)
@@ -54,6 +58,7 @@ def get_settings() -> Settings:
         database_url=os.environ.get(
             "DATABASE_URL", "sqlite+aiosqlite:///./data/powerfults.db"
         ),
+        netease_api_url=os.environ.get("NETEASE_API_URL", "http://127.0.0.1:3000"),
         ts3_host=os.environ.get("TS3_HOST", "127.0.0.1"),
         ts3_query_port=int(os.environ.get("TS3_QUERY_PORT", "10011")),
         ts3_query_user=os.environ.get("TS3_QUERY_USER", ""),

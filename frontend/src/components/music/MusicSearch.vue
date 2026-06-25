@@ -25,6 +25,14 @@ async function handlePlay(songId: string, songName: string) {
   <div class="panel">
     <h2 class="panel-title">🎵 点歌</h2>
 
+    <!-- 音源切换 -->
+    <div class="source-row">
+      <el-radio-group v-model="music.source" size="small">
+        <el-radio-button value="netease">网易云</el-radio-button>
+        <el-radio-button value="default">默认</el-radio-button>
+      </el-radio-group>
+    </div>
+
     <!-- 搜索框 -->
     <div class="search-row">
       <el-input
@@ -83,6 +91,10 @@ async function handlePlay(songId: string, songName: string) {
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border-color);
   color: var(--text-primary);
+}
+
+.source-row {
+  margin-bottom: 12px;
 }
 
 .search-row {

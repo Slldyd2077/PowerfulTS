@@ -25,22 +25,17 @@ function navigate(key: string) {
     <!-- 品牌 -->
     <div class="nav-brand">
       <div class="brand-logo">
-        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-          <rect x="2" y="2" width="24" height="24" rx="6" stroke="url(#snav-grad)" stroke-width="1.5" fill="none"/>
-          <rect x="7" y="10" width="4" height="8" rx="0.5" fill="url(#snav-grad)"/>
-          <rect x="12.5" y="7" width="4" height="11" rx="0.5" fill="url(#snav-grad)"/>
-          <rect x="18" y="12" width="4" height="6" rx="0.5" fill="url(#snav-grad)"/>
-          <defs>
-            <linearGradient id="snav-grad" x1="0" y1="0" x2="28" y2="28">
-              <stop stop-color="#00e5ff"/>
-              <stop offset="1" stop-color="#b388ff"/>
-            </linearGradient>
-          </defs>
+        <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+          <!-- 信号条：单一青绿，呼应「监控」语义 -->
+          <rect x="3" y="14" width="3.5" height="8" rx="0.5" fill="var(--color-primary)" opacity="0.45" />
+          <rect x="8.5" y="9" width="3.5" height="13" rx="0.5" fill="var(--color-primary)" opacity="0.7" />
+          <rect x="14" y="5" width="3.5" height="17" rx="0.5" fill="var(--color-primary)" />
+          <rect x="19.5" y="11" width="3.5" height="11" rx="0.5" fill="var(--color-primary)" opacity="0.55" />
         </svg>
       </div>
       <div class="brand-text">
-        <h1 class="brand-title">PowerfulTS</h1>
-        <span class="brand-sub">Monitoring</span>
+        <span class="brand-kicker label-mono">PowerfulTS</span>
+        <h1 class="brand-title">监控面板</h1>
       </div>
     </div>
 
@@ -80,10 +75,10 @@ function navigate(key: string) {
 }
 
 .nav-brand {
-  padding: 24px 18px 16px;
+  padding: 22px 18px 14px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 11px;
 }
 
 .brand-logo {
@@ -96,25 +91,23 @@ function navigate(key: string) {
 .brand-text {
   display: flex;
   flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.brand-kicker {
+  font-size: 0.58em;
+  color: var(--color-primary);
+  letter-spacing: 0.16em;
 }
 
 .brand-title {
-  font-size: 1.2em;
+  font-size: 1em;
   font-weight: 700;
-  background: var(--gradient-brand);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: var(--text-primary);
   margin: 0;
   line-height: 1.2;
-  letter-spacing: -0.3px;
-}
-
-.brand-sub {
-  font-size: 0.7em;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 2px;
-  font-weight: 500;
+  letter-spacing: -0.01em;
 }
 
 .nav-menu {
@@ -128,7 +121,7 @@ function navigate(key: string) {
 
 .footer-line {
   height: 1px;
-  background: linear-gradient(90deg, transparent, var(--border-default), transparent);
+  background: var(--border-default);
   margin-bottom: 12px;
 }
 
@@ -136,8 +129,8 @@ function navigate(key: string) {
   display: block;
   text-align: center;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.7em;
+  font-size: 0.66em;
   color: var(--text-muted);
-  letter-spacing: 1px;
+  letter-spacing: 0.1em;
 }
 </style>

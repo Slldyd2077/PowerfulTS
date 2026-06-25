@@ -5,14 +5,16 @@ import { usePolling } from '@/composables/usePolling'
 
 const channels = ref<Record<string, string>>({})
 const channelCount = ref(0)
+const loaded = ref(false)
 
 async function fetchChannels() {
   try {
     const data: ChannelData = await getChannels()
     channels.value = data.channels || {}
     channelCount.value = data.count || 0
-  } catch {
-    // 静默
+    loaded.value = true
+  } catch (e) {
+    console.warn('[monitor] 获取频道失败', e)
   }
 }
 
@@ -22,21 +24,28 @@ usePolling(fetchChannels, 30000)
 <template>
   <div class="channel-sidebar">
     <div class="sidebar-header">
-      <h2 class="sidebar-title">频道</h2>
-      <span class="sidebar-badge mono" data-mono>{{ channelCount }}</span>
+      <div class="panel-title-group">
+        <h2 class="sidebar-title">频道</h2>
+        <span class="sidebar-sub label-mono">CHANNELS</span>
+      </div>
+      <span class="sidebar-badge mono">{{ channelCount }}</span>
     </div>
 
-    <div class="channel-list">
+    <div v-if="channelCount === 0" class="no-data">
+      <span v-if="!loaded" class="loading-shimmer">采集中…</span>
+      <span v-else>暂无频道</span>
+    </div>
+
+    <div v-else class="channel-list">
       <div
         v-for="(name, cid) in channels"
         :key="cid"
-        class="channel-item"
+        class="channel-item row-scan"
       >
-        <span class="channel-icon">#</span>
+        <span class="channel-hash mono">#</span>
         <span class="channel-name">{{ name }}</span>
+        <span class="channel-id mono">{{ cid }}</span>
       </div>
-
-      <div v-if="channelCount === 0" class="no-data">加载中...</div>
     </div>
   </div>
 </template>
@@ -46,7 +55,7 @@ usePolling(fetchChannels, 30000)
   background: var(--gradient-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  padding: 20px;
+  padding: 16px 16px 12px;
   overflow-y: auto;
   max-height: 100%;
 }
@@ -55,9 +64,15 @@ usePolling(fetchChannels, 30000)
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
   border-bottom: 1px solid var(--border-subtle);
+}
+
+.panel-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .sidebar-title {
@@ -67,50 +82,62 @@ usePolling(fetchChannels, 30000)
   margin: 0;
 }
 
+.sidebar-sub {
+  font-size: 0.6em;
+  color: var(--text-muted);
+}
+
 .sidebar-badge {
-  font-size: 0.85em;
+  font-size: 0.8em;
   font-weight: 700;
-  color: var(--color-accent);
-  background: rgba(255, 171, 0, 0.08);
-  padding: 2px 10px;
-  border-radius: 20px;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-default);
+  padding: 1px 9px;
+  border-radius: 4px;
+  line-height: 1.5;
 }
 
 .channel-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
 }
 
 .channel-item {
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
+  padding: 8px 8px;
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
   gap: 8px;
+  align-items: center;
+  border-bottom: 1px solid var(--border-subtle);
   transition: background 0.15s;
 }
-
+.channel-item:last-child {
+  border-bottom: none;
+}
 .channel-item:hover {
   background: var(--surface-4);
 }
 
-.channel-icon {
+.channel-hash {
   color: var(--text-muted);
-  font-weight: 700;
-  font-size: 0.85em;
-  flex-shrink: 0;
-  width: 18px;
-  text-align: center;
+  font-weight: 600;
+  font-size: 0.82em;
 }
 
 .channel-name {
   font-weight: 500;
   color: var(--text-secondary);
-  font-size: 0.85em;
+  font-size: 0.84em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.channel-id {
+  font-size: 0.62em;
+  color: var(--text-muted);
+  opacity: 0.7;
 }
 
 .no-data {

@@ -15,7 +15,7 @@ const auth = useAuthStore()
       <header class="layout-header">
         <div class="header-left">
           <div class="status-dot"></div>
-          <span class="status-label">在线</span>
+          <span class="status-label label-mono">UPLINK · 在线</span>
         </div>
         <UserAvatar />
       </header>
@@ -37,7 +37,7 @@ const auth = useAuthStore()
 .layout-sidebar {
   width: 230px;
   flex-shrink: 0;
-  background: rgba(12, 12, 29, 0.6);
+  background: rgba(13, 16, 20, 0.85);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-right: 1px solid var(--border-subtle);
@@ -54,13 +54,13 @@ const auth = useAuthStore()
 }
 
 .layout-header {
-  height: 52px;
+  height: 50px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
   border-bottom: 1px solid var(--border-subtle);
-  background: rgba(12, 12, 29, 0.4);
+  background: rgba(13, 16, 20, 0.7);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   flex-shrink: 0;
@@ -69,29 +69,26 @@ const auth = useAuthStore()
 .header-left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
 }
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--color-success);
-  box-shadow: 0 0 8px rgba(105, 240, 174, 0.5);
-  animation: pulse-glow 2s ease-in-out infinite;
+  animation: pulse-glow 2.4s ease-in-out infinite;
 }
 
 .status-label {
-  font-size: 0.8em;
+  font-size: 0.64em;
   color: var(--text-muted);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 0.14em;
 }
 
 .layout-content {
   flex: 1;
   overflow-y: auto;
-  padding: 28px;
+  padding: 26px;
 }
 </style>

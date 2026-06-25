@@ -66,3 +66,25 @@ export async function callRadio() {
   const { data } = await apiClient.post('/music/call_radio', { token })
   return data
 }
+
+/** 搜索网易云音乐（后端调本地网易云 API :3000，取 URL 交 TS3AudioBot 播放） */
+export async function searchNetease(keyword: string, limit = 10): Promise<MusicSearchResult> {
+  const { data } = await apiClient.get('/music/netease/search', { params: { keyword, limit } })
+  return {
+    keyword: data.keyword,
+    count: data.count,
+    results: (data.results || []).map((s: { song_id: string; name: string; artist: string; album?: string }) => ({
+      song_id: s.song_id,
+      song_name: s.name,
+      artist: s.artist,
+      album: s.album,
+    })),
+  }
+}
+
+/** 播放网易云音乐（取可播放 URL → TS3AudioBot 标准 play） */
+export async function playNetease(songId: string) {
+  const token = localStorage.getItem('session_token') || ''
+  const { data } = await apiClient.post('/music/netease/play', { song_id: songId, token })
+  return data
+}

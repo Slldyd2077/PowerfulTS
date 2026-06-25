@@ -93,11 +93,14 @@ async def verify_code(body: VerifyCodeRequest, db: AsyncSession = Depends(get_db
 async def register(body: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """注册：验证码校验 + uid 一致性校验 + 建账号。"""
     svc = AuthService(db)
+    # 先取 expected_uid（码还在），再消费验证码（会删除）
+    expected_uid = await svc.get_expected_uid(body.ts_nickname)
+    if not expected_uid:
+        return {"success": False, "error": "请先获取验证码"}
     if not await svc.consume_code(body.ts_nickname, body.code):
         return {"success": False, "error": "验证码错误、已失效或尝试次数过多"}
-    expected_uid = await svc.get_expected_uid(body.ts_nickname)
     current_uid = ts3_auth.get_online_uid(_monitor(request), body.ts_nickname)
-    if not expected_uid or not current_uid or current_uid != expected_uid:
+    if not current_uid or current_uid != expected_uid:
         return {"success": False, "error": "身份校验失败，请用同一 TS 客户端保持在线后重试"}
     try:
         await svc.create_account(body.ts_nickname, current_uid, body.password)

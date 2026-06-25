@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { login as apiLogin, register as apiRegister, getClientIp, sendCode, checkBinding, checkOnline } from '@/api/auth'
+import { login as apiLogin, register as apiRegister, getClientIp, sendCode, checkBinding } from '@/api/auth'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()

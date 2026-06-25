@@ -20,11 +20,11 @@ async function handleLogout() {
       </div>
       <div class="user-meta">
         <span class="user-name">{{ auth.nickname }}</span>
-        <span class="user-role" v-if="auth.isAdmin">管理员</span>
+        <span class="user-role label-mono" v-if="auth.isAdmin">管理员</span>
       </div>
     </div>
     <button class="logout-btn" @click="handleLogout" title="登出">
-      <el-icon :size="16"><SwitchButton /></el-icon>
+      <el-icon :size="15"><SwitchButton /></el-icon>
     </button>
   </div>
 </template>
@@ -43,16 +43,17 @@ async function handleLogout() {
 }
 
 .avatar-circle {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: var(--gradient-brand);
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: rgba(45, 212, 191, 0.1);
+  border: 1px solid rgba(45, 212, 191, 0.25);
+  color: var(--color-primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.8em;
+  font-size: 0.78em;
   font-weight: 700;
-  color: var(--text-inverse);
   flex-shrink: 0;
 }
 
@@ -64,34 +65,33 @@ async function handleLogout() {
 .user-name {
   color: var(--text-primary);
   font-weight: 600;
-  font-size: 0.9em;
+  font-size: 0.86em;
   line-height: 1.2;
 }
 
 .user-role {
-  font-size: 0.7em;
-  color: var(--color-danger);
-  font-weight: 500;
-  letter-spacing: 0.5px;
+  font-size: 0.58em;
+  color: var(--color-accent);
+  letter-spacing: 0.12em;
 }
 
 .logout-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
 }
 
 .logout-btn:hover {
   border-color: var(--color-danger);
   color: var(--color-danger);
-  background: rgba(255, 82, 82, 0.08);
+  background: rgba(248, 113, 113, 0.06);
 }
 </style>

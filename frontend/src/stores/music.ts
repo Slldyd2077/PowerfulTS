@@ -9,8 +9,12 @@ import {
   getVolume as apiGetVolume,
   setVolume as apiSetVolume,
   callRadio as apiCallRadio,
+  searchNetease as apiSearchNetease,
+  playNetease as apiPlayNetease,
   type Song,
 } from '@/api/music'
+
+export type MusicSource = 'netease' | 'default'
 
 export const useMusicStore = defineStore('music', () => {
   const searchResults = ref<Song[]>([])
@@ -18,14 +22,18 @@ export const useMusicStore = defineStore('music', () => {
   const playing = ref(false)
   const volume = ref(50)
   const searchKeyword = ref('')
+  // 默认网易云：原生接入（后端调 :3000），不依赖 S-QC-Bot 透传
+  const source = ref<MusicSource>('netease')
 
-  /** 搜索歌曲 */
+  /** 搜索歌曲（按当前音源） */
   async function search(keyword: string) {
     if (!keyword.trim()) return
     searching.value = true
     searchKeyword.value = keyword
     try {
-      const res = await apiSearch(keyword)
+      const res = source.value === 'netease'
+        ? await apiSearchNetease(keyword)
+        : await apiSearch(keyword)
       searchResults.value = res.results || []
     } catch {
       searchResults.value = []
@@ -34,9 +42,10 @@ export const useMusicStore = defineStore('music', () => {
     }
   }
 
-  /** 播放指定歌曲 */
+  /** 播放指定歌曲（按当前音源） */
   async function play(songId: string) {
-    await apiPlay(songId)
+    if (source.value === 'netease') await apiPlayNetease(songId)
+    else await apiPlay(songId)
     playing.value = true
   }
 
@@ -83,6 +92,7 @@ export const useMusicStore = defineStore('music', () => {
     playing,
     volume,
     searchKeyword,
+    source,
     search,
     play,
     pause,

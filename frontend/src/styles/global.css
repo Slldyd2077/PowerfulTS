@@ -1,7 +1,7 @@
 @import './variables.css';
 
 /* ── Google Fonts：JetBrains Mono（数据）+ Noto Sans SC（正文）── */
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
 
 *,
 *::before,
@@ -28,11 +28,29 @@ body {
   line-height: 1.6;
 }
 
-/* ── 数据/数字专用字体 ── */
+/* ── 数据 / 数字专用字体 ── */
 .mono,
 [data-mono] {
   font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
   font-variant-numeric: tabular-nums;
+}
+
+/* ── 等宽小标签（caps + 字距）：遥测仪表风格 ── */
+.label-mono {
+  font-family: 'JetBrains Mono', 'Cascadia Code', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 500;
+}
+
+/* ── 采集中文本微光（全局共享，避免各组件复制）── */
+.loading-shimmer {
+  background: linear-gradient(90deg, var(--text-muted), var(--text-secondary), var(--text-muted));
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 1.5s infinite;
 }
 
 /* ── Element Plus 暗色深度覆盖 ── */
@@ -52,15 +70,20 @@ body {
 .el-menu-item {
   border-radius: var(--radius-sm) !important;
   margin: 2px 0 !important;
-  height: 44px !important;
+  height: 42px !important;
   font-weight: 500;
-  transition: all 0.2s var(--ease-out-expo);
+  transition: color 0.2s var(--ease-out-expo), background 0.2s var(--ease-out-expo);
 }
 
+.el-menu-item:hover {
+  color: var(--text-secondary) !important;
+}
+
+/* 激活态：teal 文字 + 左侧 2px tick + 极淡 teal 面（去霓虹辉光） */
 .el-menu-item.is-active {
   background: var(--gradient-brand-subtle) !important;
   color: var(--color-primary) !important;
-  box-shadow: var(--glow-primary);
+  box-shadow: inset 2px 0 0 0 var(--color-primary);
 }
 
 .el-button--primary {
@@ -68,12 +91,14 @@ body {
   --el-button-border-color: var(--color-primary-dim);
   background: var(--gradient-brand) !important;
   border: none !important;
+  color: var(--text-inverse) !important;
   font-weight: 600;
   letter-spacing: 0.5px;
+  transition: filter 0.2s, box-shadow 0.2s;
 }
 
 .el-button--primary:hover {
-  filter: brightness(1.15);
+  filter: brightness(1.08);
   box-shadow: var(--glow-primary-strong);
 }
 
@@ -82,10 +107,13 @@ body {
   border: 1px solid var(--border-subtle) !important;
   box-shadow: none !important;
   border-radius: var(--radius-sm) !important;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-.el-input__wrapper:hover,
+.el-input__wrapper:hover {
+  border-color: var(--border-emphasis) !important;
+}
+
 .el-input__wrapper.is-focus {
   border-color: var(--color-primary) !important;
   box-shadow: var(--glow-primary) !important;
@@ -115,12 +143,12 @@ body {
 }
 
 .el-tag--success {
-  background: rgba(105, 240, 174, 0.12);
+  background: rgba(52, 211, 153, 0.12);
   color: var(--color-success);
 }
 
 .el-tag--danger {
-  background: rgba(255, 82, 82, 0.12);
+  background: rgba(248, 113, 113, 0.12);
   color: var(--color-danger);
 }
 
@@ -133,9 +161,10 @@ body {
   box-shadow: var(--glow-primary);
 }
 
-/* ── 滚动条 ── */
+/* ── 滚动条：更细更克制 ── */
 ::-webkit-scrollbar {
   width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
@@ -143,17 +172,17 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.16);
 }
 
 /* ── 全局动画 ── */
 @keyframes pulse-glow {
-  0%, 100% { opacity: 0.6; }
+  0%, 100% { opacity: 0.55; }
   50% { opacity: 1; }
 }
 
@@ -165,7 +194,7 @@ body {
 @keyframes fade-in-up {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
@@ -188,10 +217,54 @@ body {
 .animate-delay-3 { animation-delay: 0.15s; }
 .animate-delay-4 { animation-delay: 0.2s; }
 
-/* 侧边栏渐变分割线 */
+/* 侧边栏分隔线：发丝线（去渐变彩虹） */
 .divider-glow {
   height: 1px;
-  background: linear-gradient(90deg, transparent, var(--color-primary), var(--color-secondary), transparent);
-  opacity: 0.3;
+  background: var(--border-default);
+  opacity: 0.8;
   margin: 8px 0;
 }
+
+/* ───────────────────────────────────────────────
+   轻量互动效果（纯 CSS / 极小 rAF，无 Canvas/WebGL）
+   ─────────────────────────────────────────────── */
+
+/* 列表行 hover：左侧 1px teal 扫描刻度（终端触感） */
+.row-scan {
+  position: relative;
+}
+.row-scan::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 2px;
+  height: 0;
+  background: var(--color-primary);
+  border-radius: 1px;
+  transform: translateY(-50%);
+  transition: height 0.22s var(--ease-out-expo);
+  pointer-events: none;
+  z-index: 1;
+}
+.row-scan:hover::before {
+  height: 58%;
+}
+
+/* 声纳涟漪（点击用户行 ping） */
+@keyframes od-sonar {
+  0%   { transform: translate(-50%, -50%) scale(0.5); opacity: 0.7; }
+  100% { transform: translate(-50%, -50%) scale(6); opacity: 0; }
+}
+
+/* ── 无障碍：尊重「减少动态」偏好（通用兜底，覆盖所有动画/过渡）── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+
