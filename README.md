@@ -11,7 +11,7 @@
   <a href="https://vite.dev/" target="_blank"><img alt="Vite" src="https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white"></a>
   <a href="https://fastapi.tiangolo.com/" target="_blank"><img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.115+-05998B?logo=fastapi&logoColor=white"></a>
   <a href="https://www.python.org/" target="_blank"><img alt="Python" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white"></a>
-  <img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0-red?logo=gnu&logoColor=white">
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-blue?logo=mit&logoColor=white">
 </p>
 
 ---
@@ -183,4 +183,26 @@ TS3AB_DEFAULT_BOT_ID=0
 
 ## 📄 许可证
 
-本项目基于 [**GNU Affero General Public License v3.0**](./LICENSE) 开源。
+本项目基于 [**MIT License**](./LICENSE) 开源。
+
+---
+
+## 🙏 致谢
+
+本项目站在巨人的肩膀上，感谢以下开源项目和开发者：
+
+| 项目 | 说明 |
+|------|------|
+| [ZHANGTIANYAO1/teamspeak-music-bot](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot) | TS3/TS6 音乐机器人 — 网易云/QQ/B站，YesPlayMusic 风格 WebUI，PowerfulTS 音乐功能的后端引擎 |
+| [yichen11818/NeteaseTSBot](https://github.com/yichen11818/NeteaseTSBot) | TS6 协议兼容参考（vendored tsproto 补丁） |
+| [Splamy/TS3AudioBot](https://github.com/Splamy/TS3AudioBot) | 优秀的 TeamSpeak 音频机器人框架 |
+| [TS3AudioBot-BiliBiliPlugin](https://github.com/HuxiaoRoar/TS3AudioBot-bilibili) | 提供插件开发参考 |
+| [TS3AudioBot-NetEaseCloudmusic-plugin](https://github.com/ZHANGTIANYAO1/TS3AudioBot-NetEaseCloudmusic-plugin) | 提供插件开发参考和懒加载设计参考 |
+| [TS3AudioBot-CloudMusic-plugin](https://github.com/577fkj/TS3AudioBot-CloudMusic-plugin) | 提供插件开发参考 |
+| [TS3AudioBot-Plugin-Netease-QQ](https://github.com/HuxiaoRoar/TS3AudioBot-Plugin-Netease-QQ) | 提供插件开发参考 |
+| [YesPlayMusic](https://github.com/qier222/YesPlayMusic) | UI 设计灵感 |
+| [NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi) | 网易云音乐 API 项目 |
+| [QQMusicApi](https://github.com/jsososo/QQMusicApi) | QQ 音乐 API 项目 |
+| [@sansenjian/qq-music-api](https://github.com/sansenjian/qq-music-api) | QQ 音乐 API 活跃维护版本 |
+| [@honeybbq/teamspeak-client](https://github.com/honeybbq/teamspeak-client) | TS3 完整客户端协议实现 |
+| [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect) | 哔哩哔哩 API 文档 |
