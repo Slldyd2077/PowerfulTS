@@ -18,6 +18,16 @@ const routes: RouteRecordRaw[] = [
         name: 'Dashboard',
         component: () => import('@/views/DashboardView.vue'),
       },
+      {
+        path: 'music',
+        name: 'Music',
+        component: () => import('@/views/MusicView.vue'),
+      },
+      {
+        path: 'friends',
+        name: 'Friends',
+        component: () => import('@/views/FriendsView.vue'),
+      },
     ],
   },
   {

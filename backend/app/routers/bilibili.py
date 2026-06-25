@@ -10,7 +10,7 @@ from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from ..services.bilibili import BILI_REFERER, BILI_UA, BiliClient
@@ -81,6 +81,24 @@ async def bili_stream(url: str, request: Request):
     return StreamingResponse(
         body(), status_code=upstream.status_code, headers=resp_headers
     )
+
+
+@router.get("/pic")
+async def bili_pic(url: str):
+    """代理 B 站图片（注入 Referer/UA 绕过防盗链，缩略图才能显示）。"""
+    client = httpx.AsyncClient(timeout=httpx.Timeout(10.0))
+    try:
+        resp = await client.get(url, headers={"User-Agent": BILI_UA, "Referer": BILI_REFERER})
+        if resp.status_code != 200:
+            raise HTTPException(502, "图片获取失败")
+        return Response(
+            content=resp.content,
+            media_type=resp.headers.get("content-type", "image/jpeg"),
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, f"图片代理失败: {exc}") from exc
+    finally:
+        await client.aclose()
 
 
 # ───────────────────────── 播放控制 ─────────────────────────

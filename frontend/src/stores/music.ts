@@ -9,6 +9,10 @@ import {
   getVolume as apiGetVolume,
   setVolume as apiSetVolume,
   callRadio as apiCallRadio,
+  getQueue as apiGetQueue,
+  clearQueue as apiClear,
+  getNowplaying as apiGetNowplaying,
+  seekMusic as apiSeek,
   searchNetease as apiSearchNetease,
   playNetease as apiPlayNetease,
   type Song,
@@ -22,10 +26,13 @@ export const useMusicStore = defineStore('music', () => {
   const playing = ref(false)
   const volume = ref(50)
   const searchKeyword = ref('')
-  // 默认网易云：原生接入（后端调 :3000），不依赖 S-QC-Bot 透传
   const source = ref<MusicSource>('netease')
+  const queue = ref<Record<string, unknown>[]>([])
+  const currentIndex = ref<number | null>(null)
+  const nowplaying = ref<{ playing?: boolean; title?: string; position?: number; length?: number } | null>(null)
+  // 当前播放的「歌名」（点歌时前端记录，比 TS3AudioBot 返回的 URL 友好）
+  const currentTitle = ref('')
 
-  /** 搜索歌曲（按当前音源） */
   async function search(keyword: string) {
     if (!keyword.trim()) return
     searching.value = true
@@ -42,31 +49,37 @@ export const useMusicStore = defineStore('music', () => {
     }
   }
 
-  /** 播放指定歌曲（按当前音源） */
-  async function play(songId: string) {
+  /** 播放（可传歌名，用于显示） */
+  async function play(songId: string, name?: string) {
+    if (name) currentTitle.value = name
     if (source.value === 'netease') await apiPlayNetease(songId)
     else await apiPlay(songId)
     playing.value = true
+    await fetchQueue()
+    await fetchNowplaying()
   }
 
-  /** 暂停/恢复 */
   async function pause() {
     await apiPause()
     playing.value = !playing.value
+    await fetchNowplaying()
   }
 
-  /** 跳过当前 */
   async function skip() {
     await apiSkip()
+    currentTitle.value = ''  // 下一首标题未知，清空由轮询填充
+    await fetchQueue()
+    await fetchNowplaying()
   }
 
-  /** 停止播放 */
   async function stop() {
     await apiStop()
     playing.value = false
+    currentTitle.value = ''
+    await fetchQueue()
+    await fetchNowplaying()
   }
 
-  /** 获取音量 */
   async function fetchVolume() {
     try {
       volume.value = await apiGetVolume()
@@ -75,13 +88,41 @@ export const useMusicStore = defineStore('music', () => {
     }
   }
 
-  /** 设置音量 */
   async function updateVolume(val: number) {
     volume.value = val
     await apiSetVolume(val)
   }
 
-  /** 呼叫强基计划 */
+  async function fetchQueue() {
+    try {
+      const res = await apiGetQueue()
+      queue.value = (res.items || []) as Record<string, unknown>[]
+      currentIndex.value = res.index ?? null
+    } catch {
+      // 静默
+    }
+  }
+
+  async function clear() {
+    await apiClear()
+    await fetchQueue()
+  }
+
+  async function fetchNowplaying() {
+    try {
+      nowplaying.value = await apiGetNowplaying()
+      // 若前端没记歌名，回退用 nowplaying.title（URL 截断）
+    } catch {
+      nowplaying.value = null
+    }
+  }
+
+  /** 跳转播放进度 */
+  async function seek(position: number) {
+    await apiSeek(position)
+    await fetchNowplaying()
+  }
+
   async function callRadio() {
     await apiCallRadio()
   }
@@ -93,13 +134,21 @@ export const useMusicStore = defineStore('music', () => {
     volume,
     searchKeyword,
     source,
+    queue,
+    currentIndex,
+    nowplaying,
+    currentTitle,
     search,
     play,
     pause,
     skip,
     stop,
+    seek,
     fetchVolume,
     updateVolume,
+    fetchQueue,
+    clear,
+    fetchNowplaying,
     callRadio,
   }
 })

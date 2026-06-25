@@ -10,6 +10,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from pydantic import BaseModel, Field
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..core.database import get_db
+from ..deps import get_current_account
+from ..models import Account
 from ..services.netease import NeteaseClient
 from ..services.ts3audio_client import TS3AudioBotClient, TS3AudioBotError
 
@@ -233,3 +238,79 @@ async def netease_play(body: NeteasePlayRequest, netease: NeteaseDep, client: Ts
     except TS3AudioBotError as exc:
         raise _handle_error(exc) from exc
     return {"success": True, "queued": body.queue}
+
+
+# ───────────────────────── 网易云账号 (扫码登录 + 我的歌单) ─────────────────────────
+
+AccountDep = Annotated[Account, Depends(get_current_account)]
+
+
+@router.get("/netease/qr/key")
+async def netease_qr_key(netease: NeteaseDep, _: SessionDep):
+    """生成扫码登录 unikey。"""
+    unikey = await netease.qr_key()
+    if not unikey:
+        raise HTTPException(status_code=500, detail="生成扫码 key 失败")
+    return {"unikey": unikey}
+
+
+class QrRequest(BaseModel):
+    unikey: str
+
+
+@router.post("/netease/qr/create")
+async def netease_qr_create(body: QrRequest, netease: NeteaseDep, _: SessionDep):
+    """生成二维码图片。"""
+    qrimg = await netease.qr_create(body.unikey)
+    if not qrimg:
+        raise HTTPException(status_code=500, detail="生成二维码失败")
+    return {"qrimg": qrimg}
+
+
+@router.post("/netease/qr/check")
+async def netease_qr_check(body: QrRequest, netease: NeteaseDep, _: SessionDep):
+    """轮询扫码状态。803=已登录(带 cookie)。"""
+    return await netease.qr_check(body.unikey)
+
+
+class NeteaseBindRequest(BaseModel):
+    cookie: str
+
+
+@router.post("/netease/bind")
+async def netease_bind(
+    body: NeteaseBindRequest,
+    account: AccountDep,
+    netease: NeteaseDep,
+    db: AsyncSession = Depends(get_db),
+):
+    """扫码登录成功后，绑定网易云 cookie 到当前账号（每用户独立）。"""
+    info = await netease.account_info(body.cookie)
+    if not info:
+        raise HTTPException(status_code=400, detail="cookie 无效或未登录网易云")
+    account.netease_cookie = body.cookie
+    account.netease_uid = info["uid"]
+    await db.commit()
+    return {"success": True, "nickname": info["nickname"], "uid": info["uid"]}
+
+
+@router.get("/netease/my/playlists")
+async def netease_my_playlists(account: AccountDep, netease: NeteaseDep):
+    """我的网易云歌单（自建 + 收藏）。"""
+    if not account.netease_cookie or not account.netease_uid:
+        raise HTTPException(status_code=400, detail="未绑定网易云账号，请先扫码登录")
+    playlists = await netease.user_playlists(account.netease_uid, account.netease_cookie)
+    return {"playlists": playlists}
+
+
+class PlaylistTracksRequest(BaseModel):
+    playlist_id: str
+
+
+@router.post("/netease/playlist/tracks")
+async def netease_playlist_tracks(body: PlaylistTracksRequest, account: AccountDep, netease: NeteaseDep):
+    """歌单内歌曲（用于播放清单 / 整单播放）。"""
+    if not account.netease_cookie:
+        raise HTTPException(status_code=400, detail="未绑定网易云账号")
+    tracks = await netease.playlist_tracks(body.playlist_id, account.netease_cookie)
+    return {"tracks": tracks}

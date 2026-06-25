@@ -13,7 +13,7 @@ async function handleSearch() {
 
 async function handlePlay(songId: string, songName: string) {
   try {
-    await music.play(songId)
+    await music.play(songId, songName)
     ElMessage.success(`正在播放: ${songName}`)
   } catch (e: unknown) {
     ElMessage.error(e instanceof Error ? e.message : '播放失败')

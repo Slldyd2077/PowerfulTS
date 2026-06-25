@@ -27,10 +27,11 @@ export function cleanTitle(title: string): string {
   return title.replace(/<[^>]+>/g, '')
 }
 
-/** 补全封面协议 */
+/** 封面走后端代理（绕过 B 站防盗链，前端直接 img 会 403） */
 export function picUrl(pic?: string): string {
   if (!pic) return ''
-  return pic.startsWith('//') ? 'https:' + pic : pic
+  const full = pic.startsWith('//') ? 'https:' + pic : pic
+  return `/api/bili/pic?url=${encodeURIComponent(full)}`
 }
 
 /** 搜索 B 站视频 */

@@ -10,13 +10,18 @@ import {
 const route = useRoute()
 const router = useRouter()
 
+// 当前激活的菜单项（与 menu-item index 对应）
 const activeIndex = computed(() => {
   if (route.path === '/') return 'dashboard'
-  return route.path
+  if (route.path === '/music') return 'music'
+  if (route.path === '/friends') return 'friends'
+  return ''
 })
 
 function navigate(key: string) {
   if (key === 'dashboard') router.push('/')
+  else if (key === 'music') window.open('http://localhost:3000', '_blank')
+  else if (key === 'friends') router.push('/friends')
 }
 </script>
 
@@ -48,12 +53,12 @@ function navigate(key: string) {
         <span>服务器监控</span>
       </el-menu-item>
 
-      <el-menu-item index="music" disabled>
+      <el-menu-item index="music">
         <el-icon><Headset /></el-icon>
         <span>音乐控制</span>
       </el-menu-item>
 
-      <el-menu-item index="friends" disabled>
+      <el-menu-item index="friends">
         <el-icon><User /></el-icon>
         <span>好友列表</span>
       </el-menu-item>
@@ -62,7 +67,7 @@ function navigate(key: string) {
     <!-- 底部 -->
     <div class="nav-footer">
       <div class="footer-line"></div>
-      <span class="version">v1.0.0</span>
+      <span class="version">v1.1.0</span>
     </div>
   </nav>
 </template>
