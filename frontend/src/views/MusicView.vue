@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import MusicSearch from '@/components/music/MusicSearch.vue'
 import MusicPlayer from '@/components/music/MusicPlayer.vue'
+import BotManager from '@/components/music/BotManager.vue'
 import PlatformAccounts from '@/components/music/PlatformAccounts.vue'
+import MyMusic from '@/components/music/MyMusic.vue'
 </script>
 
 <template>
@@ -16,9 +18,11 @@ import PlatformAccounts from '@/components/music/PlatformAccounts.vue'
     <div class="music-grid">
       <div class="music-main">
         <MusicSearch />
+        <MyMusic />
       </div>
 
       <div class="music-side">
+        <BotManager />
         <MusicPlayer />
         <PlatformAccounts />
       </div>
@@ -53,7 +57,12 @@ import PlatformAccounts from '@/components/music/PlatformAccounts.vue'
   align-items: start;
 }
 
-.music-main { min-width: 0; }
+.music-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
 .music-side { position: sticky; top: 0; }
 
 @media (max-width: 1100px) {

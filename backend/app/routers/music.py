@@ -7,13 +7,18 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+import logging
+import re
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
 from ..deps import get_current_account
 from ..models import Account
 from ..services.tsmusic_client import TSMusicClient
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/music", tags=["music"])
 
 
@@ -26,6 +31,11 @@ def get_tsmusic(request: Request) -> TSMusicClient:
 TsmusicDep = Annotated[TSMusicClient, Depends(get_tsmusic)]
 AccountDep = Annotated[Account, Depends(get_current_account)]
 
+# 前端按 JS 惯例用 query 参数 botId（camelCase）传当前 bot；此处用 alias 对齐，
+# 否则 FastAPI 只认 snake_case 的 bot_id，前端传的真实 bot id 会被丢弃、回退默认 bot
+# （曾因此静默打到不存在的默认 bot → 上游 404 → UI 假显示"正在播放"）。
+BotIdQuery = Annotated[str | None, Query(alias="botId")]
+
 
 # ───────────────────────── 请求模型 ─────────────────────────
 
@@ -37,6 +47,13 @@ class PlayRequest(BaseModel):
     query: str = Field(description="歌名或 'id:xxx' 精确播放")
     queue: bool = Field(default=False, description="True=加入队列, False=立即播放")
     platform: str | None = Field(default=None, description="音源平台 netease/qq/bilibili")
+    # 前端传入的歌曲元数据；上游 TSMusicBot 入队 QQ 音乐时会丢失 name/coverUrl，
+    # 用它在后端缓存并回填队列 / 当前播放。
+    meta: dict | None = Field(default=None, description="歌曲元数据 {id,name,artist,album,duration,coverUrl,platform}")
+
+
+class SeekRequest(BaseModel):
+    position: int = Field(ge=0, description="跳转到的播放位置（秒）")
 
 
 class VolumeRequest(BaseModel):
@@ -62,66 +79,203 @@ async def search(
 
 
 @router.post("/play")
-async def play(body: PlayRequest, tsmusic: TsmusicDep, _account: AccountDep):
+async def play(body: PlayRequest, tsmusic: TsmusicDep, _account: AccountDep, bot_id: BotIdQuery = None):
     """播放（query 可以是歌名或 'id:xxx'，platform 指定音源）。"""
     if body.queue:
-        result = await tsmusic.add(body.query, platform=body.platform)
+        result = await tsmusic.add(body.query, platform=body.platform, meta=body.meta, bot_id=bot_id)
     else:
-        result = await tsmusic.play(body.query, platform=body.platform)
+        result = await tsmusic.play(body.query, platform=body.platform, meta=body.meta, bot_id=bot_id)
     return result
 
 
 @router.post("/pause")
-async def pause(tsmusic: TsmusicDep, _account: AccountDep):
-    return await tsmusic.pause()
+async def pause(tsmusic: TsmusicDep, _account: AccountDep, bot_id: BotIdQuery = None):
+    return await tsmusic.pause(bot_id=bot_id)
 
 
 @router.post("/resume")
-async def resume(tsmusic: TsmusicDep, _account: AccountDep):
-    return await tsmusic.resume()
+async def resume(tsmusic: TsmusicDep, _account: AccountDep, bot_id: BotIdQuery = None):
+    return await tsmusic.resume(bot_id=bot_id)
 
 
 @router.post("/next")
-async def next_track(tsmusic: TsmusicDep, _account: AccountDep):
-    return await tsmusic.next()
+async def next_track(tsmusic: TsmusicDep, _account: AccountDep, bot_id: BotIdQuery = None):
+    return await tsmusic.next(bot_id=bot_id)
 
 
 @router.post("/stop")
-async def stop(tsmusic: TsmusicDep, _account: AccountDep):
-    return await tsmusic.stop()
+async def stop(tsmusic: TsmusicDep, _account: AccountDep, bot_id: BotIdQuery = None):
+    return await tsmusic.stop(bot_id=bot_id)
 
 
 @router.post("/seek")
-async def seek(body: SeekRequest, tsmusic: TsmusicDep, _account: AccountDep):
-    return await tsmusic.seek(body.position)
+async def seek(body: SeekRequest, tsmusic: TsmusicDep, _account: AccountDep, bot_id: BotIdQuery = None):
+    return await tsmusic.seek(body.position, bot_id=bot_id)
 
 
 @router.post("/volume")
-async def set_volume(body: VolumeRequest, tsmusic: TsmusicDep, _account: AccountDep):
-    return await tsmusic.set_volume(body.volume)
+async def set_volume(body: VolumeRequest, tsmusic: TsmusicDep, _account: AccountDep, bot_id: BotIdQuery = None):
+    return await tsmusic.set_volume(body.volume, bot_id=bot_id)
 
 
 @router.post("/mode")
-async def set_mode(body: ModeRequest, tsmusic: TsmusicDep, _account: AccountDep):
-    return await tsmusic.set_mode(body.mode)
+async def set_mode(body: ModeRequest, tsmusic: TsmusicDep, _account: AccountDep, bot_id: BotIdQuery = None):
+    return await tsmusic.set_mode(body.mode, bot_id=bot_id)
 
 
 @router.post("/clear")
-async def clear(tsmusic: TsmusicDep, _account: AccountDep):
-    return await tsmusic.clear()
+async def clear(tsmusic: TsmusicDep, _account: AccountDep, bot_id: BotIdQuery = None):
+    return await tsmusic.clear(bot_id=bot_id)
 
 
 @router.get("/nowplaying")
-async def now_playing(tsmusic: TsmusicDep, _account: AccountDep):
+async def now_playing(tsmusic: TsmusicDep, _account: AccountDep, bot_id: BotIdQuery = None):
     """当前播放状态（歌名/歌手/进度/封面/音量）。"""
-    return await tsmusic.get_bot_status()
+    return await tsmusic.get_bot_status(bot_id=bot_id)
 
 
 @router.get("/queue")
-async def queue(tsmusic: TsmusicDep, _account: AccountDep):
+async def queue(tsmusic: TsmusicDep, _account: AccountDep, bot_id: BotIdQuery = None):
     """播放队列。"""
-    items = await tsmusic.get_queue()
+    items = await tsmusic.get_queue(bot_id=bot_id)
     return {"count": len(items), "items": items}
+
+
+@router.delete("/queue/{index}")
+async def remove_from_queue(
+    index: Annotated[int, Path(ge=0)],
+    tsmusic: TsmusicDep,
+    _account: AccountDep,
+    bot_id: BotIdQuery = None,
+):
+    """移除队列中指定位置的单曲（前端传 0-based 索引，内部转上游 1-based !remove）。"""
+    return await tsmusic.remove_from_queue(index, bot_id=bot_id)
+
+
+# ───────────────────────── 我的音乐 / 歌单 ─────────────────────────
+
+
+@router.get("/my/playlists")
+async def my_playlists(platform: str, tsmusic: TsmusicDep, _account: AccountDep):
+    """用户歌单（自建+收藏）。返回 {ok, unsupported, data, error}。"""
+    return await tsmusic.user_playlists(platform)
+
+
+_PLAYLIST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+@router.get("/my/playlist/{playlist_id}/songs")
+async def my_playlist_songs(
+    playlist_id: str,
+    platform: str,
+    tsmusic: TsmusicDep,
+    _account: AccountDep,
+):
+    """歌单内歌曲（playlist_id 限定字母/数字/下划线/短横，防路径注入）。"""
+    # Path(pattern) 对 path 参数在本 FastAPI 版本不校验，显式补
+    if not _PLAYLIST_ID_RE.fullmatch(playlist_id):
+        raise HTTPException(status_code=400, detail="invalid playlist_id")
+    return await tsmusic.playlist_songs(playlist_id, platform)
+
+
+@router.get("/my/recommend/songs")
+async def my_recommend_songs(platform: str, tsmusic: TsmusicDep, _account: AccountDep):
+    """每日推荐。"""
+    return await tsmusic.recommend_songs(platform)
+
+
+@router.get("/my/personal-fm")
+async def my_personal_fm(platform: str, tsmusic: TsmusicDep, _account: AccountDep):
+    """私人 FM。"""
+    return await tsmusic.personal_fm(platform)
+
+
+@router.get("/my/bilibili-popular")
+async def my_bilibili_popular(
+    tsmusic: TsmusicDep,
+    _account: AccountDep,
+    limit: int = 20,
+):
+    """B 站热门视频（无需登录）。"""
+    return await tsmusic.bilibili_popular(limit)
+
+
+class EnqueueRequest(BaseModel):
+    platform: str | None = Field(default=None, description="音源平台 netease/qq/bilibili")
+    songs: list[dict] = Field(description="歌曲列表 [{id,...}]，最多取前 50 首")
+
+
+@router.post("/my/enqueue")
+async def my_enqueue(body: EnqueueRequest, tsmusic: TsmusicDep, _account: AccountDep, bot_id: BotIdQuery = None):
+    """批量入队（整单播放）：后端循环 add，并发上限 4，上限 50 首，单首失败容忍。"""
+    return await tsmusic.enqueue_songs(body.songs, platform=body.platform, bot_id=bot_id)
+
+
+# ───────────────────────── bot 实例管理 ─────────────────────────
+
+
+_BOT_ID_RE = re.compile(r"^[0-9a-fA-F-]{1,64}$")
+
+
+def _check_bot_id(bot_id: str) -> None:
+    """校验 bot_id 格式（UUID hex+连字符），防路径注入。Path(pattern) 对 path 参数不生效，显式补。"""
+    if not _BOT_ID_RE.fullmatch(bot_id):
+        raise HTTPException(status_code=400, detail="invalid bot_id")
+
+
+class BotCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    nickname: str = Field(min_length=1, max_length=64)
+    serverAddress: str = Field(min_length=1, description="TS 服务器地址（TSMusicBot 在 docker 时用 host.docker.internal）")
+    serverPort: int = Field(default=9987, ge=1, le=65535)
+    defaultChannel: str = ""
+    channelPassword: str = ""
+    serverPassword: str = ""
+
+
+@router.get("/bots")
+async def list_bots(tsmusic: TsmusicDep, _account: AccountDep):
+    """bot 实例列表（含连接 / 播放状态）。"""
+    return {"bots": await tsmusic.list_bots()}
+
+
+@router.post("/bots")
+async def create_bot(body: BotCreate, tsmusic: TsmusicDep, _account: AccountDep):
+    """创建 bot（identity 自动生成，不自动连接；创建后调 start 连接 TS）。"""
+    try:
+        return await tsmusic.create_bot(body.model_dump())
+    except (httpx.HTTPError, ValueError):
+        raise HTTPException(status_code=502, detail="TSMusicBot 不可达，请确认其 Docker 容器在运行")
+
+
+@router.post("/bots/{bot_id}/start")
+async def start_bot(bot_id: str, tsmusic: TsmusicDep, _account: AccountDep):
+    """启动 bot 连接 TS。"""
+    _check_bot_id(bot_id)
+    try:
+        return await tsmusic.start_bot(bot_id)
+    except (httpx.HTTPError, ValueError):
+        raise HTTPException(status_code=502, detail="TSMusicBot 不可达，请确认其 Docker 容器在运行")
+
+
+@router.post("/bots/{bot_id}/stop")
+async def stop_bot(bot_id: str, tsmusic: TsmusicDep, _account: AccountDep):
+    """停止 bot（断开 TS）。"""
+    _check_bot_id(bot_id)
+    try:
+        return await tsmusic.stop_bot(bot_id)
+    except (httpx.HTTPError, ValueError):
+        raise HTTPException(status_code=502, detail="TSMusicBot 不可达，请确认其 Docker 容器在运行")
+
+
+@router.delete("/bots/{bot_id}")
+async def delete_bot(bot_id: str, tsmusic: TsmusicDep, _account: AccountDep):
+    """删除 bot 实例。"""
+    _check_bot_id(bot_id)
+    try:
+        return await tsmusic.delete_bot(bot_id)
+    except (httpx.HTTPError, ValueError):
+        raise HTTPException(status_code=502, detail="TSMusicBot 不可达，请确认其 Docker 容器在运行")
 
 
 # ───────────────────────── 平台账号登录 ─────────────────────────

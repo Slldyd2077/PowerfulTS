@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch, ref, onMounted, onUnmounted } from 'vue'
+import { computed, watch, ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useMusicStore } from '@/stores/music'
 import { usePolling } from '@/composables/usePolling'
 import { ElMessage } from 'element-plus'
@@ -7,7 +7,8 @@ import EqualizerBars from '@/components/music/EqualizerBars.vue'
 
 const music = useMusicStore()
 
-onMounted(() => {
+onMounted(async () => {
+  await music.fetchBots()
   music.fetchNowplaying()
   music.fetchQueue()
 })
@@ -22,12 +23,19 @@ usePolling(async () => {
 let tickTimer: number | null = null
 const dragging = ref(false)
 const lastTitle = ref('')
+// 封面加载失败回退（B 站等封面偶尔因防盗链 / 域名失效而 404，避免破损图标）
+const brokenCovers = reactive(new Set<string>())
+function onCoverError(url?: string) {
+  if (url) brokenCovers.add(url)
+}
 
 // 换歌时重置进度
 watch(() => music.nowplaying?.title, (title) => {
   if (title && title !== lastTitle.value) {
     music.localPosition = 0
     lastTitle.value = title
+    // 换歌：重置封面失败标记，让新歌封面重新尝试加载（避免旧 url 残留导致永久回退）
+    brokenCovers.clear()
   }
 })
 
@@ -90,6 +98,7 @@ async function handlePause() {
 async function handleNext() { try { await music.next() } catch { ElMessage.error('操作失败') } }
 async function handleStop() { try { await music.stop() } catch { ElMessage.error('操作失败') } }
 async function handleClear() { try { await music.clear(); ElMessage.success('已清空队列') } catch {} }
+async function handleRemove(index: number) { try { await music.removeQueueAt(index) } catch { ElMessage.error('移除失败') } }
 
 // 播放模式：单控件循环切换
 const MODES = [
@@ -104,8 +113,16 @@ function cycleMode() {
   music.setMode(MODES[(i + 1) % MODES.length].value)
 }
 
-// 队列中与当前曲匹配的项（用于频谱指示）
-const currentTitle = computed(() => music.nowplaying?.title || '')
+// 用 id+platform 精确判断队列中哪首是当前播放（歌名匹配会误判同名/翻唱）
+const npSong = computed(() => {
+  const np = music.nowplaying
+  if (!np?.songId) return null
+  return { id: String(np.songId), platform: (np.platform || '') }
+})
+function isCurrent(item: { id?: string; platform?: string }): boolean {
+  const cur = npSong.value
+  return !!cur && String(item.id ?? '') === cur.id && (item.platform || '') === cur.platform
+}
 </script>
 
 <template>
@@ -120,7 +137,7 @@ const currentTitle = computed(() => music.nowplaying?.title || '')
     <!-- Now Playing Hero -->
     <div class="np-hero" :class="{ playing: isPlaying }">
       <div class="np-cover-wrap">
-        <img v-if="np?.cover" :src="np.cover" class="np-cover" referrerpolicy="no-referrer" />
+        <img v-if="np?.cover && !brokenCovers.has(np.cover)" :src="np.cover" class="np-cover" referrerpolicy="no-referrer" @error="onCoverError(np.cover)" />
         <div v-else class="np-cover np-cover--fallback" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 17.5V6l10-2v8.5" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.5" cy="17.5" r="2.5"/><circle cx="16" cy="14.5" r="2.5"/></svg>
         </div>
@@ -216,10 +233,10 @@ const currentTitle = computed(() => music.nowplaying?.title || '')
           v-for="(item, i) in music.queue"
           :key="(item.platform || '') + ':' + (item.id || i)"
           class="queue-item row-scan"
-          :class="{ current: currentTitle && item.name === currentTitle }"
+          :class="{ current: isCurrent(item) }"
         >
           <span class="q-idx mono">{{ String(i + 1).padStart(2, '0') }}</span>
-          <img v-if="item.coverUrl" :src="item.coverUrl" class="q-cover" referrerpolicy="no-referrer" />
+          <img v-if="item.coverUrl && !brokenCovers.has(item.coverUrl)" :src="item.coverUrl" class="q-cover" referrerpolicy="no-referrer" @error="onCoverError(item.coverUrl)" />
           <span v-else class="q-cover q-cover--fallback" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 17V7l8-1.5v7" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.5" cy="17" r="2"/><circle cx="14" cy="15" r="2"/></svg>
           </span>
@@ -227,8 +244,11 @@ const currentTitle = computed(() => music.nowplaying?.title || '')
             <span class="q-name">{{ item.name }}</span>
             <span class="q-artist">{{ item.artist }}</span>
           </div>
-          <EqualizerBars v-if="currentTitle && item.name === currentTitle" class="q-eq" :active="true" />
+          <EqualizerBars v-if="isCurrent(item)" class="q-eq" :active="true" />
           <span v-else-if="item.duration" class="q-dur mono">{{ fmt(item.duration) }}</span>
+          <button class="q-remove" title="移除" @click="handleRemove(i)">
+            <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
         </div>
       </div>
     </div>
@@ -634,5 +654,36 @@ const currentTitle = computed(() => music.nowplaying?.title || '')
   font-size: 0.66em;
   color: var(--text-muted);
   flex-shrink: 0;
+}
+.q-remove {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+.q-remove svg {
+  width: 14px;
+  height: 14px;
+}
+.queue-item:hover .q-remove,
+.queue-item:focus-within .q-remove {
+  opacity: 1;
+}
+.q-remove:hover {
+  color: var(--color-danger);
+  background: rgba(248, 113, 113, 0.1);
+}
+@media (hover: none) {
+  .q-remove {
+    opacity: 0.6;
+  }
 }
 </style>

@@ -27,6 +27,8 @@
 
 > 💡 **跨平台**：提供完整 Docker 化方案，Linux / Windows / macOS / NAS（群晖、威联通等）均可一键部署。
 
+> ⚠️ **早期测试版本**：本项目目前处于**早期开发与测试阶段**，功能仍在快速迭代中，存在诸多 Bug。如遇问题，欢迎[提交 Issue](https://github.com/Slldyd2077/PowerfulTS/issues) 反馈。
+
 ---
 
 ## ✨ 功能特性
@@ -307,6 +309,22 @@ PowerfulTS 本身不含 TS3 服务端与音乐引擎，需接入两个上游：
 - [x] 原生 TS3 ServerQuery 直连（监控 / 认证 / 好友）
 - [x] 音乐与点播引擎迁移至 TSMusicBot（网易云 / QQ / B 站 多平台）
 - [x] Docker 化跨平台一键部署
+
+---
+
+## 🤝 参与贡献
+
+本项目处于早期阶段，**非常欢迎并感谢社区的各类贡献** —— 反馈 Bug、提出建议、完善文档或提交代码，对项目都很有帮助。
+
+- 🐛 **反馈问题 / 功能建议**：请[提交 Issue](https://github.com/Slldyd2077/PowerfulTS/issues/new)，尽量附上复现步骤、相关日志与运行环境信息。
+- 🛠️ **提交代码（Pull Request）**：
+  1. Fork 本仓库并克隆到本地
+  2. 新建分支：`git checkout -b feat/你的功能` 或 `fix/问题描述`
+  3. 提交改动，遵循 [Conventional Commits](https://www.conventionalcommits.org/) 规范（如 `feat:` / `fix:` / `docs:`）
+  4. 推送分支并发起 Pull Request，描述改动内容与动机
+- 💬 **交流讨论**：也欢迎在 Issue 区分享使用体验与改进想法。
+
+> 首次贡献者同样欢迎 —— 哪怕只是修正一处文档错别字、补充一段说明，都是有价值的贡献 🎉
 
 ---
 

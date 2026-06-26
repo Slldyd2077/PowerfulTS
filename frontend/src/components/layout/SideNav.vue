@@ -6,9 +6,11 @@ import {
   Headset,
   User,
 } from '@element-plus/icons-vue'
+import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
 const router = useRouter()
+const auth = useAuthStore()
 
 // 当前激活的菜单项（与 menu-item index 对应）
 const activeIndex = computed(() => {
@@ -53,12 +55,12 @@ function navigate(key: string) {
         <span>服务器监控</span>
       </el-menu-item>
 
-      <el-menu-item index="music">
+      <el-menu-item v-if="!auth.isGuest" index="music">
         <el-icon><Headset /></el-icon>
         <span>音乐控制</span>
       </el-menu-item>
 
-      <el-menu-item index="friends">
+      <el-menu-item v-if="!auth.isGuest" index="friends">
         <el-icon><User /></el-icon>
         <span>好友列表</span>
       </el-menu-item>

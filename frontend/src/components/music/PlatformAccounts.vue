@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import QRCode from 'qrcode'
-import { getAuthStatus, getQrcode } from '@/api/music'
+import { getAuthStatus, getQrcode, setCookie } from '@/api/music'
 import { ElMessage } from 'element-plus'
+import { useMusicStore } from '@/stores/music'
 
 interface PlatformInfo {
   value: string
@@ -17,22 +18,13 @@ const platforms: PlatformInfo[] = [
   { value: 'bilibili', label: 'B站', color: '#fb7299', icon: 'B' },
 ]
 
-const status = ref<Record<string, { loggedIn: boolean; nickname?: string }>>({})
+const music = useMusicStore()
+// 登录态已提升到 store（供 MyMusic 置灰判断）；此处 status 为只读视图，模板沿用 status[p.value]
+const status = computed(() => music.platformStatus)
 const activePlatform = ref('')
 const qrImg = ref('')
 const loading = ref(false)
 let pollTimer: number | null = null
-
-async function fetchAllStatus() {
-  for (const p of platforms) {
-    try {
-      const res = await getAuthStatus(p.value)
-      status.value[p.value] = { loggedIn: !!res.loggedIn, nickname: res.nickname }
-    } catch {
-      status.value[p.value] = { loggedIn: false }
-    }
-  }
-}
 
 async function startLogin(p: PlatformInfo) {
   activePlatform.value = p.value
@@ -66,7 +58,8 @@ function startPolling(platform: string) {
     try {
       const res = await getAuthStatus(platform)
       if (res.loggedIn) {
-        status.value[platform] = { loggedIn: true, nickname: res.nickname }
+        // 写回 store，解除 MyMusic 的置灰
+        music.platformStatus[platform] = { loggedIn: true, nickname: res.nickname }
         qrImg.value = ''
         activePlatform.value = ''
         stopPolling()
@@ -92,7 +85,61 @@ function closeQr() {
   stopPolling()
 }
 
-onMounted(fetchAllStatus)
+// Cookie 登录（扫码失败时的可靠替代：从浏览器导出 cookie 粘贴）
+const showCookie = ref(false)
+const cookiePlatform = ref('')
+const cookieText = ref('')
+
+const cookiePlaceholder = computed(() => {
+  switch (cookiePlatform.value) {
+    case 'bilibili':
+      return 'SESSDATA=xxx; bili_jct=xxx; DedeUserID=xxx'
+    case 'qq':
+      return 'uin=xxx; qqmusic_key=xxx'
+    case 'netease':
+      return 'MUSIC_U=xxx; __csrf=xxx'
+    default:
+      return '粘贴 Cookie 字符串…'
+  }
+})
+
+function openCookie(p: PlatformInfo) {
+  cookiePlatform.value = p.value
+  cookieText.value = ''
+  showCookie.value = true
+  stopPolling()
+}
+function closeCookie() {
+  showCookie.value = false
+  cookieText.value = ''
+  cookiePlatform.value = ''
+}
+async function submitCookie() {
+  const text = cookieText.value.trim()
+  const plat = cookiePlatform.value
+  if (!text || !plat) return
+  loading.value = true
+  try {
+    await setCookie(plat, text)
+    // 上游 /api/auth/cookie 总返回 success:true（仅表示已提交），真实登录态以 status.loggedIn 为准
+    const res = await getAuthStatus(plat)
+    // 写回 store，解除 MyMusic 的置灰
+    music.platformStatus[plat] = { loggedIn: !!res.loggedIn, nickname: res.nickname }
+    if (res.loggedIn) {
+      const label = platforms.find((x) => x.value === plat)?.label
+      ElMessage.success(`${label} Cookie 登录成功`)
+      closeCookie()
+    } else {
+      ElMessage.warning('Cookie 已提交，但平台验证未通过——请检查 Cookie 是否有效/完整')
+    }
+  } catch {
+    ElMessage.error('Cookie 提交失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(() => music.fetchPlatformStatus())
 onUnmounted(stopPolling)
 </script>
 
@@ -113,13 +160,10 @@ onUnmounted(stopPolling)
             {{ status[p.value]?.loggedIn ? `✓ ${status[p.value]?.nickname || '已登录'}` : '未登录' }}
           </span>
         </div>
-        <button
-          v-if="!status[p.value]?.loggedIn"
-          class="login-btn"
-          @click="startLogin(p)"
-        >
-          扫码登录
-        </button>
+        <div v-if="!status[p.value]?.loggedIn" class="login-actions">
+          <button class="login-btn" @click="startLogin(p)">扫码</button>
+          <button class="login-btn login-btn--ghost" @click="openCookie(p)">Cookie</button>
+        </div>
         <span v-else class="logged-dot" :style="{ background: p.color }"></span>
       </div>
     </div>
@@ -130,6 +174,24 @@ onUnmounted(stopPolling)
         <img :src="qrImg" class="qr-img" alt="二维码" />
         <p class="qr-tip">用 {{ platforms.find((p) => p.value === activePlatform)?.label }} APP 扫码登录</p>
         <button class="qr-close" @click="closeQr">取消</button>
+      </div>
+    </div>
+
+    <!-- Cookie 登录弹窗 -->
+    <div v-if="showCookie" class="qr-overlay" @click.self="closeCookie">
+      <div class="cookie-box">
+        <h3 class="cookie-title">{{ platforms.find((p) => p.value === cookiePlatform)?.label }} Cookie 登录</h3>
+        <p class="cookie-hint">
+          从浏览器登录后导出 Cookie 字符串（如
+          <span class="mono">SESSDATA=…; bili_jct=…</span>），粘贴到下方
+        </p>
+        <textarea v-model="cookieText" class="cookie-input" rows="5" :placeholder="cookiePlaceholder"></textarea>
+        <div class="cookie-actions">
+          <button class="qr-close" @click="closeCookie">取消</button>
+          <button class="cookie-submit" :disabled="!cookieText.trim() || loading" @click="submitCookie">
+            {{ loading ? '提交中…' : '提交并验证' }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -213,6 +275,81 @@ onUnmounted(stopPolling)
 .login-btn:hover {
   background: var(--color-primary);
   color: #fff;
+}
+.login-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.login-btn--ghost {
+  border-color: var(--border-emphasis);
+  color: var(--text-secondary);
+}
+.login-btn--ghost:hover {
+  background: var(--surface-4);
+  color: var(--text-primary);
+}
+
+/* Cookie 登录弹窗 */
+.cookie-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 22px;
+  width: 380px;
+  max-width: 90vw;
+}
+.cookie-title {
+  margin: 0 0 6px;
+  font-size: 0.95em;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.cookie-hint {
+  margin: 0 0 12px;
+  font-size: 0.72em;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.cookie-hint .mono {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-secondary);
+}
+.cookie-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--surface-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.74em;
+  resize: vertical;
+  outline: none;
+}
+.cookie-input:focus {
+  border-color: var(--color-primary);
+}
+.cookie-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+.cookie-submit {
+  padding: 5px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--gradient-brand);
+  color: var(--text-inverse);
+  font-size: 0.78em;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cookie-submit:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .logged-dot {

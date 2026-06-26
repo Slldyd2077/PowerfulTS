@@ -24,6 +24,7 @@ apiClient.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('session_token')
+      localStorage.removeItem('guest_session')
       window.location.href = '/login'
     }
     return Promise.reject(error)

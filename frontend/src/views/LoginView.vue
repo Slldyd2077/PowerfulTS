@@ -200,6 +200,12 @@ async function handleRegister() {
     loading.value = false
   }
 }
+
+/** 以游客身份进入（仅可访问监控面板） */
+function handleGuest() {
+  auth.enterAsGuest()
+  router.push('/')
+}
 </script>
 
 <template>
@@ -341,6 +347,20 @@ async function handleRegister() {
             </el-form>
           </div>
         </Transition>
+
+        <!-- 游客入口 -->
+        <div class="guest-entry field-group field-7">
+          <div class="divider-or">
+            <span class="divider-line"></span>
+            <span class="divider-text label-mono">或</span>
+            <span class="divider-line"></span>
+          </div>
+          <button class="guest-btn" @click="handleGuest">
+            <el-icon class="guest-icon"><View /></el-icon>
+            <span>以游客身份浏览</span>
+          </button>
+          <p class="guest-hint">仅可查看服务器监控面板</p>
+        </div>
       </div>
 
       <!-- 底部版权 -->
@@ -610,6 +630,7 @@ async function handleRegister() {
 .field-4 { animation-delay: 0.36s; }
 .field-5 { animation-delay: 0.43s; }
 .field-6 { animation-delay: 0.50s; }
+.field-7 { animation-delay: 0.57s; }
 
 @keyframes field-in {
   to {
@@ -718,6 +739,68 @@ async function handleRegister() {
 .code-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ── 游客入口 ── */
+.guest-entry {
+  margin-top: 30px;
+}
+
+.divider-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.divider-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+}
+
+.divider-text {
+  font-size: 0.72em;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+}
+
+.guest-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-secondary);
+  font-size: 0.9em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.25s var(--ease-out-expo), background 0.25s var(--ease-out-expo),
+    color 0.25s var(--ease-out-expo), box-shadow 0.25s var(--ease-out-expo);
+  font-family: inherit;
+}
+
+.guest-btn:hover {
+  border-color: rgba(0, 229, 255, 0.35);
+  background: rgba(0, 229, 255, 0.05);
+  color: var(--text-primary);
+  box-shadow: 0 0 18px rgba(0, 229, 255, 0.08);
+}
+
+.guest-icon {
+  font-size: 16px;
+}
+
+.guest-hint {
+  margin-top: 12px;
+  text-align: center;
+  font-size: 0.76em;
+  color: var(--text-muted);
+  opacity: 0.7;
 }
 
 /* ── 表单切换动画 ── */

@@ -15,12 +15,13 @@ async function handleLogout() {
 <template>
   <div class="user-avatar">
     <div class="user-info" v-if="auth.isLoggedIn">
-      <div class="avatar-circle">
+      <div class="avatar-circle" :class="{ 'avatar-circle--guest': auth.isGuest }">
         {{ auth.nickname.charAt(0) }}
       </div>
       <div class="user-meta">
         <span class="user-name">{{ auth.nickname }}</span>
         <span class="user-role label-mono" v-if="auth.isAdmin">管理员</span>
+        <span class="user-role label-mono user-role--guest" v-else-if="auth.isGuest">游客</span>
       </div>
     </div>
     <button class="logout-btn" @click="handleLogout" title="登出">
@@ -73,6 +74,16 @@ async function handleLogout() {
   font-size: 0.58em;
   color: var(--color-accent);
   letter-spacing: 0.12em;
+}
+
+.avatar-circle--guest {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--border-default);
+  color: var(--text-muted);
+}
+
+.user-role--guest {
+  color: var(--text-muted);
 }
 
 .logout-btn {
