@@ -157,6 +157,38 @@ usePolling(() => monitor.fetchStats(), 5000)
   }
   .dashboard-sidebar {
     width: 100%;
+    /* 纵向堆叠后限制高度，避免频道列表把页面撑得过长 */
+    max-height: 56vh;
+    overflow-y: auto;
+  }
+}
+
+/* 移动端：间距收缩、页头允许换行、标题流式缩放 */
+@media (max-width: 768px) {
+  .dashboard {
+    gap: 14px;
+  }
+  .dashboard-main {
+    gap: 14px;
+    padding-right: 0;
+  }
+  .dashboard-panels {
+    gap: 14px;
+  }
+  .page-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .page-title {
+    font-size: clamp(1.1em, 4vw, 1.4em);
+  }
+}
+
+/* 小屏：页头纵向堆叠，标题与实时状态上下排列 */
+@media (max-width: 480px) {
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 </style>

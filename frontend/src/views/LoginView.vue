@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { login as apiLogin, register as apiRegister, getClientIp, sendCode, checkBinding } from '@/api/auth'
+import { getIntroTracks, introStreamUrl, type IntroTrack } from '@/api/introMusic'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()
@@ -34,9 +35,63 @@ const canRegister = computed(() =>
 )
 
 // ── 音频频谱可视化 ──
+// 真实音频驱动（AnalyserNode）；无音乐或 AudioContext 尚未 running 时回退模拟律动。
+const BAR_COUNT = 48
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 let animFrameId = 0
 let bars: number[] = []
+let resizeHandler: (() => void) | null = null
+
+// Web Audio 图：source → analyser → gain → destination
+// analyser 位于 gain 之前，故静音（gain=0）时仍能拿到频率数据 → 频谱照常律动。
+// 每个 <audio> 元素只能 createMediaElementSource 一次 → 用单元素 + 改 src 切歌。
+let audioCtx: AudioContext | null = null
+let analyser: AnalyserNode | null = null
+let freqData: Uint8Array<ArrayBuffer> | null = null
+let gainNode: GainNode | null = null
+let sourceBound = false
+
+// 默认播放音量（背景音乐不宜过大，范围 0–1）
+const DEFAULT_VOLUME = 0.4
+// 音量持久化 key（localStorage）
+const VOLUME_KEY = 'intro_music_volume'
+
+/** 从 localStorage 读取上次音量，缺失 / 非法时回退默认值。 */
+function loadVolume(): number {
+  try {
+    const raw = localStorage.getItem(VOLUME_KEY)
+    if (raw == null) return DEFAULT_VOLUME
+    const v = Number(raw)
+    return Number.isFinite(v) && v >= 0 && v <= 1 ? v : DEFAULT_VOLUME
+  } catch {
+    return DEFAULT_VOLUME
+  }
+}
+
+/** 持久化音量到 localStorage（隐私模式等失败时静默忽略）。 */
+function persistVolume(v: number) {
+  try {
+    localStorage.setItem(VOLUME_KEY, String(v))
+  } catch {
+    /* ignore */
+  }
+}
+
+// 音频元素与播放状态
+const audioRef = ref<HTMLAudioElement | null>(null)
+const tracks = ref<IntroTrack[]>([])
+const currentTrack = ref<IntroTrack | null>(null)
+const hasRealAudio = ref(false) // AudioContext 进入 running → 频谱走真实数据
+const volume = ref(loadVolume()) // 意图音量 0–1（持久化）；0 视为静音
+let lastVolume = volume.value > 0 ? volume.value : DEFAULT_VOLUME // 静音前音量，用于恢复
+const muted = ref(false) // 当前是否静音（autoplay 兜底 / 用户手动静音 / 音量拖到 0）
+const soundHint = ref(false) // autoplay 兜底时提示「点此开声」
+
+/** 频谱高度倍率：以默认音量为基准（=1.0）；静音或音量为 0 时为 0（频谱贴底不动）。 */
+const spectrumScale = computed(() => {
+  if (muted.value || volume.value <= 0) return 0
+  return volume.value / DEFAULT_VOLUME
+})
 
 function initVisualizer() {
   const canvas = canvasRef.value
@@ -45,18 +100,17 @@ function initVisualizer() {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
 
-  const BAR_COUNT = 48
   bars = Array.from({ length: BAR_COUNT }, () => Math.random() * 0.3 + 0.1)
 
-  const resize = () => {
+  resizeHandler = () => {
     const rect = canvas.getBoundingClientRect()
     canvas.width = rect.width * devicePixelRatio
     canvas.height = rect.height * devicePixelRatio
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.scale(devicePixelRatio, devicePixelRatio)
   }
-
-  resize()
-  window.addEventListener('resize', resize)
+  resizeHandler()
+  window.addEventListener('resize', resizeHandler)
 
   const draw = () => {
     const w = canvas.getBoundingClientRect().width
@@ -66,12 +120,25 @@ function initVisualizer() {
 
     const gap = 3
     const barWidth = (w - gap * (BAR_COUNT - 1)) / BAR_COUNT
+    const a = analyser
+    const d = freqData
+    const real = hasRealAudio.value && a !== null && d !== null
+    if (real && a && d) a.getByteFrequencyData(d)
+
+    // 频谱整体按音量等比例缩放：默认音量(0.4)=1.0，往上更高，静音/0 贴底不动
+    const scale = spectrumScale.value
 
     for (let i = 0; i < BAR_COUNT; i++) {
-      // 有机的随机运动
-      const target = 0.08 + Math.random() * 0.55
-      bars[i] += (target - bars[i]) * 0.08 + (Math.random() - 0.5) * 0.02
-      bars[i] = Math.max(0.04, Math.min(0.85, bars[i]))
+      if (real && a && d) {
+        // 前 BAR_COUNT 个 FFT bin 归一化 × 音量倍率
+        const target = (d[i] / 255) * scale
+        bars[i] += (target - bars[i]) * 0.5
+      } else {
+        // 模拟律动（无音乐 / context 未 running 时降级）× 音量倍率
+        const target = (0.08 + Math.random() * 0.55) * scale
+        bars[i] += (target - bars[i]) * 0.08 + (Math.random() - 0.5) * 0.02 * scale
+      }
+      bars[i] = Math.max(0, Math.min(0.95, bars[i]))
 
       const barHeight = bars[i] * h * 0.7
       const x = i * (barWidth + gap)
@@ -99,19 +166,193 @@ function initVisualizer() {
   }
 
   draw()
-
-  onUnmounted(() => {
-    cancelAnimationFrame(animFrameId)
-    window.removeEventListener('resize', resize)
-  })
 }
 
-// ── 入场动画 ──
-onMounted(() => {
+/** 建立 Web Audio 图（每个 audio 元素仅一次）。 */
+function ensureAudioGraph() {
+  const audio = audioRef.value
+  if (!audio || sourceBound) return
+  const Ctor =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  if (!Ctor) return
+
+  audioCtx = new Ctor()
+  const src = audioCtx.createMediaElementSource(audio)
+  analyser = audioCtx.createAnalyser()
+  analyser.fftSize = 128 // frequencyBinCount = 64，取前 48
+  analyser.smoothingTimeConstant = 0.8
+  freqData = new Uint8Array(analyser.frequencyBinCount)
+  gainNode = audioCtx.createGain()
+  gainNode.gain.value = muted.value ? 0 : volume.value
+
+  src.connect(analyser)
+  analyser.connect(gainNode)
+  gainNode.connect(audioCtx.destination)
+  sourceBound = true
+
+  // context 进入 running（通常用户首次交互后）→ 频谱切真实律动
+  audioCtx.onstatechange = () => {
+    if (audioCtx?.state === 'running') hasRealAudio.value = true
+  }
+
+  // 监听首次任意交互，尽早 resume context（频谱更快开始真实律动，仍保持当前静音态）
+  document.addEventListener('pointerdown', onFirstInteraction, { once: true })
+  document.addEventListener('keydown', onFirstInteraction, { once: true })
+}
+
+function onFirstInteraction() {
+  audioCtx?.resume().catch(() => {})
+  document.removeEventListener('pointerdown', onFirstInteraction)
+  document.removeEventListener('keydown', onFirstInteraction)
+}
+
+/** 随机选曲（避免连续重复同一首）。 */
+function pickRandomTrack(exclude?: string | null): IntroTrack | null {
+  const pool = tracks.value
+  if (pool.length === 0) return null
+  if (pool.length === 1) return pool[0]
+  let next = pool[Math.floor(Math.random() * pool.length)]
+  if (next.filename === exclude) {
+    next = pool[(pool.indexOf(next) + 1) % pool.length]
+  }
+  return next
+}
+
+/** 切歌：改 src（不重建 audio 元素，保留已建的 source 节点）。 */
+function loadTrack(track: IntroTrack) {
+  const audio = audioRef.value
+  if (!audio) return
+  currentTrack.value = track
+  audio.src = introStreamUrl(track.filename)
+  audio.load()
+}
+
+/** 尝试播放并 resume context；返回是否成功（不抛错）。 */
+async function tryPlay(): Promise<boolean> {
+  const audio = audioRef.value
+  if (!audio) return false
+  try {
+    if (audioCtx?.state === 'suspended') await audioCtx.resume()
+    await audio.play()
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 播放结束 → 随机换下一首（切歌失败则静音兜底，避免频谱卡死，与 onMounted 三段式一致）。 */
+async function onTrackEnded() {
+  const next = pickRandomTrack(currentTrack.value?.filename ?? null)
+  if (!next) return
+  loadTrack(next)
+  const ok = await tryPlay()
+  if (!ok) {
+    if (gainNode) gainNode.gain.setValueAtTime(0, audioCtx?.currentTime ?? 0)
+    const a = audioRef.value
+    if (a) a.muted = true
+    await tryPlay()
+  }
+}
+
+/** 把 GainNode 平滑过渡到「当前应有效果音量」（muted ? 0 : volume）。 */
+function applyGain(duration = 0.15) {
+  if (!audioCtx || !gainNode) return
+  const now = audioCtx.currentTime
+  const target = muted.value ? 0 : volume.value
+  const g = gainNode.gain
+  g.cancelScheduledValues(now)
+  g.setValueAtTime(g.value, now)
+  g.linearRampToValueAtTime(target, now + duration)
+}
+
+/** 音量滑块输入：持久化 + 同步静音态 + 应用增益。 */
+function onVolumeInput() {
+  const v = volume.value
+  persistVolume(v)
+  if (v > 0) {
+    lastVolume = v
+    if (muted.value) {
+      muted.value = false
+      soundHint.value = false
+    }
+  } else {
+    muted.value = true
+  }
+  applyGain(0.1)
+}
+
+/** 静音 ↔ 开声切换（用 GainNode 做平滑淡入淡出）。 */
+async function toggleSound() {
+  const audio = audioRef.value
+  if (!audio) return
+  if (muted.value) {
+    // 开声：恢复上次音量并淡入
+    muted.value = false
+    soundHint.value = false
+    audio.muted = false
+    if (volume.value <= 0) {
+      volume.value = lastVolume || DEFAULT_VOLUME
+      persistVolume(volume.value)
+    }
+    if (audioCtx?.state === 'suspended') await audioCtx.resume()
+    await audio.play().catch(() => {})
+    applyGain(0.5)
+  } else {
+    // 静音：淡出
+    muted.value = true
+    applyGain(0.3)
+  }
+}
+
+// ── 入场动画 + 频谱 + 随机背景音乐 ──
+onMounted(async () => {
   requestAnimationFrame(() => {
     formVisible.value = true
   })
   initVisualizer()
+
+  // 加载曲目（失败 / 为空 → 频谱保持模拟律动）
+  try {
+    tracks.value = await getIntroTracks()
+  } catch {
+    tracks.value = []
+  }
+
+  const first = pickRandomTrack()
+  if (first && audioRef.value) {
+    ensureAudioGraph()
+    loadTrack(first)
+
+    // Autoplay 三段式：先试有声自动播放
+    muted.value = false
+    const ok = await tryPlay()
+    if (ok) {
+      // 有声播放成功（高 Media Engagement 用户 / 已交互）
+    } else {
+      // 浏览器拒绝有声 autoplay → 静音播放（频谱照常律动）+ 显示开声按钮
+      muted.value = true
+      soundHint.value = true
+      if (gainNode) gainNode.gain.setValueAtTime(0, audioCtx?.currentTime ?? 0)
+      audioRef.value.muted = true // 兜过浏览器 autoplay 策略
+      await tryPlay()
+    }
+  }
+})
+
+onUnmounted(() => {
+  cancelAnimationFrame(animFrameId)
+  if (resizeHandler) window.removeEventListener('resize', resizeHandler)
+  document.removeEventListener('pointerdown', onFirstInteraction)
+  document.removeEventListener('keydown', onFirstInteraction)
+  const audio = audioRef.value
+  if (audio) {
+    audio.pause()
+    audio.removeAttribute('src')
+    audio.load()
+  }
+  if (audioCtx) audioCtx.onstatechange = null
+  audioCtx?.close().catch(() => {})
 })
 
 /** 登录 */
@@ -200,12 +441,6 @@ async function handleRegister() {
     loading.value = false
   }
 }
-
-/** 以游客身份进入（仅可访问监控面板） */
-function handleGuest() {
-  auth.enterAsGuest()
-  router.push('/')
-}
 </script>
 
 <template>
@@ -217,6 +452,33 @@ function handleGuest() {
 
       <!-- 音频频谱 -->
       <canvas ref="canvasRef" class="spectrum-canvas"></canvas>
+
+      <!-- 开屏随机背景音乐（隐藏 audio 元素） -->
+      <audio ref="audioRef" class="intro-audio" preload="auto" @ended="onTrackEnded"></audio>
+
+      <!-- 静音 / 开声切换 + 悬停音量滑块 -->
+      <div v-if="tracks.length > 0" class="sound-control" :class="{ hint: soundHint }">
+        <button
+          class="sound-toggle"
+          :title="muted ? '点击开启声音' : '静音'"
+          @click="toggleSound"
+        >
+          <span class="sound-icon">{{ muted ? '🔇' : '🔊' }}</span>
+        </button>
+        <div class="volume-popover">
+          <input
+            v-model.number="volume"
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            class="volume-slider"
+            aria-label="背景音乐音量"
+            @input="onVolumeInput"
+          />
+          <span class="volume-value">{{ Math.round(volume * 100) }}</span>
+        </div>
+      </div>
 
       <!-- 品牌层 -->
       <div class="brand-layer">
@@ -347,20 +609,6 @@ function handleGuest() {
             </el-form>
           </div>
         </Transition>
-
-        <!-- 游客入口 -->
-        <div class="guest-entry field-group field-7">
-          <div class="divider-or">
-            <span class="divider-line"></span>
-            <span class="divider-text label-mono">或</span>
-            <span class="divider-line"></span>
-          </div>
-          <button class="guest-btn" @click="handleGuest">
-            <el-icon class="guest-icon"><View /></el-icon>
-            <span>以游客身份浏览</span>
-          </button>
-          <p class="guest-hint">仅可查看服务器监控面板</p>
-        </div>
       </div>
 
       <!-- 底部版权 -->
@@ -415,6 +663,132 @@ function handleGuest() {
   height: 55%;
   pointer-events: none;
   opacity: 0.85;
+}
+
+/* 隐藏的开屏背景音乐元素 */
+.intro-audio {
+  display: none;
+}
+
+/* 静音 / 开声按钮 + 悬停音量滑块容器 */
+.sound-control {
+  position: absolute;
+  left: 28px;
+  bottom: 28px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sound-toggle {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  background: rgba(6, 6, 16, 0.5);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.25s var(--ease-out-expo), box-shadow 0.25s var(--ease-out-expo), transform 0.2s var(--ease-out-expo);
+}
+
+.sound-toggle:hover {
+  border-color: rgba(0, 229, 255, 0.5);
+  box-shadow: 0 0 18px rgba(0, 229, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+.sound-toggle:active {
+  transform: translateY(0);
+}
+
+.sound-icon {
+  font-size: 1.05em;
+  line-height: 1;
+}
+
+/* 悬停弹出的音量滑块（按钮右侧） */
+.volume-popover {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: rgba(6, 6, 16, 0.6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 229, 255, 0.2);
+  border-radius: 100px;
+  opacity: 0;
+  transform: translateX(8px) scale(0.96);
+  transform-origin: left center;
+  pointer-events: none;
+  transition: opacity 0.2s var(--ease-out-expo), transform 0.2s var(--ease-out-expo);
+}
+
+.sound-control:hover .volume-popover {
+  opacity: 1;
+  transform: translateX(0) scale(1);
+  pointer-events: auto;
+}
+
+.volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 96px;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, rgba(0, 229, 255, 0.6), rgba(0, 229, 255, 0.15));
+  outline: none;
+  cursor: pointer;
+}
+
+.volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #00e5ff;
+  border: none;
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.6);
+  cursor: pointer;
+}
+
+.volume-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #00e5ff;
+  border: none;
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.6);
+  cursor: pointer;
+}
+
+.volume-value {
+  font-size: 0.72em;
+  color: var(--text-muted);
+  min-width: 26px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* autoplay 兜底态：按钮高亮脉动，提示用户点击开声 */
+.sound-control.hint .sound-toggle {
+  border-color: rgba(0, 229, 255, 0.55);
+  animation: sound-hint-pulse 2s ease-in-out infinite;
+}
+
+@keyframes sound-hint-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 18px 4px rgba(0, 229, 255, 0.2);
+  }
 }
 
 /* 品牌层 */
@@ -630,7 +1004,6 @@ function handleGuest() {
 .field-4 { animation-delay: 0.36s; }
 .field-5 { animation-delay: 0.43s; }
 .field-6 { animation-delay: 0.50s; }
-.field-7 { animation-delay: 0.57s; }
 
 @keyframes field-in {
   to {
@@ -739,68 +1112,6 @@ function handleGuest() {
 .code-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-}
-
-/* ── 游客入口 ── */
-.guest-entry {
-  margin-top: 30px;
-}
-
-.divider-or {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 18px;
-}
-
-.divider-line {
-  flex: 1;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
-}
-
-.divider-text {
-  font-size: 0.72em;
-  color: var(--text-muted);
-  letter-spacing: 0.1em;
-}
-
-.guest-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  height: 44px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.02);
-  color: var(--text-secondary);
-  font-size: 0.9em;
-  font-weight: 500;
-  cursor: pointer;
-  transition: border-color 0.25s var(--ease-out-expo), background 0.25s var(--ease-out-expo),
-    color 0.25s var(--ease-out-expo), box-shadow 0.25s var(--ease-out-expo);
-  font-family: inherit;
-}
-
-.guest-btn:hover {
-  border-color: rgba(0, 229, 255, 0.35);
-  background: rgba(0, 229, 255, 0.05);
-  color: var(--text-primary);
-  box-shadow: 0 0 18px rgba(0, 229, 255, 0.08);
-}
-
-.guest-icon {
-  font-size: 16px;
-}
-
-.guest-hint {
-  margin-top: 12px;
-  text-align: center;
-  font-size: 0.76em;
-  color: var(--text-muted);
-  opacity: 0.7;
 }
 
 /* ── 表单切换动画 ── */

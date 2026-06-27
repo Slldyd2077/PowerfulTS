@@ -72,3 +72,41 @@ async def delete_friend(
         return {"success": False, "error": "该用户不存在"}
     await svc.remove_relation(account.id, friend.id)
     return {"success": True}
+
+
+class FriendSettingsUpdate(BaseModel):
+    qq_number: str | None = Field(default=None, max_length=16)
+    notify_friends_online: bool | None = None
+
+
+@router.get("/friends/settings")
+async def get_friend_settings(
+    account: Account = Depends(get_current_account),
+):
+    """当前用户的好友上线提醒设置（QQ 绑定 + 开关）。"""
+    return {
+        "qq_number": account.qq_number or "",
+        "notify_friends_online": bool(account.notify_friends_online),
+    }
+
+
+@router.post("/friends/settings")
+async def update_friend_settings(
+    body: FriendSettingsUpdate,
+    account: Account = Depends(get_current_account),
+    db: AsyncSession = Depends(get_db),
+):
+    """更新好友上线提醒设置。QQ 号非空须为纯数字；空串→解绑(None)。"""
+    if body.qq_number is not None:
+        qq = body.qq_number.strip()
+        if qq == "":
+            account.qq_number = None
+        elif qq.isdigit():
+            account.qq_number = qq
+        else:
+            return {"success": False, "error": "QQ 号必须为纯数字"}
+        await db.commit()
+    if body.notify_friends_online is not None:
+        account.notify_friends_online = bool(body.notify_friends_online)
+        await db.commit()
+    return {"success": True}

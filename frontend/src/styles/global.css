@@ -267,4 +267,27 @@ body {
   }
 }
 
+/* ───────────────────────────────────────────────
+   移动端响应式适配（≤768px 主断点，≤480px 小屏精简）
+   桌面端（>768px）完全不受以下规则影响。
+   ─────────────────────────────────────────────── */
+
+/* 允许 pinch-zoom（可访问性，配合 index.html 移除 user-scalable=no），
+   仅禁用双击缩放，避免误触导致布局跳动 */
+body {
+  touch-action: manipulation;
+}
+
+/* Element Plus 弹窗在小屏自适应宽度：覆盖 width="400px" 等固定内联值，
+   解决对话框超屏（AddFriendDialog 等） */
+@media (max-width: 480px) {
+  .el-dialog {
+    width: 92% !important;
+    margin: 8vh auto !important;
+  }
+  .el-message-box {
+    width: 88% !important;
+  }
+}
+
 

@@ -280,4 +280,18 @@ function onPing(user: OnlineUser, index: number) {
   font-size: 0.76em;
   font-weight: 500;
 }
+
+/* 移动端：收缩内边距、缩窄列宽、隐藏迷你时长条，给昵称留空间 */
+@media (max-width: 768px) {
+  .panel { padding: 14px 14px 6px; }
+  .row { grid-template-columns: 1fr 84px 64px; gap: 8px; }
+  .time-bar-track { display: none; }
+}
+
+/* 小屏：隐藏游戏标签与频道列，保留昵称 + 时长 */
+@media (max-width: 480px) {
+  .game-tag { display: none; }
+  .row { grid-template-columns: 1fr auto; }
+  .col-channel { display: none; }
+}
 </style>

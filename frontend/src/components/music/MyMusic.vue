@@ -414,4 +414,11 @@ async function handlePlay(song: Song, queued = false) {
   background: var(--surface-3);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
+
+/* 移动端：平台 tab 允许换行、收缩展开歌曲的缩进 */
+@media (max-width: 768px) {
+  .panel { padding: 14px; }
+  .platform-tabs { flex-wrap: wrap; }
+  .playlist-songs { margin-left: 6px; padding-left: 8px; }
+}
 </style>

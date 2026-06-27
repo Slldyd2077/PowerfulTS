@@ -9,7 +9,7 @@ import logging
 import os
 from typing import AsyncIterator
 
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -70,12 +70,24 @@ async def get_db() -> AsyncIterator[AsyncSession]:
             raise
 
 
+async def _ensure_column(conn, table: str, column: str, ddl_type: str) -> None:
+    """幂等加列：内省现有列名，缺则 ALTER TABLE（SQLite 无 ADD COLUMN IF NOT EXISTS）。"""
+    rows = (await conn.execute(text(f"PRAGMA table_info({table})"))).fetchall()
+    existing = {str(r[1]) for r in rows}
+    if column not in existing:
+        await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))
+        logger.info("迁移: %s.%s 已加列", table, column)
+
+
 async def init_db() -> None:
     """启动时建表（幂等）。需在导入所有模型后调用。"""
     from .. import models  # noqa: F401  触发模型注册到 Base.metadata
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # 对已存在的库补新列（create_all 不改已存在表结构）
+        await _ensure_column(conn, "accounts", "qq_number", "VARCHAR(16)")
+        await _ensure_column(conn, "accounts", "notify_friends_online", "BOOLEAN DEFAULT 0 NOT NULL")
     # 日志只输出驱动名，避免切换 PG/MySQL 后连接串(含密码)落盘
     driver = settings.database_url.split("://")[0]
     logger.info("数据库初始化完成 (driver=%s)", driver)

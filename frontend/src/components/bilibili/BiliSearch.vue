@@ -186,4 +186,16 @@ async function handlePlay(bvid: string) {
 .loading {
   font-style: italic;
 }
+
+/* 移动端：收缩缩略图与内边距、结果随页面滚动 */
+@media (max-width: 768px) {
+  .panel { padding: 14px; }
+  .thumb-wrap { width: 104px; height: 58px; }
+  .results { max-height: none; }
+}
+
+@media (max-width: 480px) {
+  .thumb-wrap { width: 88px; height: 50px; }
+  .video-card { gap: 10px; padding: 6px; }
+}
 </style>

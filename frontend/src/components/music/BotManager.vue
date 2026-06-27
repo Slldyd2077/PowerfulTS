@@ -413,4 +413,10 @@ onMounted(() => music.fetchBots())
   cursor: pointer;
 }
 .submit-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* 移动端：加大按钮触摸区、列表行允许折行 */
+@media (max-width: 768px) {
+  .mini-btn { padding: 5px 10px; }
+  .bot-row { flex-wrap: wrap; }
+}
 </style>

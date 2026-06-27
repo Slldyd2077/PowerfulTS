@@ -690,4 +690,23 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
     opacity: 0.6;
   }
 }
+
+/* ── 移动端：封面 / 间距收缩 ── */
+@media (max-width: 768px) {
+  .player { padding: 14px; }
+  .np-hero { gap: 12px; }
+  .np-cover-wrap { width: 96px; height: 96px; }
+  .np-title { font-size: 1.04em; }
+  .scrubber { gap: 8px; }
+  .transport { gap: 14px; }
+  .queue-list { max-height: 280px; }
+}
+
+/* 小屏：进一步缩小封面、隐藏队列序号让位标题 */
+@media (max-width: 480px) {
+  .np-cover-wrap { width: 80px; height: 80px; }
+  .np-cover--fallback svg { width: 30px; height: 30px; }
+  .q-idx { display: none; }
+  .secondary { justify-content: center; }
+}
 </style>

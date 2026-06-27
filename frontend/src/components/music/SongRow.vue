@@ -134,4 +134,10 @@ function fmt(sec?: number): string {
   color: var(--text-inverse);
 }
 .act--play:hover { color: var(--text-inverse); border: none; filter: brightness(1.08); }
+
+/* 小屏：隐藏时长让位标题、放大操作按钮触摸区 */
+@media (max-width: 480px) {
+  .song-dur { display: none; }
+  .act { width: 36px; height: 36px; }
+}
 </style>

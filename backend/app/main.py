@@ -10,15 +10,18 @@ PowerfulTS 后端 — FastAPI
 原生数据层: SQLite + SQLAlchemy async (core.database)
 原生 TS3 监控: services.ts3_monitor (ServerQuery 长连接轮询)
 """
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import get_settings
-from .core.database import dispose_db, init_db
-from .routers import auth, bilibili, friends, monitor, music
+from .core.database import AsyncSessionLocal, dispose_db, init_db
+from .routers import auth, bilibili, friends, intro_music, monitor, music
 from .services.netease import NeteaseClient
+from .services.napcat_client import NapCatClient
+from .services.online_notifier import OnlineNotifier
 from .services.tsmusic_client import TSMusicClient
 from .services.ts3_monitor import TS3Monitor
 
@@ -27,11 +30,18 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期：原生数据层 + TS3 监控 + 多媒体代理客户端。"""
+    """应用生命周期：原生数据层 + TS3 监控 + 多媒体代理客户端 + NapCat 推送。"""
     # 原生数据层: 建表 (SQLite + SQLAlchemy async)
     await init_db()
+    # NapCat QQ 推送客户端 (好友上线提醒; 未配置则发送时优雅降级)
+    app.state.napcat = NapCatClient(settings.napcat_url, settings.napcat_token)
+    # 上线提醒编排器 (反查订阅者 → NapCat 发私聊)
+    app.state.online_notifier = OnlineNotifier(app.state.napcat, AsyncSessionLocal)
     # 原生 TS3 监控 (后台线程 ServerQuery 轮询; 未配置则优雅降级)
+    # 注入主 event loop + notifier，使监控线程能把上线事件投递回 async 主循环
     app.state.ts3_monitor = TS3Monitor(settings)
+    app.state.ts3_monitor.set_loop(asyncio.get_running_loop())
+    app.state.ts3_monitor.set_notifier(app.state.online_notifier)
     app.state.ts3_monitor.start()
     # 网易云音乐 API 客户端 (本地 NeteaseCloudMusicApi 服务, 账号/歌单)
     app.state.netease = NeteaseClient(settings.netease_api_url)
@@ -43,6 +53,7 @@ async def lifespan(app: FastAPI):
         app.state.ts3_monitor.stop()
         await app.state.netease.close()
         await app.state.tsmusic.close()
+        await app.state.napcat.close()
         await dispose_db()
 
 
@@ -70,6 +81,8 @@ app.include_router(monitor.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 # 原生好友：/api/friends/*
 app.include_router(friends.router, prefix="/api")
+# 开屏背景音乐：/api/intro-music/* (本地音乐目录扫描 + 流式, 登录页随机播放 + 真实频谱)
+app.include_router(intro_music.router, prefix="/api")
 
 
 # ─────────────────────────────────────────────────────

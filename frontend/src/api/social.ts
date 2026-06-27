@@ -28,3 +28,20 @@ export async function deleteFriend(friendTsNickname: string) {
   const { data } = await apiClient.post('/friends/delete', { friend_ts_nickname: friendTsNickname })
   return data
 }
+
+export interface FriendSettings {
+  qq_number: string
+  notify_friends_online: boolean
+}
+
+/** 获取好友上线提醒设置（QQ 绑定 + 开关） */
+export async function getFriendSettings(): Promise<FriendSettings> {
+  const { data } = await apiClient.get('/friends/settings')
+  return data
+}
+
+/** 更新好友上线提醒设置 */
+export async function updateFriendSettings(payload: Partial<FriendSettings>) {
+  const { data } = await apiClient.post('/friends/settings', payload)
+  return data
+}

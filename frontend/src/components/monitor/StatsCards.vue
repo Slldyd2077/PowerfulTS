@@ -154,6 +154,16 @@ function formatTime(seconds: number): string {
   }
 }
 
+/* 小屏：卡片单列堆叠，数值字号略缩防溢出 */
+@media (max-width: 480px) {
+  .stats-row {
+    grid-template-columns: 1fr;
+  }
+  .stat-value {
+    font-size: 1.7em;
+  }
+}
+
 .stat-card {
   position: relative;
   background: var(--gradient-surface);

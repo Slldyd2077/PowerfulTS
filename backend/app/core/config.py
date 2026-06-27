@@ -48,6 +48,10 @@ class Settings:
     tsmusic_password: str
     tsmusic_bot_id: str
 
+    # ── NapCat QQ 机器人 (HTTP API, 好友上线提醒推送; 未配置则不推送) ──
+    napcat_url: str
+    napcat_token: str
+
     # ── CORS 允许的前端来源 (逗号分隔; 生产改为实际域名) ──
     cors_origins: list[str]
 
@@ -68,6 +72,8 @@ def get_settings() -> Settings:
         tsmusic_user=os.environ.get("TSMUSIC_USER", ""),
         tsmusic_password=os.environ.get("TSMUSIC_PASSWORD", ""),
         tsmusic_bot_id=os.environ.get("TSMUSIC_BOT_ID", ""),
+        napcat_url=os.environ.get("NAPCAT_URL", "http://127.0.0.1:3000"),
+        napcat_token=os.environ.get("NAPCAT_TOKEN", ""),
         cors_origins=_parse_origins(
             os.environ.get("CORS_ORIGINS", "http://localhost:5173")
         ),

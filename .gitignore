@@ -24,6 +24,7 @@ Thumbs.db
 
 # Node.js
 node_modules/
+frontend/.vite/
 
 # 临时工作文件 (如 TS3AudioBot 插件下载/解包, 截图验证等, 勿提交)
 .tmp_*
@@ -33,3 +34,9 @@ node_modules/
 *.db-journal
 *.db-wal
 *.db-shm
+
+# 开屏背景音乐：忽略用户放入的音频文件，仅保留 .gitkeep / README.md 占位
+# （防止版权音频或其他不应公开的文件被提交到仓库）
+backend/data/intro-music/*
+!backend/data/intro-music/.gitkeep
+!backend/data/intro-music/README.md

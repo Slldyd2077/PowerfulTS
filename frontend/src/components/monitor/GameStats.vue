@@ -210,4 +210,10 @@ function percent(count: number): number {
   font-size: 0.84em;
   color: var(--text-primary);
 }
+
+/* 小屏：隐藏进度条列，保留排名 / 游戏名 / 人数 */
+@media (max-width: 480px) {
+  .row { grid-template-columns: 26px 1fr 34px; gap: 8px; }
+  .col-bar { display: none; }
+}
 </style>

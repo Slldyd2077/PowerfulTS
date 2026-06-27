@@ -522,4 +522,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
   padding: 36px;
   font-size: 0.86em;
 }
+
+/* 移动端：平台 tab 允许换行、结果随页面滚动（避免嵌套双滚动区） */
+@media (max-width: 768px) {
+  .panel { padding: 14px; }
+  .platform-tabs { flex-wrap: wrap; }
+  .results { max-height: none; }
+}
 </style>

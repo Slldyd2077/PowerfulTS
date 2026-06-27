@@ -1,0 +1,2 @@
+# 占位文件：保留 backend/data/intro-music/ 目录到 git。
+# 把音频文件（.mp3/.wav/.ogg/.m4a/.flac/.aac）放进本目录，登录页开屏会随机播放。

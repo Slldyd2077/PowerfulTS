@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import FriendsList from '@/components/social/FriendsList.vue'
 import AddFriendDialog from '@/components/social/AddFriendDialog.vue'
+import FriendNotifySettings from '@/components/social/FriendNotifySettings.vue'
 
 const showAddFriend = ref(false)
 </script>
@@ -22,6 +23,7 @@ const showAddFriend = ref(false)
           添加好友
         </el-button>
       </div>
+      <FriendNotifySettings />
     </div>
 
     <AddFriendDialog v-model:visible="showAddFriend" />
@@ -73,5 +75,17 @@ const showAddFriend = ref(false)
 
 .add-friend-btn {
   width: 100%;
+}
+
+/* 移动端：间距收缩、标题流式缩放、添加好友按钮加大触摸区 */
+@media (max-width: 768px) {
+  .friends-view { gap: 14px; }
+  .page-title {
+    font-size: clamp(1.1em, 4vw, 1.4em);
+  }
+  .add-friend-btn {
+    min-height: 44px;
+    font-size: 0.9em;
+  }
 }
 </style>

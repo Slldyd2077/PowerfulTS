@@ -69,4 +69,14 @@ import MyMusic from '@/components/music/MyMusic.vue'
   .music-grid { grid-template-columns: 1fr; }
   .music-side { position: static; }
 }
+
+/* 移动端：间距收缩、标题流式缩放 */
+@media (max-width: 768px) {
+  .music-view { gap: 14px; }
+  .music-grid { gap: 14px; }
+  .music-main { gap: 14px; }
+  .page-title {
+    font-size: clamp(1.1em, 4vw, 1.4em);
+  }
+}
 </style>

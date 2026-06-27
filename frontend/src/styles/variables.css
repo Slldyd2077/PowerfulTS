@@ -85,6 +85,12 @@
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
+  /* ── 响应式断点约定（仅作文档锚点：CSS @media 不支持 var()，
+     JS 侧单一数据源见 composables/useBreakpoint.ts 的 BREAKPOINTS）──
+     1100px 平板：多栏 → 单栏
+      768px 移动端主断点：侧栏抽屉化、布局转纵向、触摸目标 ≥44px
+      480px 小屏：字号缩小、隐藏次要元素 ── */
+
   /* ── 兼容旧变量 ── */
   --bg-primary: var(--surface-1);
   --bg-secondary: var(--surface-2);

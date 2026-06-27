@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onBeforeUnmount } from 'vue'
 import { getFriends, deleteFriend, type Friend } from '@/api/social'
 import { usePolling } from '@/composables/usePolling'
+import { useBreakpoint } from '@/composables/useBreakpoint'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+const { isMobile } = useBreakpoint()
 const friends = ref<Friend[]>([])
 const loggedIn = ref(false)
 
@@ -26,13 +28,41 @@ async function handleDelete(friend: Friend) {
       '删除好友',
       { type: 'warning' },
     )
+  } catch {
+    return // 用户取消确认
+  }
+  try {
     await deleteFriend(friend.ts_nickname)
     ElMessage.success('已删除好友')
     await fetchFriends()
-  } catch {
-    // 取消或失败
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '删除好友失败')
   }
 }
+
+/* 移动端长按删除：按住约 550ms 触发，移动 / 抬起 / 离开则取消（无悬空定时器） */
+const pressingName = ref<string | null>(null)
+let pressTimer: number | null = null
+
+function startPress(friend: Friend) {
+  if (!isMobile.value) return
+  pressingName.value = friend.ts_nickname
+  pressTimer = window.setTimeout(() => {
+    pressingName.value = null
+    pressTimer = null
+    handleDelete(friend)
+  }, 550)
+}
+function cancelPress() {
+  if (pressTimer !== null) {
+    clearTimeout(pressTimer)
+    pressTimer = null
+  }
+  pressingName.value = null
+}
+onBeforeUnmount(() => {
+  if (pressTimer !== null) clearTimeout(pressTimer)
+})
 </script>
 
 <template>
@@ -58,7 +88,12 @@ async function handleDelete(friend: Friend) {
         v-for="friend in friends"
         :key="friend.ts_nickname"
         class="friend-item"
+        :class="{ pressing: pressingName === friend.ts_nickname }"
         @contextmenu.prevent="handleDelete(friend)"
+        @touchstart.passive="startPress(friend)"
+        @touchend="cancelPress"
+        @touchmove="cancelPress"
+        @touchcancel="cancelPress"
       >
         <div class="friend-avatar">{{ friend.ts_nickname.charAt(0) }}</div>
         <div class="friend-info">
@@ -78,7 +113,7 @@ async function handleDelete(friend: Friend) {
       </div>
     </div>
 
-    <p class="hint mono">右键点击好友可删除</p>
+    <p class="hint mono">{{ isMobile ? '长按好友可删除' : '右键点击好友可删除' }}</p>
   </div>
 </template>
 
@@ -240,5 +275,18 @@ async function handleDelete(friend: Friend) {
   font-size: 0.62em;
   color: var(--text-muted);
   letter-spacing: 0.06em;
+}
+
+/* 移动端：长按删除的红色渐变反馈 + 禁用系统长按选区菜单 */
+.friend-item.pressing {
+  background: rgba(248, 113, 113, 0.12);
+}
+@media (max-width: 768px) {
+  .friend-item,
+  .friend-item * {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
 }
 </style>

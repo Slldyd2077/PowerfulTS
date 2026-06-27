@@ -398,4 +398,10 @@ onUnmounted(stopPolling)
   font-size: 0.78em;
   cursor: pointer;
 }
+
+/* 移动端：加大登录按钮触摸区、行允许折行 */
+@media (max-width: 768px) {
+  .login-btn { padding: 5px 12px; }
+  .platform-row { flex-wrap: wrap; }
+}
 </style>

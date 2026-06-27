@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..core.database import Base
@@ -24,6 +24,9 @@ class Account(Base):
     locked_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     netease_cookie: Mapped[str | None] = mapped_column(Text, nullable=True)
     netease_uid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # QQ 绑定 + 好友上线提醒开关（NapCat 推送用）
+    qq_number: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    notify_friends_online: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
