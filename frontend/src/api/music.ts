@@ -113,6 +113,12 @@ export async function removeQueueItem(index: number, botId?: string) {
   return data
 }
 
+/** 跳转到队列指定位置播放（0-based 索引，不清空队列） */
+export async function playQueueAt(index: number, botId?: string) {
+  const { data } = await apiClient.post(`/music/queue/${index}/play`, undefined, botId ? { params: { botId } } : undefined)
+  return data
+}
+
 // ───────────────────────── bot 实例管理 ─────────────────────────
 
 /** bot 实例信息（后端归一化后） */

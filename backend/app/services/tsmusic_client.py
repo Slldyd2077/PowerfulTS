@@ -250,6 +250,12 @@ class TSMusicClient:
         resp = await self._http.delete(f"/api/player/{self._bid(bot_id)}/queue/{index + 1}")
         return self._json(resp)
 
+    async def play_at(self, index: int, bot_id: str | None = None) -> dict:
+        """跳转到队列指定位置播放（不清空队列）。上游 play-at 用 0-based 数组索引，与前端一致，无需转换。"""
+        await self._ensure_login()
+        resp = await self._http.post(f"/api/player/{self._bid(bot_id)}/play-at", json={"index": index})
+        return self._json(resp)
+
     # ───────────────────────── 状态 ─────────────────────────
 
     async def get_bot_status(self, bot_id: str | None = None) -> dict:

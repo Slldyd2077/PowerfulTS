@@ -14,6 +14,7 @@ import {
   getNowplaying as apiGetNowplaying,
   getQueue as apiGetQueue,
   removeQueueItem as apiRemoveQueueItem,
+  playQueueAt as apiPlayQueueAt,
   getAuthStatus as apiGetAuthStatus,
   getMyPlaylists as apiGetMyPlaylists,
   getPlaylistSongs as apiGetPlaylistSongs,
@@ -169,6 +170,15 @@ export const useMusicStore = defineStore('music', () => {
   async function removeQueueAt(index: number) {
     await apiRemoveQueueItem(index, activeBotId.value)
     await fetchQueue()
+  }
+
+  /** 跳转到队列指定位置播放（点击队列项切歌） */
+  async function playQueueAt(index: number) {
+    const res = await apiPlayQueueAt(index, activeBotId.value)
+    if (res?.error) throw new Error(typeof res.error === 'string' ? res.error : '切换失败')
+    await fetchNowplaying()
+    await fetchQueue()
+    return res
   }
 
   /** 当前播放 */
@@ -419,6 +429,7 @@ export const useMusicStore = defineStore('music', () => {
     updateVolume,
     clear,
     removeQueueAt,
+    playQueueAt,
     setMode,
     fetchNowplaying,
     fetchQueue,

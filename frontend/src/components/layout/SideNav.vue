@@ -21,6 +21,11 @@ const activeIndex = computed(() => {
 })
 
 function navigate(key: string) {
+  // 游客受限功能 → 跳登录页（保留游客态；登录成功后由 setToken 升级为真实用户）
+  if (auth.isGuest && (key === 'music' || key === 'friends')) {
+    router.push('/login')
+    return
+  }
   if (key === 'dashboard') router.push('/')
   else if (key === 'music') router.push('/music')
   else if (key === 'friends') router.push('/friends')
@@ -55,14 +60,16 @@ function navigate(key: string) {
         <span>服务器监控</span>
       </el-menu-item>
 
-      <el-menu-item v-if="!auth.isGuest" index="music">
+      <el-menu-item index="music" :class="{ 'guest-locked': auth.isGuest }">
         <el-icon><Headset /></el-icon>
         <span>音乐控制</span>
+        <span v-if="auth.isGuest" class="lock-hint label-mono">登录后查看</span>
       </el-menu-item>
 
-      <el-menu-item v-if="!auth.isGuest" index="friends">
+      <el-menu-item index="friends" :class="{ 'guest-locked': auth.isGuest }">
         <el-icon><User /></el-icon>
         <span>好友列表</span>
+        <span v-if="auth.isGuest" class="lock-hint label-mono">登录后查看</span>
       </el-menu-item>
     </el-menu>
 
@@ -120,6 +127,32 @@ function navigate(key: string) {
 .nav-menu {
   flex: 1;
   padding: 8px 10px;
+}
+
+/* 游客受限菜单项：置灰 + 删除线 + 登录后查看 */
+.guest-locked {
+  opacity: 0.55;
+  transition: opacity 0.2s;
+}
+
+.guest-locked :deep(span:first-of-type) {
+  text-decoration: line-through;
+  text-decoration-color: rgba(248, 113, 113, 0.45);
+  text-decoration-thickness: 1.5px;
+}
+
+.guest-locked:hover {
+  opacity: 0.8;
+  background: rgba(248, 113, 113, 0.04) !important;
+}
+
+.lock-hint {
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: 0.5em;
+  color: var(--color-danger);
+  opacity: 0.9;
+  white-space: nowrap;
 }
 
 .nav-footer {

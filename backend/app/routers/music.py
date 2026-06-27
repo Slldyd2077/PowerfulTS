@@ -152,6 +152,20 @@ async def remove_from_queue(
     return await tsmusic.remove_from_queue(index, bot_id=bot_id)
 
 
+@router.post("/queue/{index}/play")
+async def play_at(
+    index: Annotated[int, Path(ge=0)],
+    tsmusic: TsmusicDep,
+    _account: AccountDep,
+    bot_id: BotIdQuery = None,
+):
+    """跳转到队列中指定位置播放（点击队列项切歌；index 越界或不可播时 400）。"""
+    result = await tsmusic.play_at(index, bot_id=bot_id)
+    if isinstance(result, dict) and result.get("error"):
+        raise HTTPException(status_code=400, detail=str(result["error"]))
+    return result
+
+
 # ───────────────────────── 我的音乐 / 歌单 ─────────────────────────
 
 

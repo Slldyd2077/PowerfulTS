@@ -243,9 +243,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
   transform: scale(0.96);
 }
 .platform-tab.active {
-  background: var(--surface-4);
-  border-color: var(--border-emphasis);
-  color: var(--text-primary);
+  background: rgba(var(--color-primary-rgb), 0.12);
+  border-color: rgba(var(--color-primary-rgb), 0.45);
+  color: var(--color-primary);
+  font-weight: 600;
 }
 
 /* ── 一体化搜索栏 ── */
@@ -472,7 +473,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
   transition: opacity 0.15s;
 }
 .song-item:hover .song-actions,
-.song-item:focus-within .song-actions {
+.song-item:has(:focus-visible) .song-actions {
   opacity: 1;
 }
 @media (hover: none) {

@@ -278,7 +278,12 @@ async function handlePlay(song: Song, queued = false) {
   white-space: nowrap;
 }
 .platform-tab:hover { background: var(--surface-4); color: var(--text-primary); }
-.platform-tab.active { background: var(--surface-4); border-color: var(--border-emphasis); color: var(--text-primary); }
+.platform-tab.active {
+  background: rgba(var(--color-primary-rgb), 0.12);
+  border-color: rgba(var(--color-primary-rgb), 0.45);
+  color: var(--color-primary);
+  font-weight: 600;
+}
 .platform-tab.disabled { opacity: 0.45; cursor: not-allowed; }
 .platform-tab.disabled:hover { background: transparent; color: var(--text-muted); }
 .pt-lock { font-size: 0.85em; color: var(--text-muted); }
@@ -357,6 +362,7 @@ async function handlePlay(song: Song, queued = false) {
 }
 .playlist-row:hover { background: var(--surface-4); }
 .playlist-row.expanded { background: var(--surface-4); }
+.playlist-row.expanded .pl-name { color: var(--color-primary); }
 .pl-cover {
   width: 40px;
   height: 40px;
@@ -401,5 +407,11 @@ async function handlePlay(song: Song, queued = false) {
   transform: rotate(-90deg);
 }
 .pl-arrow.open { transform: rotate(0); }
-.playlist-songs { padding: 0 0 4px; }
+.playlist-songs {
+  margin: 4px 0 8px 12px;
+  padding: 6px 4px 6px 12px;
+  border-left: 2px solid var(--color-primary);
+  background: var(--surface-3);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
 </style>

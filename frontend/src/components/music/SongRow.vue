@@ -111,7 +111,7 @@ function fmt(sec?: number): string {
   transition: opacity 0.15s;
 }
 .song-item:hover .song-actions,
-.song-item:focus-within .song-actions { opacity: 1; }
+.song-item:has(:focus-visible) .song-actions { opacity: 1; }
 @media (hover: none) { .song-actions { opacity: 1; } }
 .act {
   width: 32px;

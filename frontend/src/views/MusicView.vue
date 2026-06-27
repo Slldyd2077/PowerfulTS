@@ -63,7 +63,7 @@ import MyMusic from '@/components/music/MyMusic.vue'
   flex-direction: column;
   gap: 20px;
 }
-.music-side { position: sticky; top: 0; }
+.music-side { position: sticky; top: 0; display: flex; flex-direction: column; gap: 16px; }
 
 @media (max-width: 1100px) {
   .music-grid { grid-template-columns: 1fr; }

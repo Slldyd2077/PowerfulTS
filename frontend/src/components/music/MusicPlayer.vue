@@ -99,6 +99,7 @@ async function handleNext() { try { await music.next() } catch { ElMessage.error
 async function handleStop() { try { await music.stop() } catch { ElMessage.error('操作失败') } }
 async function handleClear() { try { await music.clear(); ElMessage.success('已清空队列') } catch {} }
 async function handleRemove(index: number) { try { await music.removeQueueAt(index) } catch { ElMessage.error('移除失败') } }
+async function handlePlayAt(index: number) { try { await music.playQueueAt(index) } catch { ElMessage.error('切换失败') } }
 
 // 播放模式：单控件循环切换
 const MODES = [
@@ -234,6 +235,8 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
           :key="(item.platform || '') + ':' + (item.id || i)"
           class="queue-item row-scan"
           :class="{ current: isCurrent(item) }"
+          :title="isCurrent(item) ? '正在播放' : '点击播放此曲'"
+          @click="handlePlayAt(i)"
         >
           <span class="q-idx mono">{{ String(i + 1).padStart(2, '0') }}</span>
           <img v-if="item.coverUrl && !brokenCovers.has(item.coverUrl)" :src="item.coverUrl" class="q-cover" referrerpolicy="no-referrer" @error="onCoverError(item.coverUrl)" />
@@ -244,9 +247,9 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
             <span class="q-name">{{ item.name }}</span>
             <span class="q-artist">{{ item.artist }}</span>
           </div>
-          <EqualizerBars v-if="isCurrent(item)" class="q-eq" :active="true" />
+          <EqualizerBars v-if="isCurrent(item)" class="q-eq" :active="isPlaying" />
           <span v-else-if="item.duration" class="q-dur mono">{{ fmt(item.duration) }}</span>
-          <button class="q-remove" title="移除" @click="handleRemove(i)">
+          <button class="q-remove" title="移除" @click.stop="handleRemove(i)">
             <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
           </button>
         </div>
@@ -589,6 +592,7 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border-subtle);
   transition: background 0.15s;
+  cursor: pointer;
 }
 .queue-item:last-child {
   border-bottom: none;
@@ -674,7 +678,7 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
   height: 14px;
 }
 .queue-item:hover .q-remove,
-.queue-item:focus-within .q-remove {
+.queue-item:has(:focus-visible) .q-remove {
   opacity: 1;
 }
 .q-remove:hover {

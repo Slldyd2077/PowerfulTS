@@ -29,6 +29,17 @@ function statusText(s: string): string {
   return s === 'connected' ? '已连接' : '离线'
 }
 
+// active 实例下拉开关（自建，避免原生 <select> 弹层古老）
+const botMenuOpen = ref(false)
+async function chooseBot(id: string) {
+  botMenuOpen.value = false
+  try {
+    await music.setActiveBot(id)
+  } catch {
+    ElMessage.error('切换 Bot 失败')
+  }
+}
+
 function resetForm() {
   form.value = {
     name: '', nickname: 'PowerfulTS', serverAddress: 'host.docker.internal',
@@ -107,16 +118,47 @@ onMounted(() => music.fetchBots())
       </div>
     </div>
 
-    <!-- active 选择器 -->
+    <!-- active 选择器（自建下拉，避免原生 <select> 弹层古老） -->
     <div v-if="hasBots" class="active-select">
-      <span class="status-dot" :class="music.activeBot?.status === 'connected' ? 'dot-on' : 'dot-off'"></span>
-      <select
-        class="bot-select"
-        :value="music.activeBotId"
-        @change="music.setActiveBot(($event.target as HTMLSelectElement).value)"
+      <button
+        type="button"
+        class="bot-trigger"
+        :class="{ open: botMenuOpen }"
+        aria-haspopup="listbox"
+        :aria-expanded="botMenuOpen"
+        @click="botMenuOpen = !botMenuOpen"
+        @keydown.esc="botMenuOpen = false"
       >
-        <option v-for="b in bots" :key="b.id" :value="b.id">{{ b.name }} · {{ statusText(b.status) }}</option>
-      </select>
+        <span class="status-dot" :class="music.activeBot?.status === 'connected' ? 'dot-on' : 'dot-off'"></span>
+        <span class="bot-trigger-text">
+          {{ music.activeBot?.name || '选择 Bot' }}
+          <span class="bot-trigger-status">· {{ statusText(music.activeBot?.status || '') }}</span>
+        </span>
+        <svg class="bot-chev" :class="{ open: botMenuOpen }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6" /></svg>
+      </button>
+
+      <transition name="bot-menu">
+        <div v-if="botMenuOpen" class="bot-menu" role="listbox">
+          <button
+            v-for="b in bots"
+            :key="b.id"
+            type="button"
+            class="bot-option"
+            :class="{ active: b.id === music.activeBotId }"
+            role="option"
+            :aria-selected="b.id === music.activeBotId"
+            @click="chooseBot(b.id)"
+          >
+            <span class="bot-dot" :class="b.status === 'connected' ? 'dot-on' : 'dot-off'"></span>
+            <span class="bot-option-name">{{ b.name }}</span>
+            <span class="bot-option-status">{{ statusText(b.status) }}{{ b.playing ? ' · 播放中' : '' }}</span>
+            <svg v-if="b.id === music.activeBotId" class="bot-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7" /></svg>
+          </button>
+        </div>
+      </transition>
+
+      <!-- 透明遮罩：点击外部收起 -->
+      <div v-if="botMenuOpen" class="bot-backdrop" @click="botMenuOpen = false"></div>
     </div>
 
     <!-- 列表 -->
@@ -203,20 +245,77 @@ onMounted(() => music.fetchBots())
 .panel-title { font-size: 0.8em; font-weight: 600; color: var(--text-secondary); margin: 0; }
 .panel-sub { font-size: 0.66em; color: var(--text-muted); }
 
-.active-select { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.bot-select {
+.active-select { position: relative; display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+
+/* 触发器 */
+.bot-trigger {
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
   background: var(--surface-3);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
-  padding: 5px 8px;
+  padding: 6px 9px;
   color: var(--text-primary);
   font-size: 0.78em;
   font-family: inherit;
-  outline: none;
+  cursor: pointer;
+  transition: border-color 0.18s var(--ease-out-expo), box-shadow 0.18s;
 }
-.bot-select:focus { border-color: var(--color-primary); }
+.bot-trigger:hover { border-color: var(--border-emphasis); }
+.bot-trigger.open { border-color: var(--color-primary); box-shadow: var(--glow-primary); }
+.bot-trigger-text { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bot-trigger-status { color: var(--text-muted); }
+.bot-chev { width: 14px; height: 14px; flex-shrink: 0; color: var(--text-muted); transition: transform 0.18s var(--ease-out-expo), color 0.18s; }
+.bot-chev.open { transform: rotate(180deg); color: var(--color-primary); }
+
+/* 弹层 */
+.bot-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+}
+.bot-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.76em;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s;
+}
+.bot-option:hover { background: var(--surface-4); color: var(--text-primary); }
+.bot-option.active { background: rgba(45, 212, 191, 0.12); color: var(--color-primary); }
+.bot-option-name { font-weight: 600; }
+.bot-option-status { margin-left: auto; color: var(--text-muted); font-size: 0.92em; }
+.bot-option.active .bot-option-status { color: var(--color-primary); opacity: 0.8; }
+.bot-check { width: 14px; height: 14px; flex-shrink: 0; }
+
+/* 点击外部收起的透明遮罩（在弹层之下） */
+.bot-backdrop { position: fixed; inset: 0; z-index: 40; }
+
+/* 弹层进出过渡 */
+.bot-menu-enter-from { opacity: 0; transform: translateY(-4px); }
+.bot-menu-enter-active,
+.bot-menu-leave-active { transition: opacity 0.15s var(--ease-out-expo), transform 0.15s var(--ease-out-expo); }
+.bot-menu-leave-to { opacity: 0; transform: translateY(-4px); }
 
 .status-dot,
 .bot-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
