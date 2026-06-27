@@ -1,0 +1,29 @@
+# commitizen 配置 — PowerfulTS 单一版本管理
+#
+# 发版流程（在仓库根目录）：
+#   cz bump                 # 按 conventional commits 自动判定升 patch/minor/major，
+#                           # 同步下方所有 version_files，更新 CHANGELOG.md，并打 git tag
+#   cz bump --dry-run       # 预演：只打印将要发生什么，不改文件不打卡
+#   cz bump --patch         # 强制只升 patch
+#
+# 安装 commitizen（任选其一）：
+#   uv tool install commitizen        # 推荐（与项目 Python 工具链一致）
+#   pipx install commitizen
+#   pip install --user commitizen
+#
+# 约定：提交信息用 feat:/fix:/docs:/refactor: 等前缀，cz bump 会据此判定版本变化。
+[tool.commitizen]
+name = "cz_conventional_commits"
+version = "0.3.0"
+version_files = [
+  "pyproject.toml:version",
+  "backend/pyproject.toml:version",
+  "backend/app/_version.py:__version__",
+  "frontend/package.json:version",
+]
+tag_format = "v$version"
+update_changelog_on_bump = true
+annotated_tag = true
+# 当前处于 0.x 阶段：major_version_zero 让 feat 只升 minor、不兼容改动也只升 minor，
+# 避免首次 feat 把版本直接顶到 1.0.0（遵循 SemVer 0.y.z 惯例）。
+major_version_zero = true

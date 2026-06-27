@@ -12,6 +12,9 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
+// 应用版本号：构建时由 vite define 从 package.json 注入（version.d.ts 提供类型）
+const appVersion = __APP_VERSION__
+
 // 当前激活的菜单项（与 menu-item index 对应）
 const activeIndex = computed(() => {
   if (route.path === '/') return 'dashboard'
@@ -76,7 +79,7 @@ function navigate(key: string) {
     <!-- 底部 -->
     <div class="nav-footer">
       <div class="footer-line"></div>
-      <span class="version">v1.1.0</span>
+      <span class="version">v{{ appVersion }}</span>
     </div>
   </nav>
 </template>

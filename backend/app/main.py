@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from ._version import __version__
 from .core.config import get_settings
 from .core.database import AsyncSessionLocal, dispose_db, init_db
 from .routers import auth, bilibili, friends, intro_music, monitor, music
@@ -59,7 +60,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="PowerfulTS Backend",
-    version="2.0.0",
+    version=__version__,
     description="TS3 监控面板后端 — 原生 TS3 直连 + TSMusicBot 多媒体代理",
     lifespan=lifespan,
 )
