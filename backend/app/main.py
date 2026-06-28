@@ -11,6 +11,7 @@ PowerfulTS 后端 — FastAPI
 原生 TS3 监控: services.ts3_monitor (ServerQuery 长连接轮询)
 """
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -27,6 +28,7 @@ from .services.tsmusic_client import TSMusicClient
 from .services.ts3_monitor import TS3Monitor
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -48,6 +50,12 @@ async def lifespan(app: FastAPI):
     app.state.netease = NeteaseClient(settings.netease_api_url)
     # TSMusicBot 音乐引擎代理客户端 (网易云 / QQ / B 站 多平台)
     app.state.tsmusic = TSMusicClient(settings)
+    # 预加载播放跟随开关到单例（保证重启后关闭态生效；失败不阻断启动）
+    try:
+        async with AsyncSessionLocal() as session:
+            await app.state.tsmusic.load_follow_setting(session)
+    except Exception:
+        logger.warning("预加载播放跟随开关失败（将惰性使用默认值）", exc_info=True)
     try:
         yield
     finally:

@@ -10,8 +10,10 @@ import logging
 import re
 
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import Settings
+from . import app_setting
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,10 @@ class TSMusicClient:
         # 在搜索 / play / add 时缓存完整元数据，get_queue / 状态查询时回填缺失字段
         # （key="platform:id"）。TSMusicClient 为应用级单例，缓存跨请求有效。
         self._meta_cache: dict[str, dict] = {}
+        # bot TS 昵称缓存：GET /api/bot/{id}/config 取 nickname（列表 name 是实例名≠TS 昵称）
+        self._bot_nickname_cache: dict[str, str] = {}
+        # 播放跟随开关（应用级单例内存缓存；None=未加载，property 默认开）
+        self._follow_enabled: bool | None = None
 
     async def _ensure_login(self) -> None:
         """确保已登录（幂等）。"""
@@ -117,6 +123,10 @@ class TSMusicClient:
             for k in ("name", "artist", "album", "duration", "coverUrl")
             if song.get(k)
         }
+        # vip 单独处理：False 是合法值（明确「非 VIP」），不能用真值判断跳过，
+        # 否则 vip=False 会被丢弃，队列 / 正在播放无法回填「非 VIP」标记
+        if "vip" in song and song["vip"] is not None:
+            meta["vip"] = bool(song["vip"])
         if not meta:
             return
         key = self._meta_key(song.get("platform") or platform, sid)
@@ -137,7 +147,11 @@ class TSMusicClient:
             return item
         enriched = dict(item)
         for k, v in cached.items():
-            if not enriched.get(k):
+            if k == "vip":
+                # vip=False 是合法值：仅当目标缺失 vip 时回填，不覆盖已有 False/True
+                if "vip" not in enriched:
+                    enriched[k] = v
+            elif not enriched.get(k):
                 enriched[k] = v
         return enriched
 
@@ -285,9 +299,13 @@ class TSMusicClient:
                 "artist": cs.get("artist", ""),
                 "album": cs.get("album", ""),
                 "duration": cs.get("duration", 0),
+                # 实际播放时长：试听片段=试听秒数，完整=duration；上游未暴露时回退 duration
+                "effectiveDuration": bot.get("effectiveDuration") or cs.get("duration", 0),
                 "position": bot.get("elapsed", 0),
                 "cover": cs.get("coverUrl", ""),
                 "platform": cs.get("platform", ""),
+                # vip 来自搜索 / 详情时缓存的元数据回填（currentSong 本身不带 vip）
+                "vip": cs.get("vip"),
             }
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("TSMusicBot 状态获取失败: %s", exc)
@@ -472,3 +490,45 @@ class TSMusicClient:
         results = await asyncio.gather(*(_one(s) for s in target))
         ok_count = sum(1 for r in results if r)
         return {"ok": True, "enqueued": ok_count, "failed": len(target) - ok_count}
+
+    # ───────────────────────── 播放跟随 ─────────────────────────
+
+    @property
+    def follow_enabled(self) -> bool:
+        """播放跟随开关（未加载时默认开启）。"""
+        return self._follow_enabled if self._follow_enabled is not None else True
+
+    async def load_follow_setting(self, session: AsyncSession) -> bool:
+        """从 KV 加载跟随开关到单例内存缓存，返回当前值（缺失默认开启）。"""
+        raw = await app_setting.get_setting(session, "follow_enabled", "1")
+        self._follow_enabled = raw.strip().lower() not in ("0", "false", "no", "off")
+        return self._follow_enabled
+
+    async def set_follow_setting(self, session: AsyncSession, enabled: bool) -> None:
+        """持久化跟随开关并刷新单例内存缓存。"""
+        await app_setting.set_setting(session, "follow_enabled", "1" if enabled else "0")
+        self._follow_enabled = enabled
+
+    async def get_bot_nickname(self, bot_id: str | None = None) -> str | None:
+        """获取 bot 的 TS 昵称（供 bot_mover 在 clientlist 中定位 bot client）。
+
+        GET /api/bot/{id}/config 返回移除 identity/apiKey 后的 bot 配置，含 nickname。
+        bot 改昵称需重连（低频），故永久缓存。
+        """
+        bid = self._bid(bot_id)
+        cached = self._bot_nickname_cache.get(bid)
+        if cached:
+            return cached
+        await self._ensure_login()
+        try:
+            resp = await self._http.get(f"/api/bot/{bid}/config")
+            if resp.status_code >= 400:
+                logger.warning("获取 bot 昵称失败: 上游 %s", resp.status_code)
+                return None
+            nick = str(self._json(resp).get("nickname") or "").strip()
+        except httpx.HTTPError as exc:
+            logger.warning("获取 bot 昵称异常: %s", exc)
+            return None
+        if nick:
+            self._bot_nickname_cache[bid] = nick
+        return nick or None

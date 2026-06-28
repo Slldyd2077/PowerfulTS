@@ -40,3 +40,6 @@ frontend/.vite/
 backend/data/intro-music/*
 !backend/data/intro-music/.gitkeep
 !backend/data/intro-music/README.md
+
+# Claude Code 本地配置
+.claude/

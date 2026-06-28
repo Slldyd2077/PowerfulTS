@@ -7,19 +7,25 @@ from __future__ import annotations
 
 from typing import Annotated
 
+import asyncio
 import logging
 import re
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.config import get_settings
+from ..core.database import get_db
 from ..deps import get_current_account
 from ..models import Account
+from ..services import bot_mover
 from ..services.tsmusic_client import TSMusicClient
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/music", tags=["music"])
+settings = get_settings()
 
 
 # ───────────────────────── 依赖 ─────────────────────────
@@ -66,6 +72,37 @@ class ModeRequest(BaseModel):
 
 # ───────────────────────── 端点 ─────────────────────────
 
+
+async def _ensure_follow(
+    request: Request,
+    tsmusic: TSMusicClient,
+    account: Account,
+    bot_id: str | None,
+) -> dict:
+    """播放前移动 bot 到当前用户所在 TS 频道。
+
+    开关关闭 / 失败均不阻断播放，仅返回结果 dict（{moved, reason, ...}）。
+    同步 SQ 调用经 asyncio.to_thread 放线程池，异常外层兜底。
+    """
+    try:
+        if not tsmusic.follow_enabled:
+            return {"moved": False, "reason": "disabled"}
+        bot_nick = await tsmusic.get_bot_nickname(bot_id)
+        if not bot_nick:
+            logger.warning("跟随跳过: 未能解析 bot 昵称 (bot_id=%s)", bot_id)
+            return {"moved": False, "reason": "bot_nickname_unknown"}
+        result = await asyncio.to_thread(bot_mover.move_bot_to_user, settings, bot_nick, account)
+        reason = result.get("reason")
+        if result.get("moved"):
+            logger.info("跟随完成: bot→cid=%s (用户=%s)", result.get("user_cid"), account.ts_nickname)
+        elif reason not in ("disabled", "already_together"):
+            logger.warning("跟随未生效: %s (用户=%s)", reason, account.ts_nickname)
+        return result
+    except Exception:
+        logger.warning("跟随异常 (用户=%s)", account.ts_nickname, exc_info=True)
+        return {"moved": False, "reason": "exception"}
+
+
 @router.get("/search")
 async def search(
     q: str,
@@ -79,12 +116,16 @@ async def search(
 
 
 @router.post("/play")
-async def play(body: PlayRequest, tsmusic: TsmusicDep, _account: AccountDep, bot_id: BotIdQuery = None):
+async def play(body: PlayRequest, request: Request, tsmusic: TsmusicDep, account: AccountDep, bot_id: BotIdQuery = None):
     """播放（query 可以是歌名或 'id:xxx'，platform 指定音源）。"""
+    follow = await _ensure_follow(request, tsmusic, account, bot_id)
     if body.queue:
         result = await tsmusic.add(body.query, platform=body.platform, meta=body.meta, bot_id=bot_id)
     else:
         result = await tsmusic.play(body.query, platform=body.platform, meta=body.meta, bot_id=bot_id)
+    if isinstance(result, dict):
+        # 仅回传 moved/reason 给前端，剥离内部 cid/clid（最小信息原则）
+        result["follow"] = {"moved": follow.get("moved", False), "reason": follow.get("reason")}
     return result
 
 
@@ -99,7 +140,8 @@ async def resume(tsmusic: TsmusicDep, _account: AccountDep, bot_id: BotIdQuery =
 
 
 @router.post("/next")
-async def next_track(tsmusic: TsmusicDep, _account: AccountDep, bot_id: BotIdQuery = None):
+async def next_track(request: Request, tsmusic: TsmusicDep, account: AccountDep, bot_id: BotIdQuery = None):
+    await _ensure_follow(request, tsmusic, account, bot_id)
     return await tsmusic.next(bot_id=bot_id)
 
 
@@ -155,11 +197,13 @@ async def remove_from_queue(
 @router.post("/queue/{index}/play")
 async def play_at(
     index: Annotated[int, Path(ge=0)],
+    request: Request,
     tsmusic: TsmusicDep,
-    _account: AccountDep,
+    account: AccountDep,
     bot_id: BotIdQuery = None,
 ):
     """跳转到队列中指定位置播放（点击队列项切歌；index 越界或不可播时 400）。"""
+    await _ensure_follow(request, tsmusic, account, bot_id)
     result = await tsmusic.play_at(index, bot_id=bot_id)
     if isinstance(result, dict) and result.get("error"):
         raise HTTPException(status_code=400, detail=str(result["error"]))
@@ -220,9 +264,30 @@ class EnqueueRequest(BaseModel):
 
 
 @router.post("/my/enqueue")
-async def my_enqueue(body: EnqueueRequest, tsmusic: TsmusicDep, _account: AccountDep, bot_id: BotIdQuery = None):
-    """批量入队（整单播放）：后端循环 add，并发上限 4，上限 50 首，单首失败容忍。"""
+async def my_enqueue(body: EnqueueRequest, request: Request, tsmusic: TsmusicDep, account: AccountDep, bot_id: BotIdQuery = None):
+    """批量入队（整单播放）：后端循环 add，并发上限 4，上限 50 首，单首失败容忍。整批只跟随一次。"""
+    await _ensure_follow(request, tsmusic, account, bot_id)
     return await tsmusic.enqueue_songs(body.songs, platform=body.platform, bot_id=bot_id)
+
+
+# ───────────────────────── 播放跟随开关 ─────────────────────────
+
+
+class FollowSettingRequest(BaseModel):
+    enabled: bool
+
+
+@router.get("/follow-setting")
+async def get_follow_setting(tsmusic: TsmusicDep, _account: AccountDep, db: AsyncSession = Depends(get_db)):
+    """播放跟随开关（默认开启）。"""
+    return {"enabled": await tsmusic.load_follow_setting(db)}
+
+
+@router.put("/follow-setting")
+async def put_follow_setting(body: FollowSettingRequest, tsmusic: TsmusicDep, _account: AccountDep, db: AsyncSession = Depends(get_db)):
+    """更新播放跟随开关（持久化 + 刷新单例缓存）。"""
+    await tsmusic.set_follow_setting(db, body.enabled)
+    return {"enabled": body.enabled}
 
 
 # ───────────────────────── bot 实例管理 ─────────────────────────

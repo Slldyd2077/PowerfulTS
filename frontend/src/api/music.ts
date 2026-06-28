@@ -8,6 +8,8 @@ export interface Song {
   duration?: number
   coverUrl?: string
   platform?: string
+  /** VIP/版权受限：非会员仅能试听片段（上游 fee/pay 标记） */
+  vip?: boolean
 }
 
 export interface MusicSearchResult {
@@ -25,9 +27,13 @@ export interface NowPlaying {
   artist: string
   album: string
   duration: number
+  /** 实际播放时长（试听=片段秒数，完整=duration）；缺失回退 duration */
+  effectiveDuration?: number
   position: number
   cover: string
   platform: string
+  /** VIP/版权受限（来自搜索元数据回填；上游 currentSong 不自带） */
+  vip?: boolean
 }
 
 /** 搜索歌曲（可指定平台） */
@@ -169,6 +175,18 @@ export async function stopBot(botId: string) {
 /** 删除 bot */
 export async function deleteBot(botId: string) {
   const { data } = await apiClient.delete(`/music/bots/${botId}`)
+  return data
+}
+
+/** 播放跟随开关（点击播放时 bot 自动移到你的 TS 频道，默认开启） */
+export async function getFollowSetting(): Promise<{ enabled: boolean }> {
+  const { data } = await apiClient.get('/music/follow-setting')
+  return data
+}
+
+/** 更新播放跟随开关 */
+export async function setFollowSetting(enabled: boolean): Promise<{ enabled: boolean }> {
+  const { data } = await apiClient.put('/music/follow-setting', { enabled })
   return data
 }
 

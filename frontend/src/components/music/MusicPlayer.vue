@@ -49,7 +49,7 @@ watch(() => music.nowplaying?.position, (pos) => {
 // 每秒递增
 tickTimer = window.setInterval(() => {
   if (music.nowplaying?.playing && !dragging.value) {
-    const len = music.nowplaying?.duration || 0
+    const len = effDur.value || 0
     if (len <= 0 || music.localPosition < len) {
       music.localPosition += 1
     }
@@ -59,6 +59,12 @@ onUnmounted(() => { if (tickTimer) clearInterval(tickTimer) })
 
 const np = computed(() => music.nowplaying)
 const isPlaying = computed(() => !!np.value?.playing && !np.value?.paused)
+// 实际播放时长：试听片段=试听秒数，完整=duration（effectiveDuration 缺失回退 duration）
+const effDur = computed(() => np.value?.effectiveDuration || np.value?.duration)
+// 试听片段：effectiveDuration 存在且短于完整 duration
+const isTrial = computed(
+  () => !!(np.value?.effectiveDuration && np.value?.duration && np.value.effectiveDuration < np.value.duration),
+)
 const statusText = computed(() =>
   isPlaying.value ? '正在播放' : np.value?.paused ? '已暂停' : '空闲',
 )
@@ -149,16 +155,20 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
           <span class="np-dot" :class="{ on: isPlaying, paused: np?.paused }"></span>
           <span class="np-status-text label-mono">{{ statusText }}</span>
         </div>
-        <span class="np-title">{{ np?.title || '尚未播放' }}</span>
+        <div class="np-title-row">
+          <span class="np-title">{{ np?.title || '尚未播放' }}</span>
+          <span v-if="np?.vip" class="vip-badge" title="VIP / 版权受限：非会员仅能试听片段">VIP</span>
+          <span v-if="isTrial" class="trial-badge" title="试听片段：非会员仅能播放前 {{ fmt(effDur) }}">试听</span>
+        </div>
         <span class="np-artist">{{ np?.artist || '在左侧搜索并点歌' }}</span>
 
         <div class="scrubber">
           <span class="time mono">{{ fmt(music.localPosition) }}</span>
           <el-slider
-            v-if="np?.duration"
+            v-if="effDur"
             :model-value="music.localPosition"
             :min="0"
-            :max="np.duration"
+            :max="effDur"
             :step="1"
             :show-tooltip="false"
             size="small"
@@ -166,7 +176,7 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
             @change="onSeekEnd"
           />
           <div v-else class="scrubber-track"></div>
-          <span class="time mono">{{ fmt(np?.duration) }}</span>
+          <span class="time mono">{{ fmt(effDur) }}</span>
         </div>
       </div>
     </div>
@@ -244,7 +254,10 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 17V7l8-1.5v7" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.5" cy="17" r="2"/><circle cx="14" cy="15" r="2"/></svg>
           </span>
           <div class="q-meta">
-            <span class="q-name">{{ item.name }}</span>
+            <div class="q-name-row">
+              <span class="q-name">{{ item.name }}</span>
+              <span v-if="item.vip" class="vip-badge" title="VIP / 版权受限：非会员仅能试听片段">VIP</span>
+            </div>
             <span class="q-artist">{{ item.artist }}</span>
           </div>
           <EqualizerBars v-if="isCurrent(item)" class="q-eq" :active="isPlaying" />
@@ -371,6 +384,36 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.np-title-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.vip-badge {
+  flex-shrink: 0;
+  font-size: 0.5em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #f5a623;
+  background: rgba(245, 166, 35, 0.12);
+  border: 1px solid rgba(245, 166, 35, 0.4);
+  border-radius: 3px;
+  padding: 0 4px;
+  line-height: 1.6;
+}
+.trial-badge {
+  flex-shrink: 0;
+  font-size: 0.5em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #60a5fa;
+  background: rgba(96, 165, 250, 0.12);
+  border: 1px solid rgba(96, 165, 250, 0.4);
+  border-radius: 3px;
+  padding: 0 4px;
+  line-height: 1.6;
 }
 .np-artist {
   font-size: 0.78em;
@@ -641,6 +684,12 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.q-name-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
 }
 .q-artist {
   font-size: 0.68em;

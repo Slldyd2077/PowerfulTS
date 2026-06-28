@@ -106,7 +106,25 @@ async function onDelete(b: BotInfo) {
   }
 }
 
-onMounted(() => music.fetchBots())
+const followBusy = ref(false)
+async function onToggleFollow() {
+  if (followBusy.value) return
+  const next = !music.followEnabled
+  followBusy.value = true
+  try {
+    await music.setFollow(next)
+    ElMessage.success(next ? '已开启播放跟随' : '已关闭播放跟随')
+  } catch {
+    ElMessage.error('设置失败')
+  } finally {
+    followBusy.value = false
+  }
+}
+
+onMounted(() => {
+  music.fetchBots()
+  music.fetchFollowSetting()
+})
 </script>
 
 <template>
@@ -160,6 +178,21 @@ onMounted(() => music.fetchBots())
       <!-- 透明遮罩：点击外部收起 -->
       <div v-if="botMenuOpen" class="bot-backdrop" @click="botMenuOpen = false"></div>
     </div>
+
+    <!-- 播放跟随开关 -->
+    <button
+      v-if="hasBots"
+      type="button"
+      role="switch"
+      :aria-checked="music.followEnabled"
+      class="follow-toggle"
+      :class="{ on: music.followEnabled, busy: followBusy }"
+      :disabled="followBusy"
+      @click="onToggleFollow"
+    >
+      <span class="follow-label">播放时跟随到我的频道</span>
+      <span class="follow-switch"><span class="follow-knob"></span></span>
+    </button>
 
     <!-- 列表 -->
     <div v-if="hasBots" class="bot-list">
@@ -362,6 +395,47 @@ onMounted(() => music.fetchBots())
 .mini-btn--danger:hover:not(:disabled) { background: var(--color-danger); color: #fff; }
 
 .bot-empty { text-align: center; color: var(--text-muted); padding: 18px 10px; font-size: 0.78em; }
+
+/* 播放跟随开关 */
+.follow-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 7px 10px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.18s var(--ease-out-expo);
+  user-select: none;
+}
+.follow-toggle:hover { border-color: var(--border-emphasis); }
+button.follow-toggle { font-family: inherit; text-align: left; width: 100%; }
+.follow-toggle.busy { opacity: 0.6; cursor: default; }
+.follow-label { font-size: 0.74em; color: var(--text-secondary); }
+.follow-switch {
+  width: 30px; height: 16px; border-radius: 999px;
+  background: var(--surface-4);
+  border: 1px solid var(--border-emphasis);
+  position: relative; flex-shrink: 0;
+  transition: background 0.18s var(--ease-out-expo), border-color 0.18s;
+}
+.follow-knob {
+  position: absolute; top: 1px; left: 1px;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--text-muted);
+  transition: transform 0.18s var(--ease-out-expo), background 0.18s;
+}
+.follow-toggle.on .follow-switch {
+  background: rgba(45, 212, 191, 0.25);
+  border-color: var(--color-primary);
+}
+.follow-toggle.on .follow-knob {
+  transform: translateX(14px);
+  background: var(--color-primary);
+}
 
 .add-btn {
   width: 100%;

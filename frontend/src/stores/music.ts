@@ -27,6 +27,8 @@ import {
   startBot as apiStartBot,
   stopBot as apiStopBot,
   deleteBot as apiDeleteBot,
+  getFollowSetting as apiGetFollowSetting,
+  setFollowSetting as apiSetFollowSetting,
   type Song,
   type NowPlaying,
   type Playlist,
@@ -55,6 +57,9 @@ export const useMusicStore = defineStore('music', () => {
   // bot 切换代数：拦截过期轮询响应（防切换后旧 bot 状态闪现）；start 重连定时器
   let botGen = 0
   let startPollTimer: ReturnType<typeof setTimeout> | null = null
+
+  // ── 播放跟随开关（默认开启；点击播放时 bot 自动移到当前用户所在 TS 频道）──
+  const followEnabled = ref(true)
 
   // ── 我的音乐：平台登录态（提升自 PlatformAccounts，供 MyMusic 置灰判断）──
   const platformStatus = ref<Record<string, { loggedIn: boolean; nickname?: string }>>({})
@@ -396,6 +401,22 @@ export const useMusicStore = defineStore('music', () => {
     }
   }
 
+  /** 拉取播放跟随开关 */
+  async function fetchFollowSetting() {
+    try {
+      const res = await apiGetFollowSetting()
+      followEnabled.value = res.enabled
+    } catch {
+      // 静默，保持默认 true
+    }
+  }
+
+  /** 设置播放跟随开关 */
+  async function setFollow(enabled: boolean) {
+    await apiSetFollowSetting(enabled)
+    followEnabled.value = enabled
+  }
+
   return {
     searchResults,
     searching,
@@ -446,5 +467,8 @@ export const useMusicStore = defineStore('music', () => {
     startBot,
     stopBot,
     deleteBot,
+    followEnabled,
+    fetchFollowSetting,
+    setFollow,
   }
 })

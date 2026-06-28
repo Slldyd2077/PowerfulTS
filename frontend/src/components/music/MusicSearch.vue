@@ -164,6 +164,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
           <div class="song-name-row">
             <span class="song-name">{{ song.name }}</span>
             <span
+              v-if="song.vip"
+              class="vip-badge"
+              title="VIP / 版权受限：非会员仅能试听片段"
+            >VIP</span>
+            <span
               v-if="song.platform && platformColors[song.platform]"
               class="platform-dot"
               :style="{ background: platformColors[song.platform] }"
@@ -450,6 +455,18 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.vip-badge {
+  flex-shrink: 0;
+  font-size: 0.58em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #f5a623;
+  background: rgba(245, 166, 35, 0.12);
+  border: 1px solid rgba(245, 166, 35, 0.4);
+  border-radius: 3px;
+  padding: 0 4px;
+  line-height: 1.6;
 }
 .platform-dot {
   width: 7px;
