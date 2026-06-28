@@ -22,7 +22,7 @@ services:
     volumes:
       - powerfults-data:/app/data   # SQLite 持久化
     ports:
-      - "9090:9090"                 # 后端直接暴露（健康检查/调试；仅前端访问可删除此行）
+      - "8001:8001"                 # 后端直接暴露（健康检查/调试；仅前端访问可删除此行）
     networks:
       - powerfults
 

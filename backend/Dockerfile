@@ -25,6 +25,6 @@ COPY app ./app
 RUN mkdir -p /app/data
 VOLUME ["/app/data"]
 
-EXPOSE 9090
+EXPOSE 8001
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9090"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
