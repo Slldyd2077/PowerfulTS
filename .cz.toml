@@ -14,7 +14,7 @@
 # 约定：提交信息用 feat:/fix:/docs:/refactor: 等前缀，cz bump 会据此判定版本变化。
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.3.1"
+version = "0.3.2"
 version_files = [
   "pyproject.toml:version",
   "backend/pyproject.toml:version",
