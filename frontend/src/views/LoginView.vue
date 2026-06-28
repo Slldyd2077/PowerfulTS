@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth'
 import { login as apiLogin, register as apiRegister, getClientIp, sendCode, checkBinding } from '@/api/auth'
 import { getIntroTracks, introStreamUrl, type IntroTrack } from '@/api/introMusic'
 import { ElMessage } from 'element-plus'
+import { View } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -27,9 +28,16 @@ const codeSent = ref(false)
 const codeCountdown = ref(0)
 
 const canLogin = computed(() => loginForm.value.tsNickname.trim() && loginForm.value.password.trim())
+// 后端 RegisterRequest.password 强制 min_length=8，前端同步约束，避免裸 422
+const MIN_PASSWORD_LENGTH = 8
+const passwordTooShort = computed(
+  () =>
+    registerForm.value.password.length > 0 &&
+    registerForm.value.password.length < MIN_PASSWORD_LENGTH,
+)
 const canRegister = computed(() =>
   registerForm.value.tsNickname.trim() &&
-  registerForm.value.password.trim() &&
+  registerForm.value.password.length >= MIN_PASSWORD_LENGTH &&
   registerForm.value.password === registerForm.value.confirmPassword &&
   registerForm.value.code.trim(),
 )
@@ -355,6 +363,12 @@ onUnmounted(() => {
   audioCtx?.close().catch(() => {})
 })
 
+/** 以游客身份进入（仅可访问监控面板） */
+function handleGuest() {
+  auth.enterAsGuest()
+  router.push('/')
+}
+
 /** 登录 */
 async function handleLogin() {
   if (!canLogin.value) return
@@ -418,6 +432,10 @@ async function handleSendCode() {
 
 /** 注册 */
 async function handleRegister() {
+  if (registerForm.value.password.length < MIN_PASSWORD_LENGTH) {
+    ElMessage.warning('密码至少需要 8 位')
+    return
+  }
   if (!canRegister.value) return
   loading.value = true
   try {
@@ -553,6 +571,20 @@ async function handleRegister() {
                 </button>
               </div>
             </el-form>
+
+            <!-- 游客入口 -->
+            <div class="guest-entry field-group field-7">
+              <div class="divider-or">
+                <span class="divider-line"></span>
+                <span class="divider-text label-mono">或</span>
+                <span class="divider-line"></span>
+              </div>
+              <button class="guest-btn" @click="handleGuest">
+                <el-icon class="guest-icon"><View /></el-icon>
+                <span>以游客身份浏览</span>
+              </button>
+              <p class="guest-hint">仅可查看服务器监控面板</p>
+            </div>
           </div>
 
           <!-- 注册表单 -->
@@ -569,7 +601,20 @@ async function handleRegister() {
               </div>
               <div class="field-group field-3">
                 <label class="field-label">密码</label>
-                <el-input v-model="registerForm.password" type="password" placeholder="设置密码" size="large" show-password />
+                <el-input
+                  v-model="registerForm.password"
+                  type="password"
+                  placeholder="至少 8 位字符"
+                  size="large"
+                  show-password
+                />
+                <p class="field-hint" :class="{ 'field-hint--error': passwordTooShort }">
+                  {{
+                    passwordTooShort
+                      ? `密码至少 8 位（当前 ${registerForm.password.length} 位）`
+                      : '至少 8 位字符'
+                  }}
+                </p>
               </div>
               <div class="field-group field-4">
                 <label class="field-label">确认密码</label>
@@ -990,6 +1035,80 @@ async function handleRegister() {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.field-hint {
+  margin-top: 6px;
+  font-size: 0.76em;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.field-hint--error {
+  color: rgba(248, 113, 113, 0.9);
+  opacity: 1;
+}
+
+/* ── 游客入口 ── */
+.guest-entry {
+  margin-top: 30px;
+}
+
+.divider-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.divider-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+}
+
+.divider-text {
+  font-size: 0.72em;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+}
+
+.guest-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-secondary);
+  font-size: 0.9em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.25s var(--ease-out-expo), background 0.25s var(--ease-out-expo),
+    color 0.25s var(--ease-out-expo), box-shadow 0.25s var(--ease-out-expo);
+  font-family: inherit;
+}
+
+.guest-btn:hover {
+  border-color: rgba(0, 229, 255, 0.35);
+  background: rgba(0, 229, 255, 0.05);
+  color: var(--text-primary);
+  box-shadow: 0 0 18px rgba(0, 229, 255, 0.08);
+}
+
+.guest-icon {
+  font-size: 16px;
+}
+
+.guest-hint {
+  margin-top: 12px;
+  text-align: center;
+  font-size: 0.76em;
+  color: var(--text-muted);
+  opacity: 0.7;
 }
 
 .field-group {
