@@ -32,6 +32,7 @@ const SWITCHES: { key: keyof BotProfile; label: string; hint: string }[] = [
 // 头部一览：已开启的开关数（autoPause + per-bot 外观开关）
 const activeCount = computed(() => {
   let n = music.botSettings.autoPauseOnEmpty ? 1 : 0
+  if (music.followEnabled) n++
   const prof = music.activeBotProfile
   if (prof) for (const s of SWITCHES) if (prof[s.key]) n++
   return n
@@ -77,6 +78,20 @@ async function toggleAutoPause(val: boolean) {
     ElMessage.error('保存失败')
   } finally {
     autoPauseBusy.value = false
+  }
+}
+
+const followBusy = ref(false)
+async function toggleFollow(val: boolean) {
+  if (followBusy.value) return
+  followBusy.value = true
+  try {
+    await music.setFollow(val)
+    ElMessage.success(val ? '已开启播放跟随' : '已关闭播放跟随')
+  } catch {
+    ElMessage.error('设置失败')
+  } finally {
+    followBusy.value = false
   }
 }
 
@@ -205,6 +220,22 @@ async function onRemoveAvatar() {
         <span class="switch-track"><span class="switch-knob"></span></span>
       </button>
       <p class="warn-line">依赖 TS 服务器 clientlist 命令，部分服务器可能不生效。</p>
+
+      <button
+        type="button"
+        role="switch"
+        :aria-checked="music.followEnabled"
+        class="switch-row"
+        :class="{ on: music.followEnabled, busy: followBusy }"
+        :disabled="followBusy"
+        @click="toggleFollow(!music.followEnabled)"
+      >
+        <span class="field-text">
+          <span class="field-label">播放时跟随到我的频道</span>
+          <span class="field-hint">点歌/播放时，Bot 自动移动到你当前所在的 TS 频道</span>
+        </span>
+        <span class="switch-track"><span class="switch-knob"></span></span>
+      </button>
 
       <div class="create-actions">
         <button class="submit-btn" :disabled="globalBusy" @click="saveGlobal">{{ globalBusy ? '保存中…' : '保存下线时长' }}</button>
