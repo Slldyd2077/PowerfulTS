@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useMusicStore } from '@/stores/music'
 import type { BotInfo, BotCreate } from '@/api/music'
+import BotBehaviorPanel from './BotBehaviorPanel.vue'
 
 const music = useMusicStore()
 
@@ -260,6 +261,9 @@ onMounted(() => {
         <button class="submit-btn" :disabled="creating" @click="submitCreate">{{ creating ? '创建中…' : '创建' }}</button>
       </div>
     </div>
+
+    <!-- 机器人行为设置（空闲下线 / 头像 / 昵称等） -->
+    <BotBehaviorPanel v-if="hasBots" />
   </div>
 </template>
 

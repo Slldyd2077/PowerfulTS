@@ -6,18 +6,15 @@
 from __future__ import annotations
 
 from ipaddress import AddressValueError, ip_address
-from typing import Annotated
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from ..deps import get_current_account
-from ..models import Account
+from ..deps import AccountDep, TsmusicDep
 from ..services.bilibili import BILI_REFERER, BILI_UA
-from ..services.tsmusic_client import TSMusicClient
 
 router = APIRouter(prefix="/bili", tags=["bilibili"])
 
@@ -28,15 +25,6 @@ _BILI_HOST_SUFFIXES = (
     ".bilivideo.cn",
     ".akamaized.net",
 )
-
-AccountDep = Annotated[Account, Depends(get_current_account)]
-
-
-def _get_tsmusic(request: Request) -> TSMusicClient:
-    return request.app.state.tsmusic
-
-
-TsmusicDep = Annotated[TSMusicClient, Depends(_get_tsmusic)]
 
 
 def _to_bili_video(song: dict) -> dict:

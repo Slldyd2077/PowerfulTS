@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..core.database import Base
@@ -27,8 +27,29 @@ class Account(Base):
     # QQ 绑定 + 好友上线提醒开关（NapCat 推送用）
     qq_number: Mapped[str | None] = mapped_column(String(16), nullable=True)
     notify_friends_online: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+    # ── 专属 TSMusicBot 容器归属（per-user 隔离：每用户独立容器 → 独立 bot + 平台账号）──
+    tsmusic_container_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tsmusic_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tsmusic_user: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tsmusic_password: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    container_status: Mapped[str] = mapped_column(String(16), default="none", server_default="none")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class BotOwnership(Base):
+    """bot 实例归属：哪个 account 拥有哪个 TSMusicBot bot（软隔离，list/start/stop/delete 按 owner 过滤）。"""
+
+    __tablename__ = "bot_ownerships"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("accounts.id", ondelete="CASCADE"), index=True
+    )
+    bot_id: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("account_id", "bot_id", name="uq_account_bot"),)
 
 
 class Session(Base):

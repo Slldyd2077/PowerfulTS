@@ -36,10 +36,11 @@ export interface NowPlaying {
   vip?: boolean
 }
 
-/** 搜索歌曲（可指定平台） */
-export async function searchMusic(q: string, platform?: string): Promise<MusicSearchResult> {
+/** 搜索歌曲（botId 指定 bot → 用该 bot 的平台 cookie 搜索） */
+export async function searchMusic(q: string, platform?: string, botId?: string): Promise<MusicSearchResult> {
   const params: Record<string, string> = { q }
   if (platform) params.platform = platform
+  if (botId) params.botId = botId
   const { data } = await apiClient.get('/music/search', { params })
   return data
 }
@@ -148,7 +149,7 @@ export interface BotCreate {
   serverPassword: string
 }
 
-/** bot 列表 */
+/** bot 实例列表 */
 export async function getBots(): Promise<{ bots: BotInfo[] }> {
   const { data } = await apiClient.get('/music/bots')
   return data
@@ -190,6 +191,72 @@ export async function setFollowSetting(enabled: boolean): Promise<{ enabled: boo
   return data
 }
 
+// ───────────────────────── bot 行为 / 外观设置 ─────────────────────────
+
+/** 全局 bot 行为设置 */
+export interface BotSettings {
+  /** 频道无人多少分钟后自动断开，0=禁用 */
+  idleTimeoutMinutes: number
+  /** 频道无人时自动暂停 */
+  autoPauseOnEmpty: boolean
+}
+
+/** per-bot profile 开关（头像/昵称/描述等 6 字段） */
+export interface BotProfile {
+  avatarEnabled: boolean
+  descriptionEnabled: boolean
+  nicknameEnabled: boolean
+  awayStatusEnabled: boolean
+  channelDescEnabled: boolean
+  nowPlayingMsgEnabled: boolean
+}
+
+/** 读取全局 bot 行为设置 */
+export async function getBotSettings(): Promise<BotSettings> {
+  const { data } = await apiClient.get('/music/bot-settings')
+  return data
+}
+
+/** 更新全局 bot 行为设置（仅传需要改的字段） */
+export async function setBotSettings(payload: Partial<BotSettings>): Promise<BotSettings> {
+  const { data } = await apiClient.put('/music/bot-settings', payload)
+  return data
+}
+
+/** 读取 per-bot profile 开关 */
+export async function getBotProfile(botId: string): Promise<BotProfile> {
+  const { data } = await apiClient.get(`/music/bots/${botId}/profile`)
+  return data
+}
+
+/** 更新 per-bot profile 开关（仅传需要改的字段；上游立即生效） */
+export async function setBotProfile(botId: string, payload: Partial<BotProfile>): Promise<BotProfile> {
+  const { data } = await apiClient.put(`/music/bots/${botId}/profile`, payload)
+  return data
+}
+
+/**
+ * 获取 bot 固定头像（Blob）。后端 avatar 端点需 X-Session-Token，
+ * <img src> 无法带 header，故用 blob + URL.createObjectURL 在前端展示。
+ * 404（未设置固定头像）会 reject，调用方捕获即可。
+ */
+export async function getBotAvatarBlob(botId: string): Promise<Blob> {
+  const { data } = await apiClient.get(`/music/bots/${botId}/avatar`, { responseType: 'blob' })
+  return data
+}
+
+/** 上传/替换 bot 固定头像（data:image/(png|jpeg|webp);base64,...，≤200KB） */
+export async function setBotAvatar(botId: string, dataUrl: string) {
+  const { data } = await apiClient.put(`/music/bots/${botId}/avatar`, { dataUrl })
+  return data
+}
+
+/** 移除 bot 固定头像 */
+export async function deleteBotAvatar(botId: string) {
+  const { data } = await apiClient.delete(`/music/bots/${botId}/avatar`)
+  return data
+}
+
 // ───────────────────────── 我的音乐 / 歌单 ─────────────────────────
 
 /** 歌单 */
@@ -216,33 +283,43 @@ export interface EnqueueResult {
   failed: number
 }
 
-/** 用户歌单（自建+收藏） */
-export async function getMyPlaylists(platform: string): Promise<PlaylistResult> {
-  const { data } = await apiClient.get('/music/my/playlists', { params: { platform } })
+/** 用户歌单（自建+收藏，per-bot） */
+export async function getMyPlaylists(platform: string, botId?: string): Promise<PlaylistResult> {
+  const params: Record<string, string> = { platform }
+  if (botId) params.botId = botId
+  const { data } = await apiClient.get('/music/my/playlists', { params })
   return data
 }
 
-/** 歌单内歌曲 */
-export async function getPlaylistSongs(playlistId: string, platform: string): Promise<PlaylistResult> {
-  const { data } = await apiClient.get(`/music/my/playlist/${playlistId}/songs`, { params: { platform } })
+/** 歌单内歌曲（per-bot） */
+export async function getPlaylistSongs(playlistId: string, platform: string, botId?: string): Promise<PlaylistResult> {
+  const params: Record<string, string> = { platform }
+  if (botId) params.botId = botId
+  const { data } = await apiClient.get(`/music/my/playlist/${playlistId}/songs`, { params })
   return data
 }
 
-/** 每日推荐 */
-export async function getRecommendSongs(platform: string): Promise<PlaylistResult> {
-  const { data } = await apiClient.get('/music/my/recommend/songs', { params: { platform } })
+/** 每日推荐（per-bot） */
+export async function getRecommendSongs(platform: string, botId?: string): Promise<PlaylistResult> {
+  const params: Record<string, string> = { platform }
+  if (botId) params.botId = botId
+  const { data } = await apiClient.get('/music/my/recommend/songs', { params })
   return data
 }
 
-/** 私人 FM */
-export async function getPersonalFm(platform: string): Promise<PlaylistResult> {
-  const { data } = await apiClient.get('/music/my/personal-fm', { params: { platform } })
+/** 私人 FM（per-bot） */
+export async function getPersonalFm(platform: string, botId?: string): Promise<PlaylistResult> {
+  const params: Record<string, string> = { platform }
+  if (botId) params.botId = botId
+  const { data } = await apiClient.get('/music/my/personal-fm', { params })
   return data
 }
 
-/** B 站热门视频（无需登录） */
-export async function getBilibiliPopular(limit = 20): Promise<PlaylistResult> {
-  const { data } = await apiClient.get('/music/my/bilibili-popular', { params: { limit } })
+/** B 站热门视频（无需登录，per-bot） */
+export async function getBilibiliPopular(limit = 20, botId?: string): Promise<PlaylistResult> {
+  const params: Record<string, string> = { limit: String(limit) }
+  if (botId) params.botId = botId
+  const { data } = await apiClient.get('/music/my/bilibili-popular', { params })
   return data
 }
 
@@ -254,20 +331,30 @@ export async function enqueueSongs(platform: string | undefined, songs: Song[], 
 
 // ───────────────────────── 平台账号登录 ─────────────────────────
 
-/** 获取某平台登录状态 */
-export async function getAuthStatus(platform: string) {
-  const { data } = await apiClient.get('/music/auth/status', { params: { platform } })
+/** 获取某平台登录状态（per-bot：该 bot 的平台登录态） */
+export async function getAuthStatus(platform: string, botId?: string) {
+  const params: Record<string, string> = { platform }
+  if (botId) params.botId = botId
+  const { data } = await apiClient.get('/music/auth/status', { params })
   return data
 }
 
-/** 获取某平台登录二维码 */
-export async function getQrcode(platform: string) {
-  const { data } = await apiClient.post('/music/auth/qrcode', { platform })
+/** 获取某平台登录二维码（per-bot；botId 走 query，后端 BotIdQuery 读取） */
+export async function getQrcode(platform: string, botId?: string) {
+  const { data } = await apiClient.post('/music/auth/qrcode', { platform }, botId ? { params: { botId } } : undefined)
   return data
 }
 
-/** 手动设置某平台 cookie */
-export async function setCookie(platform: string, cookie: string) {
-  const { data } = await apiClient.post('/music/auth/cookie', { platform, cookie })
+/** 手动设置某平台 cookie（per-bot：绑定到该 bot；botId 走 query） */
+export async function setCookie(platform: string, cookie: string, botId?: string) {
+  const { data } = await apiClient.post('/music/auth/cookie', { platform, cookie }, botId ? { params: { botId } } : undefined)
+  return data
+}
+
+/** 退出某平台登录（清除该 bot 的平台 cookie） */
+export async function logoutPlatform(platform: string, botId?: string) {
+  const params: Record<string, string> = { platform }
+  if (botId) params.botId = botId
+  const { data } = await apiClient.delete('/music/auth/cookie', { params })
   return data
 }

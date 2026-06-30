@@ -7,12 +7,13 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .core.database import get_db
 from .models import Account
 from .services.auth_service import AuthService
+from .services.tsmusic_client import TSMusicClient
 
 
 async def get_current_account(
@@ -26,3 +27,15 @@ async def get_current_account(
     if account is None:
         raise HTTPException(status_code=401, detail="会话无效或已过期")
     return account
+
+
+AccountDep = Annotated[Account, Depends(get_current_account)]
+
+
+def get_tsmusic(request: Request) -> TSMusicClient:
+    """单例 TSMusicClient（连接单一共享 TSMusicBot 容器）。"""
+    return request.app.state.tsmusic
+
+
+TsmusicDep = Annotated[TSMusicClient, Depends(get_tsmusic)]
+

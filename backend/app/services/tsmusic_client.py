@@ -25,13 +25,13 @@ _HEADERS = {
 
 
 class TSMusicClient:
-    """TSMusicBot REST API 代理客户端。"""
+    """TSMusicBot REST API 代理客户端（per-user：每个用户连自己的专属容器）。"""
 
-    def __init__(self, settings: Settings) -> None:
-        self._base = settings.tsmusic_url
-        self._user = settings.tsmusic_user
-        self._pass = settings.tsmusic_password
-        self._bot_id = settings.tsmusic_bot_id
+    def __init__(self, base_url: str, user: str, password: str, bot_id: str = "") -> None:
+        self._base = base_url
+        self._user = user
+        self._pass = password
+        self._bot_id = bot_id
         self._http = httpx.AsyncClient(
             base_url=self._base,
             timeout=httpx.Timeout(15.0),
@@ -40,11 +40,11 @@ class TSMusicClient:
         self._logged_in = False
         # 歌曲元数据缓存：上游 TSMusicBot 入队 QQ 音乐时会丢失 name/coverUrl/duration，
         # 在搜索 / play / add 时缓存完整元数据，get_queue / 状态查询时回填缺失字段
-        # （key="platform:id"）。TSMusicClient 为应用级单例，缓存跨请求有效。
+        # （key="platform:id"）。per-user 实例，缓存随用户隔离。
         self._meta_cache: dict[str, dict] = {}
         # bot TS 昵称缓存：GET /api/bot/{id}/config 取 nickname（列表 name 是实例名≠TS 昵称）
         self._bot_nickname_cache: dict[str, str] = {}
-        # 播放跟随开关（应用级单例内存缓存；None=未加载，property 默认开）
+        # 播放跟随开关（per-client 内存缓存；None=未加载，property 默认开）
         self._follow_enabled: bool | None = None
 
     async def _ensure_login(self) -> None:
@@ -157,10 +157,11 @@ class TSMusicClient:
 
     # ───────────────────────── 搜索 ─────────────────────────
 
-    async def search(self, q: str, platform: str | None = None) -> list[dict]:
+    async def search(self, q: str, platform: str | None = None, bot_id: str | None = None) -> list[dict]:
         """搜索歌曲，返回 [{id, name, artist, album, duration, coverUrl, platform}]。
 
         platform 指定音源平台：netease（默认）/ qq / bilibili。
+        bot_id 指定 bot 实例 → 上游用该 bot 的平台 cookie 搜索（per-bot 平台账号）。
         B 站结果的 id 即 BV 号，可直接用于 play("id:<BV号>")。
         """
         await self._ensure_login()
@@ -168,6 +169,8 @@ class TSMusicClient:
             params: dict[str, str] = {"q": q}
             if platform:
                 params["platform"] = platform
+            if bot_id:
+                params["botId"] = bot_id
             resp = await self._http.get("/api/music/search", params=params)
             data = resp.json()
             songs = data.get("data", {}).get("songs", data.get("songs", []))
@@ -372,24 +375,134 @@ class TSMusicClient:
         resp = await self._http.delete(f"/api/bot/{bot_id}")
         return self._json(resp)
 
-    # ───────────────────────── 平台账号登录 ─────────────────────────
+    # ───────────────────────── bot 行为 / 外观设置 ─────────────────────────
 
-    async def get_auth_status(self, platform: str) -> dict:
+    # per-bot ProfileConfig 白名单字段（与上游 database.ts 一致；默认全开）
+    _PROFILE_KEYS = (
+        "avatarEnabled", "descriptionEnabled", "nicknameEnabled",
+        "awayStatusEnabled", "channelDescEnabled", "nowPlayingMsgEnabled",
+    )
+
+    async def get_bot_settings(self) -> dict:
+        """全局 bot 行为设置：空闲下线分钟 + 空频道自动暂停。
+
+        仅回传这两项；guestMode / adminGroups 属上游自身权限体系，PowerfulTS 不代理。
+        """
         await self._ensure_login()
         try:
-            resp = await self._http.get("/api/auth/status", params={"platform": platform})
+            data = self._json(await self._http.get("/api/bot/settings"))
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("TSMusicBot 读取 bot 设置失败: %s", exc)
+            return {"idleTimeoutMinutes": 0, "autoPauseOnEmpty": False}
+        return {
+            "idleTimeoutMinutes": data.get("idleTimeoutMinutes", 0),
+            "autoPauseOnEmpty": bool(data.get("autoPauseOnEmpty", False)),
+        }
+
+    async def set_bot_settings(
+        self,
+        idle_timeout_minutes: int | None = None,
+        auto_pause_on_empty: bool | None = None,
+    ) -> dict:
+        """更新全局 bot 行为设置（仅透传非 None 字段，未传项上游保持不变）。"""
+        await self._ensure_login()
+        payload: dict = {}
+        if idle_timeout_minutes is not None:
+            payload["idleTimeoutMinutes"] = idle_timeout_minutes
+        if auto_pause_on_empty is not None:
+            payload["autoPauseOnEmpty"] = auto_pause_on_empty
+        if not payload:
+            return await self.get_bot_settings()
+        data = self._json(await self._http.post("/api/bot/settings", json=payload))
+        return {
+            "idleTimeoutMinutes": data.get("idleTimeoutMinutes", 0),
+            "autoPauseOnEmpty": bool(data.get("autoPauseOnEmpty", False)),
+        }
+
+    async def get_bot_profile(self, bot_id: str | None = None) -> dict:
+        """per-bot profile 开关（6 字段，缺失默认 True，对齐上游 DEFAULT_PROFILE_CONFIG）。"""
+        await self._ensure_login()
+        bid = self._bid(bot_id)
+        try:
+            data = self._json(await self._http.get(f"/api/bot/{bid}/profile"))
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("TSMusicBot 读取 profile 失败: %s", exc)
+            return {k: True for k in self._PROFILE_KEYS}
+        return {k: bool(data.get(k, True)) for k in self._PROFILE_KEYS}
+
+    async def set_bot_profile(self, partial: dict, bot_id: str | None = None) -> dict:
+        """更新 per-bot profile 开关（仅透传白名单内且为 bool 的字段）。"""
+        await self._ensure_login()
+        bid = self._bid(bot_id)
+        payload = {
+            k: bool(partial[k])
+            for k in self._PROFILE_KEYS
+            if isinstance(partial.get(k), bool)
+        }
+        data = self._json(await self._http.put(f"/api/bot/{bid}/profile", json=payload))
+        return {k: bool(data.get(k, True)) for k in self._PROFILE_KEYS}
+
+    async def get_bot_avatar(self, bot_id: str | None = None) -> httpx.Response:
+        """获取 bot 固定头像（二进制）。返回原始 Response 供 router 透传字节与 Content-Type。"""
+        await self._ensure_login()
+        return await self._http.get(f"/api/bot/{self._bid(bot_id)}/avatar")
+
+    async def set_bot_avatar(self, data_url: str, bot_id: str | None = None) -> dict:
+        """上传/替换 bot 固定头像（data:image/(png|jpeg|webp);base64,...）。
+
+        上游对超大/格式非法返回 413/400，_json 不抛；这里把 status 透出（_status），
+        供 router 转成对应 HTTPException。
+        """
+        await self._ensure_login()
+        resp = await self._http.put(
+            f"/api/bot/{self._bid(bot_id)}/avatar", json={"dataUrl": data_url}
+        )
+        data = self._json(resp)
+        if resp.status_code >= 400:
+            data["_status"] = resp.status_code
+        return data
+
+    async def delete_bot_avatar(self, bot_id: str | None = None) -> None:
+        """移除 bot 固定头像。"""
+        await self._ensure_login()
+        await self._http.delete(f"/api/bot/{self._bid(bot_id)}/avatar")
+
+    # ───────────────────────── 平台账号登录 ─────────────────────────
+
+    async def get_auth_status(self, platform: str, bot_id: str | None = None) -> dict:
+        await self._ensure_login()
+        try:
+            params: dict[str, str] = {"platform": platform}
+            if bot_id:
+                params["botId"] = bot_id
+            resp = await self._http.get("/api/auth/status", params=params)
             return resp.json()
         except (httpx.HTTPError, ValueError):
             return {"platform": platform, "loggedIn": False}
 
-    async def get_qrcode(self, platform: str) -> dict:
+    async def get_qrcode(self, platform: str, bot_id: str | None = None) -> dict:
         await self._ensure_login()
-        resp = await self._http.post("/api/auth/qrcode", json={"platform": platform})
+        payload: dict = {"platform": platform}
+        if bot_id:
+            payload["botId"] = bot_id
+        resp = await self._http.post("/api/auth/qrcode", json=payload)
         return self._json(resp)
 
-    async def set_cookie(self, platform: str, cookie: str) -> dict:
+    async def set_cookie(self, platform: str, cookie: str, bot_id: str | None = None) -> dict:
         await self._ensure_login()
-        resp = await self._http.post("/api/auth/cookie", json={"platform": platform, "cookie": cookie})
+        payload: dict = {"platform": platform, "cookie": cookie}
+        if bot_id:
+            payload["botId"] = bot_id
+        resp = await self._http.post("/api/auth/cookie", json=payload)
+        return self._json(resp)
+
+    async def delete_cookie(self, platform: str, bot_id: str | None = None) -> dict:
+        """退出某平台登录：清除该 bot 的平台 cookie。"""
+        await self._ensure_login()
+        params: dict[str, str] = {"platform": platform}
+        if bot_id:
+            params["botId"] = bot_id
+        resp = await self._http.delete("/api/auth/cookie", params=params)
         return self._json(resp)
 
     # ───────────────────────── 我的音乐 / 歌单 ─────────────────────────
@@ -401,11 +514,13 @@ class TSMusicClient:
         platform: str | None = None,
         params: dict[str, str] | None = None,
         cache_meta: bool = False,
+        bot_id: str | None = None,
     ) -> dict:
         """统一代理 TSMusicBot 列表端点，返回 {ok, unsupported, data, error}。
 
         - 上游 501 → unsupported=True（该平台不支持此功能，如 B 站的歌单 / 每日推荐）
         - 正常 → data 为列表；cache_meta 时缓存每项元数据供队列回填
+        - bot_id → 上游用该 bot 的平台 cookie（per-bot 平台账号）
         - 异常 → ok=False
         """
         await self._ensure_login()
@@ -413,6 +528,8 @@ class TSMusicClient:
             q: dict[str, str] = dict(params or {})
             if platform:
                 q["platform"] = platform
+            if bot_id:
+                q["botId"] = bot_id
             resp = await self._http.get(path, params=q)
             if resp.status_code == 501:
                 return {"ok": False, "unsupported": True, "data": [], "error": "not supported"}
@@ -428,33 +545,33 @@ class TSMusicClient:
             logger.warning("TSMusicBot %s 失败: %s", path, exc)
             return {"ok": False, "unsupported": False, "data": [], "error": str(exc)}
 
-    async def user_playlists(self, platform: str) -> dict:
-        """用户歌单（自建 + 收藏）。B 站上游不支持 → unsupported=True。"""
-        return await self._fetch_list("/api/music/user/playlists", "playlists", platform)
+    async def user_playlists(self, platform: str, bot_id: str | None = None) -> dict:
+        """用户歌单（自建 + 收藏，per-bot）。B 站上游不支持 → unsupported=True。"""
+        return await self._fetch_list("/api/music/user/playlists", "playlists", platform, bot_id=bot_id)
 
-    async def playlist_songs(self, playlist_id: str, platform: str | None = None) -> dict:
-        """歌单内歌曲（缓存元数据，供入队后队列回填）。"""
+    async def playlist_songs(self, playlist_id: str, platform: str | None = None, bot_id: str | None = None) -> dict:
+        """歌单内歌曲（per-bot；缓存元数据，供入队后队列回填）。"""
         return await self._fetch_list(
-            f"/api/music/playlist/{playlist_id}", "songs", platform, cache_meta=True
+            f"/api/music/playlist/{playlist_id}", "songs", platform, cache_meta=True, bot_id=bot_id
         )
 
-    async def recommend_songs(self, platform: str) -> dict:
-        """每日推荐。B 站上游不支持。"""
+    async def recommend_songs(self, platform: str, bot_id: str | None = None) -> dict:
+        """每日推荐（per-bot）。B 站上游不支持。"""
         return await self._fetch_list(
-            "/api/music/recommend/songs", "songs", platform, cache_meta=True
+            "/api/music/recommend/songs", "songs", platform, cache_meta=True, bot_id=bot_id
         )
 
-    async def personal_fm(self, platform: str) -> dict:
-        """私人 FM。B 站上游不支持。"""
+    async def personal_fm(self, platform: str, bot_id: str | None = None) -> dict:
+        """私人 FM（per-bot）。B 站上游不支持。"""
         return await self._fetch_list(
-            "/api/music/personal/fm", "songs", platform, cache_meta=True
+            "/api/music/personal/fm", "songs", platform, cache_meta=True, bot_id=bot_id
         )
 
-    async def bilibili_popular(self, limit: int = 20) -> dict:
-        """B 站热门视频（无需 platform 查询参数 / 无需登录）。"""
+    async def bilibili_popular(self, limit: int = 20, bot_id: str | None = None) -> dict:
+        """B 站热门视频（无需登录，per-bot）。"""
         return await self._fetch_list(
             "/api/music/bilibili/popular", "songs",
-            params={"limit": str(limit)}, cache_meta=True,
+            params={"limit": str(limit)}, cache_meta=True, bot_id=bot_id,
         )
 
     async def enqueue_songs(self, songs: list[dict], platform: str | None = None, bot_id: str | None = None) -> dict:
@@ -499,13 +616,13 @@ class TSMusicClient:
         return self._follow_enabled if self._follow_enabled is not None else True
 
     async def load_follow_setting(self, session: AsyncSession) -> bool:
-        """从 KV 加载跟随开关到单例内存缓存，返回当前值（缺失默认开启）。"""
+        """从 KV 加载跟随开关到内存缓存（缺失默认开启）。"""
         raw = await app_setting.get_setting(session, "follow_enabled", "1")
         self._follow_enabled = raw.strip().lower() not in ("0", "false", "no", "off")
         return self._follow_enabled
 
     async def set_follow_setting(self, session: AsyncSession, enabled: bool) -> None:
-        """持久化跟随开关并刷新单例内存缓存。"""
+        """持久化跟随开关并刷新内存缓存。"""
         await app_setting.set_setting(session, "follow_enabled", "1" if enabled else "0")
         self._follow_enabled = enabled
 

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from ..core.database import Base
-from .account import Account, Session, VerifyCode
+from .account import Account, BotOwnership, Session, VerifyCode
 from .app_setting import AppSetting
 from .community import ChannelRental, Friend
 from .stats import VisitStat
@@ -10,6 +10,7 @@ from .stats import VisitStat
 __all__ = [
     "Base",
     "Account",
+    "BotOwnership",
     "Session",
     "VerifyCode",
     "AppSetting",
