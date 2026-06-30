@@ -88,6 +88,12 @@ async def init_db() -> None:
         # 对已存在的库补新列（create_all 不改已存在表结构）
         await _ensure_column(conn, "accounts", "qq_number", "VARCHAR(16)")
         await _ensure_column(conn, "accounts", "notify_friends_online", "BOOLEAN DEFAULT 0 NOT NULL")
+        # per-user 专属 TSMusicBot 容器归属字段
+        await _ensure_column(conn, "accounts", "tsmusic_container_name", "VARCHAR(64)")
+        await _ensure_column(conn, "accounts", "tsmusic_port", "INTEGER")
+        await _ensure_column(conn, "accounts", "tsmusic_user", "VARCHAR(64)")
+        await _ensure_column(conn, "accounts", "tsmusic_password", "VARCHAR(128)")
+        await _ensure_column(conn, "accounts", "container_status", "VARCHAR(16) DEFAULT 'none'")
     # 日志只输出驱动名，避免切换 PG/MySQL 后连接串(含密码)落盘
     driver = settings.database_url.split("://")[0]
     logger.info("数据库初始化完成 (driver=%s)", driver)

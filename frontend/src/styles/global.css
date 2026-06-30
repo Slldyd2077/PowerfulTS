@@ -290,4 +290,52 @@ body {
   }
 }
 
+/* ───────────────────────────────────────────────
+   Element Plus 弹窗暗色主题（ElMessage 顶部提示 / ElMessageBox 确认框）
+   两者都 teleport 到 <body>，默认亮色，此处全局覆盖为暗色，与石墨主题统一。
+   global.css 在 element-plus/dist/index.css 之后加载，源序优先。
+   ─────────────────────────────────────────────── */
+
+/* 顶部 Message 提示条（success / warning / info / error 共用） */
+.el-message {
+  background-color: var(--surface-2) !important;
+  border-color: var(--border-default) !important;
+  color: var(--text-primary);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+/* 语义文字色：success 绿 / warning 琥珀 / error 红 / info 中性（图标保持 EP 语义色）
+   注意：变体规则必须在通用规则之后（等特异性 + !important 下源序胜），否则会被通用规则覆盖。 */
+.el-message .el-message__content { color: var(--text-primary) !important; }
+.el-message--success .el-message__content { color: var(--color-success) !important; }
+.el-message--warning .el-message__content { color: var(--color-accent) !important; }
+.el-message--error   .el-message__content { color: var(--color-danger) !important; }
+.el-message--info    .el-message__content { color: var(--text-primary) !important; }
+/* close 按钮（可关闭的 message） */
+.el-message .el-message__closeBtn { color: var(--text-muted); }
+.el-message .el-message__closeBtn:hover { color: var(--text-primary); }
+
+/* MessageBox 确认/弹窗 */
+.el-message-box {
+  background-color: var(--surface-2) !important;
+  border: 1px solid var(--border-default) !important;
+  box-shadow: var(--shadow-lg);
+}
+.el-message-box .el-message-box__title { color: var(--text-primary) !important; }
+.el-message-box .el-message-box__content { color: var(--text-secondary) !important; }
+.el-message-box .el-message-box__headerbtn .el-message-box__close { color: var(--text-muted); }
+.el-message-box .el-message-box__headerbtn:hover .el-message-box__close { color: var(--text-primary); }
+/* MessageBox 内的非主按钮（取消等）走暗色，避免亮色块嵌在暗框里 */
+.el-message-box .el-button:not(.el-button--primary):not(.el-button--danger) {
+  --el-button-bg-color: var(--surface-3);
+  --el-button-border-color: var(--border-default);
+  --el-button-text-color: var(--text-secondary);
+  --el-button-hover-bg-color: var(--surface-4);
+  --el-button-hover-border-color: var(--border-emphasis);
+  --el-button-hover-text-color: var(--text-primary);
+  --el-button-active-text-color: var(--text-primary);
+}
+
+
 

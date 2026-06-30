@@ -31,11 +31,45 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 
+async def _migrate_bot_ownership() -> None:
+    """把现有默认 bot（env TSMUSIC_BOT_ID）归属首个 account。
+
+    owner 软隔离表是新增的，历史 bot（单租户时期创建）无 owner 记录，
+    会被 list_bots 过滤。这里一次性把现有默认 bot 归给首个 account（你的号）。
+    """
+    bot_id = settings.tsmusic_bot_id
+    if not bot_id:
+        return
+    from sqlalchemy import select
+
+    from .models import Account, BotOwnership
+
+    async with AsyncSessionLocal() as session:
+        existing = await session.scalar(
+            select(BotOwnership).where(BotOwnership.bot_id == bot_id)
+        )
+        if existing is not None:
+            return  # 已有 owner 记录，不重复迁移
+        acc = await session.scalar(select(Account).order_by(Account.id))
+        if acc is None:
+            return
+        session.add(BotOwnership(account_id=acc.id, bot_id=bot_id))
+        await session.commit()
+        logger.info(
+            "迁移: 现有 bot %s 归属 account %s (%s)", bot_id, acc.id, acc.ts_nickname
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期：原生数据层 + TS3 监控 + 多媒体代理客户端 + NapCat 推送。"""
     # 原生数据层: 建表 (SQLite + SQLAlchemy async)
     await init_db()
+    # 迁移：现有默认 bot（env TSMUSIC_BOT_ID）归属首个 account（兼容历史单租户数据）
+    try:
+        await _migrate_bot_ownership()
+    except Exception:
+        logger.warning("bot owner 迁移失败", exc_info=True)
     # NapCat QQ 推送客户端 (好友上线提醒; 未配置则发送时优雅降级)
     app.state.napcat = NapCatClient(settings.napcat_url, settings.napcat_token)
     # 上线提醒编排器 (反查订阅者 → NapCat 发私聊)
@@ -48,8 +82,11 @@ async def lifespan(app: FastAPI):
     app.state.ts3_monitor.start()
     # 网易云音乐 API 客户端 (本地 NeteaseCloudMusicApi 服务, 账号/歌单)
     app.state.netease = NeteaseClient(settings.netease_api_url)
-    # TSMusicBot 音乐引擎代理客户端 (网易云 / QQ / B 站 多平台)
-    app.state.tsmusic = TSMusicClient(settings)
+    # TSMusicBot 音乐引擎代理客户端（单例：连接单一共享 TSMusicBot 容器）
+    app.state.tsmusic = TSMusicClient(
+        settings.tsmusic_url, settings.tsmusic_user, settings.tsmusic_password,
+        bot_id=settings.tsmusic_bot_id,
+    )
     # 预加载播放跟随开关到单例（保证重启后关闭态生效；失败不阻断启动）
     try:
         async with AsyncSessionLocal() as session:

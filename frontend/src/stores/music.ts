@@ -29,11 +29,20 @@ import {
   deleteBot as apiDeleteBot,
   getFollowSetting as apiGetFollowSetting,
   setFollowSetting as apiSetFollowSetting,
+  getBotSettings as apiGetBotSettings,
+  setBotSettings as apiSetBotSettings,
+  getBotProfile as apiGetBotProfile,
+  setBotProfile as apiSetBotProfile,
+  getBotAvatarBlob as apiGetBotAvatarBlob,
+  setBotAvatar as apiSetBotAvatar,
+  deleteBotAvatar as apiDeleteBotAvatar,
   type Song,
   type NowPlaying,
   type Playlist,
   type BotInfo,
   type BotCreate,
+  type BotSettings,
+  type BotProfile,
 } from '@/api/music'
 
 export const useMusicStore = defineStore('music', () => {
@@ -61,6 +70,16 @@ export const useMusicStore = defineStore('music', () => {
   // ── 播放跟随开关（默认开启；点击播放时 bot 自动移到当前用户所在 TS 频道）──
   const followEnabled = ref(true)
 
+  // ── bot 行为 / 外观设置 ──
+  // 全局：空闲下线 + 空频道自动暂停（所有 bot 共享）
+  const botSettings = ref<BotSettings>({ idleTimeoutMinutes: 0, autoPauseOnEmpty: false })
+  // per-bot profile 开关（6 字段），随 activeBotId 切换而重新拉取
+  const activeBotProfile = ref<BotProfile | null>(null)
+  // 当前 active bot 的固定头像（objectURL；切换/上传/删除时 revoke 重建）
+  const activeBotAvatarUrl = ref<string | null>(null)
+  const avatarLoading = ref(false)
+  let avatarObjUrl: string | null = null
+
   // ── 我的音乐：平台登录态（提升自 PlatformAccounts，供 MyMusic 置灰判断）──
   const platformStatus = ref<Record<string, { loggedIn: boolean; nickname?: string }>>({})
   const myActivePlatform = ref<'netease' | 'qq' | 'bilibili'>('netease')
@@ -83,9 +102,9 @@ export const useMusicStore = defineStore('music', () => {
       if (searchPlatform.value === 'all') {
         // 三平台并行搜索，合并结果
         const [ne, qq, bili] = await Promise.allSettled([
-          apiSearch(q, 'netease'),
-          apiSearch(q, 'qq'),
-          apiSearch(q, 'bilibili'),
+          apiSearch(q, 'netease', activeBotId.value),
+          apiSearch(q, 'qq', activeBotId.value),
+          apiSearch(q, 'bilibili', activeBotId.value),
         ])
         const all: Song[] = []
         for (const r of [ne, qq, bili]) {
@@ -93,7 +112,7 @@ export const useMusicStore = defineStore('music', () => {
         }
         searchResults.value = all
       } else {
-        const res = await apiSearch(q, searchPlatform.value)
+        const res = await apiSearch(q, searchPlatform.value, activeBotId.value)
         searchResults.value = res.results || []
       }
     } catch {
@@ -228,7 +247,7 @@ export const useMusicStore = defineStore('music', () => {
     const results = await Promise.all(
       platforms.map(async (p) => {
         try {
-          const res = await apiGetAuthStatus(p)
+          const res = await apiGetAuthStatus(p, activeBotId.value)
           return { p, loggedIn: !!res.loggedIn, nickname: res.nickname as string | undefined }
         } catch {
           return { p, loggedIn: false, nickname: undefined }
@@ -245,7 +264,7 @@ export const useMusicStore = defineStore('music', () => {
     const key = `${platform}:playlists`
     myLoading.value = { ...myLoading.value, [key]: true }
     try {
-      const res = await apiGetMyPlaylists(platform)
+      const res = await apiGetMyPlaylists(platform, activeBotId.value)
       if (res.unsupported) {
         myUnsupported.value = { ...myUnsupported.value, [key]: true }
         myPlaylists.value = { ...myPlaylists.value, [platform]: [] }
@@ -264,7 +283,7 @@ export const useMusicStore = defineStore('music', () => {
     const key = `song:${playlistId}`
     myLoading.value = { ...myLoading.value, [key]: true }
     try {
-      const res = await apiGetPlaylistSongs(playlistId, platform)
+      const res = await apiGetPlaylistSongs(playlistId, platform, activeBotId.value)
       if (res.unsupported) {
         myUnsupported.value = { ...myUnsupported.value, [key]: true }
         playlistSongs.value = { ...playlistSongs.value, [playlistId]: [] }
@@ -283,7 +302,7 @@ export const useMusicStore = defineStore('music', () => {
     const key = `${platform}:recommend`
     myLoading.value = { ...myLoading.value, [key]: true }
     try {
-      const res = await apiGetRecommendSongs(platform)
+      const res = await apiGetRecommendSongs(platform, activeBotId.value)
       if (res.unsupported) {
         myUnsupported.value = { ...myUnsupported.value, [key]: true }
         myRecommend.value = { ...myRecommend.value, [platform]: [] }
@@ -302,7 +321,7 @@ export const useMusicStore = defineStore('music', () => {
     const key = `${platform}:fm`
     myLoading.value = { ...myLoading.value, [key]: true }
     try {
-      const res = await apiGetPersonalFm(platform)
+      const res = await apiGetPersonalFm(platform, activeBotId.value)
       if (res.unsupported) {
         myUnsupported.value = { ...myUnsupported.value, [key]: true }
         myFm.value = { ...myFm.value, [platform]: [] }
@@ -321,7 +340,7 @@ export const useMusicStore = defineStore('music', () => {
     const key = 'bilibili:popular'
     myLoading.value = { ...myLoading.value, [key]: true }
     try {
-      const res = await apiGetBilibiliPopular()
+      const res = await apiGetBilibiliPopular(20, activeBotId.value)
       bilibiliPopular.value = (res.data as Song[]) || []
       bilibiliPopularLoaded.value = true
     } catch {
@@ -342,6 +361,9 @@ export const useMusicStore = defineStore('music', () => {
 
   /** 拉取 bot 列表，并选定 active（localStorage 命中 → default → 第一个） */
   async function fetchBots() {
+    // 先清残留：防切换账号后用旧账号的 activeBotId 请求（owner 校验会 403，且串账号数据）
+    activeBotId.value = ''
+    bots.value = []
     try {
       const res = await apiGetBots()
       bots.value = res.bots || []
@@ -352,12 +374,19 @@ export const useMusicStore = defineStore('music', () => {
     if (stored && bots.value.some((b) => b.id === stored)) {
       activeBotId.value = stored
     } else if (bots.value.length) {
-      const def = bots.value.find((b) => b.default) || bots.value[0]
+      const def = bots.value.find((b) =>b.default) || bots.value[0]
       activeBotId.value = def.id
       localStorage.setItem(LS_ACTIVE_BOT, def.id)
     } else {
       activeBotId.value = ''
     }
+    // activeBot 就绪后拉取其 profile / 头像（fetchBots 不经 setActiveBot，需在此补）
+    if (activeBotId.value) {
+      void fetchBotProfile()
+      void refreshAvatar()
+    }
+    // 平台登录态随当前 bot 自动拉取（不等用户点开平台账号面板）
+    void fetchPlatformStatus()
   }
 
   /** 切换 active bot：持久化 + 清旧 bot 播放态 + 拉新 bot */
@@ -368,7 +397,8 @@ export const useMusicStore = defineStore('music', () => {
     nowplaying.value = null
     queue.value = []
     localPosition.value = 0
-    await Promise.all([fetchNowplaying(), fetchQueue()])
+    activeBotProfile.value = null
+    await Promise.all([fetchNowplaying(), fetchQueue(), fetchBotProfile(), refreshAvatar(), fetchPlatformStatus()])
   }
 
   async function createBot(payload: BotCreate) {
@@ -415,6 +445,91 @@ export const useMusicStore = defineStore('music', () => {
   async function setFollow(enabled: boolean) {
     await apiSetFollowSetting(enabled)
     followEnabled.value = enabled
+  }
+
+  // ── bot 行为 / 外观设置 ──
+
+  /** 拉取全局 bot 行为设置 */
+  async function fetchBotSettings() {
+    try {
+      botSettings.value = await apiGetBotSettings()
+    } catch {
+      // 静默，保持默认
+    }
+  }
+
+  /** 更新全局 bot 行为设置（仅传需要改的字段） */
+  async function saveBotSettings(payload: Partial<BotSettings>) {
+    botSettings.value = await apiSetBotSettings(payload)
+    return botSettings.value
+  }
+
+  /** 拉取当前 active bot 的 profile 开关 */
+  async function fetchBotProfile() {
+    if (!activeBotId.value) {
+      activeBotProfile.value = null
+      return
+    }
+    try {
+      activeBotProfile.value = await apiGetBotProfile(activeBotId.value)
+    } catch {
+      activeBotProfile.value = null
+    }
+  }
+
+  /** 更新当前 active bot 的 profile 开关（上游立即生效） */
+  async function saveBotProfile(payload: Partial<BotProfile>) {
+    if (!activeBotId.value) return
+    activeBotProfile.value = await apiSetBotProfile(activeBotId.value, payload)
+    return activeBotProfile.value
+  }
+
+  /** 重新拉取当前 active bot 的固定头像（revoke 旧 objectURL）。404=未设置，静默置空 */
+  async function refreshAvatar() {
+    const gen = botGen
+    if (avatarObjUrl) {
+      URL.revokeObjectURL(avatarObjUrl)
+      avatarObjUrl = null
+    }
+    activeBotAvatarUrl.value = null
+    if (!activeBotId.value) return
+    avatarLoading.value = true
+    try {
+      const blob = await apiGetBotAvatarBlob(activeBotId.value)
+      // 切换发生则丢弃过期响应（blob 未转 objectURL，无需 revoke），防乱序覆盖
+      if (gen !== botGen) return
+      if (blob && blob.size > 0) {
+        avatarObjUrl = URL.createObjectURL(blob)
+        activeBotAvatarUrl.value = avatarObjUrl
+      }
+    } catch {
+      // 404 = 未设置固定头像
+    } finally {
+      if (gen === botGen) avatarLoading.value = false
+    }
+  }
+
+  /** 释放当前 objectURL（组件卸载时调用，防内存泄漏） */
+  function disposeAvatar() {
+    if (avatarObjUrl) {
+      URL.revokeObjectURL(avatarObjUrl)
+      avatarObjUrl = null
+    }
+    activeBotAvatarUrl.value = null
+  }
+
+  /** 上传/替换当前 active bot 的固定头像（data:image/...;base64,...） */
+  async function uploadAvatar(dataUrl: string) {
+    if (!activeBotId.value) return
+    await apiSetBotAvatar(activeBotId.value, dataUrl)
+    await refreshAvatar()
+  }
+
+  /** 移除当前 active bot 的固定头像 */
+  async function removeAvatar() {
+    if (!activeBotId.value) return
+    await apiDeleteBotAvatar(activeBotId.value)
+    await refreshAvatar()
   }
 
   return {
@@ -470,5 +585,17 @@ export const useMusicStore = defineStore('music', () => {
     followEnabled,
     fetchFollowSetting,
     setFollow,
+    botSettings,
+    activeBotProfile,
+    activeBotAvatarUrl,
+    avatarLoading,
+    fetchBotSettings,
+    saveBotSettings,
+    fetchBotProfile,
+    saveBotProfile,
+    refreshAvatar,
+    uploadAvatar,
+    removeAvatar,
+    disposeAvatar,
   }
 })

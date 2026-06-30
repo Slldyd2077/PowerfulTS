@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import QRCode from 'qrcode'
-import { getAuthStatus, getQrcode, setCookie } from '@/api/music'
+import { getAuthStatus, getQrcode, setCookie, logoutPlatform } from '@/api/music'
 import { ElMessage } from 'element-plus'
 import { useMusicStore } from '@/stores/music'
 
@@ -27,12 +27,16 @@ const loading = ref(false)
 let pollTimer: number | null = null
 
 async function startLogin(p: PlatformInfo) {
+  if (!music.activeBotId) {
+    ElMessage.warning('请先在「TS Bot」面板创建一个 Bot，再登录平台账号（平台账号绑定到 Bot 实例）')
+    return
+  }
   activePlatform.value = p.value
   loading.value = true
   qrImg.value = ''
   stopPolling()
   try {
-    const res = await getQrcode(p.value)
+    const res = await getQrcode(p.value, music.activeBotId)
     // 优先用 API 返回的 qrImg；没有则用 qrUrl 本地生成二维码
     if (res.qrImg) {
       qrImg.value = res.qrImg
@@ -56,7 +60,7 @@ function startPolling(platform: string) {
   stopPolling()
   pollTimer = window.setInterval(async () => {
     try {
-      const res = await getAuthStatus(platform)
+      const res = await getAuthStatus(platform, music.activeBotId)
       if (res.loggedIn) {
         // 写回 store，解除 MyMusic 的置灰
         music.platformStatus[platform] = { loggedIn: true, nickname: res.nickname }
@@ -104,6 +108,10 @@ const cookiePlaceholder = computed(() => {
 })
 
 function openCookie(p: PlatformInfo) {
+  if (!music.activeBotId) {
+    ElMessage.warning('请先在「TS Bot」面板创建一个 Bot，再登录平台账号')
+    return
+  }
   cookiePlatform.value = p.value
   cookieText.value = ''
   showCookie.value = true
@@ -120,9 +128,9 @@ async function submitCookie() {
   if (!text || !plat) return
   loading.value = true
   try {
-    await setCookie(plat, text)
+    await setCookie(plat, text, music.activeBotId)
     // 上游 /api/auth/cookie 总返回 success:true（仅表示已提交），真实登录态以 status.loggedIn 为准
-    const res = await getAuthStatus(plat)
+    const res = await getAuthStatus(plat, music.activeBotId)
     // 写回 store，解除 MyMusic 的置灰
     music.platformStatus[plat] = { loggedIn: !!res.loggedIn, nickname: res.nickname }
     if (res.loggedIn) {
@@ -136,6 +144,17 @@ async function submitCookie() {
     ElMessage.error('Cookie 提交失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function onLogout(p: PlatformInfo) {
+  try {
+    await logoutPlatform(p.value, music.activeBotId)
+    // 写回 store，恢复 MyMusic 的置灰
+    music.platformStatus[p.value] = { loggedIn: false }
+    ElMessage.success(`${p.label} 已退出登录`)
+  } catch {
+    ElMessage.error(`${p.label} 退出失败`)
   }
 }
 
@@ -164,7 +183,10 @@ onUnmounted(stopPolling)
           <button class="login-btn" @click="startLogin(p)">扫码</button>
           <button class="login-btn login-btn--ghost" @click="openCookie(p)">Cookie</button>
         </div>
-        <span v-else class="logged-dot" :style="{ background: p.color }"></span>
+        <div v-else class="logout-actions">
+          <span class="logged-dot" :style="{ background: p.color }"></span>
+          <button class="logout-btn" @click="onLogout(p)">退出</button>
+        </div>
       </div>
     </div>
 
@@ -357,6 +379,30 @@ onUnmounted(stopPolling)
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
+}
+
+.logout-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.logout-btn {
+  padding: 3px 11px;
+  border: 1px solid var(--border-emphasis);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.66em;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.logout-btn:hover {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
 }
 
 /* 二维码弹窗 */
