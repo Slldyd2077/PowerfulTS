@@ -273,6 +273,14 @@ class TSMusicClient:
         resp = await self._http.post(f"/api/player/{self._bid(bot_id)}/play-at", json={"index": index})
         return self._json(resp)
 
+    async def move_queue_item(self, from_idx: int, to_idx: int, bot_id: str | None = None) -> dict:
+        """拖动调序：移动队列项到新位置（上游 POST /queue/:from/move {to}）。"""
+        await self._ensure_login()
+        resp = await self._http.post(
+            f"/api/player/{self._bid(bot_id)}/queue/{from_idx}/move", json={"to": to_idx}
+        )
+        return self._json(resp)
+
     # ───────────────────────── 状态 ─────────────────────────
 
     async def get_bot_status(self, bot_id: str | None = None) -> dict:

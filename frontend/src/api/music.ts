@@ -126,6 +126,12 @@ export async function playQueueAt(index: number, botId?: string) {
   return data
 }
 
+/** 拖动调序：移动队列项到新位置（0-based 索引） */
+export async function moveQueueItem(from: number, to: number, botId?: string) {
+  const { data } = await apiClient.post(`/music/queue/${from}/move`, { to }, botId ? { params: { botId } } : undefined)
+  return data
+}
+
 // ───────────────────────── bot 实例管理 ─────────────────────────
 
 /** bot 实例信息（后端归一化后） */
