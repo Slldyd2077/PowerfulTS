@@ -21,7 +21,7 @@ function onCoverError(url?: string) {
 }
 
 const expandedPlaylist = ref<string | null>(null)
-const openSections = reactive<Record<string, boolean>>({ playlists: true, recommend: false, fm: false })
+const openSections = reactive<Record<string, boolean>>({ playlists: true, recommend: false, fm: false, biliPopular: true })
 
 const active = computed(() => music.myActivePlatform)
 const isLoggedIn = computed(() => !!music.platformStatus[active.value]?.loggedIn)
@@ -46,8 +46,13 @@ function selectPlatform(value: 'netease' | 'qq' | 'bilibili') {
 function loadActive() {
   const p = active.value
   if (p === 'bilibili') {
+    // 热门视频（无需登录）
     if (!music.bilibiliPopularLoaded && !music.myLoading['bilibili:popular']) {
       music.fetchBilibiliPopular()
+    }
+    // 收藏夹（需登录；active=bilibili 时 fetchMyPlaylists 走上游 B 站收藏夹端点）
+    if (isLoggedIn.value && music.myPlaylists['bilibili'] === undefined && !music.myLoading['bilibili:playlists']) {
+      music.fetchMyPlaylists('bilibili')
     }
     return
   }
@@ -134,13 +139,76 @@ async function handlePlay(song: Song, queued = false) {
     </div>
 
     <div class="my-content">
-      <!-- B站：热门视频 -->
+      <!-- B站：收藏夹（登录后）+ 热门视频 -->
       <template v-if="active === 'bilibili'">
-        <div v-if="music.myLoading['bilibili:popular']" class="loading-row">
-          <EqualizerBars class="loading-eq" :active="true" /><span>加载中…</span>
-        </div>
-        <div v-else-if="music.bilibiliPopular.length === 0" class="no-data">暂无热门视频</div>
-        <SongRow v-for="s in music.bilibiliPopular" :key="s.id" :song="s" @play="handlePlay" />
+        <!-- 我的收藏夹 -->
+        <section v-if="isLoggedIn" class="section">
+          <div class="section-head" @click="openSections.playlists = !openSections.playlists">
+            <span class="section-title">我的收藏夹</span>
+            <span class="section-count mono">{{ playlists.length }}</span>
+            <svg class="section-arrow" :class="{ open: openSections.playlists }" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <div v-show="openSections.playlists" class="section-body">
+            <div v-if="music.myLoading['bilibili:playlists']" class="loading-row">
+              <EqualizerBars class="loading-eq" :active="true" /><span>加载中…</span>
+            </div>
+            <div v-else-if="playlists.length === 0" class="no-data">暂无收藏夹</div>
+            <div v-else class="playlist-list">
+              <div v-for="pl in playlists" :key="pl.id" class="playlist-item">
+                <div class="playlist-row" :class="{ expanded: expandedPlaylist === pl.id }" @click="togglePlaylist(pl)">
+                  <img
+                    v-if="pl.coverUrl && !brokenCovers.has(pl.coverUrl)"
+                    :src="pl.coverUrl"
+                    class="pl-cover"
+                    loading="lazy"
+                    referrerpolicy="no-referrer"
+                    @error="onCoverError(pl.coverUrl)"
+                  />
+                  <span v-else class="pl-cover pl-cover--fallback" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 17V7l8-1.5v7" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.5" cy="17" r="2"/><circle cx="14" cy="15" r="2"/></svg>
+                  </span>
+                  <div class="pl-info">
+                    <span class="pl-name">{{ pl.name }}</span>
+                    <span class="pl-count">{{ pl.songCount || 0 }} 个视频</span>
+                  </div>
+                  <button class="pl-enqueue" title="整单加入队列" @click.stop="playAllPlaylist(pl)">
+                    <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                  </button>
+                  <svg class="pl-arrow" :class="{ open: expandedPlaylist === pl.id }" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </div>
+                <!-- 展开的视频 -->
+                <div v-if="expandedPlaylist === pl.id" class="playlist-songs">
+                  <div v-if="music.myLoading[`song:${pl.id}`]" class="loading-row">
+                    <EqualizerBars class="loading-eq" :active="true" /><span>加载中…</span>
+                  </div>
+                  <div v-else-if="(music.playlistSongs[pl.id] || []).length === 0" class="no-data">暂无视频</div>
+                  <SongRow
+                    v-for="s in (music.playlistSongs[pl.id] || [])"
+                    :key="s.id"
+                    :song="s"
+                    @play="handlePlay"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+        <div v-else class="no-data">登录 B 站后可查看收藏夹</div>
+
+        <!-- 热门视频 -->
+        <section class="section">
+          <div class="section-head" @click="openSections.biliPopular = !openSections.biliPopular">
+            <span class="section-title">热门视频</span>
+            <svg class="section-arrow" :class="{ open: openSections.biliPopular }" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <div v-show="openSections.biliPopular" class="section-body">
+            <div v-if="music.myLoading['bilibili:popular']" class="loading-row">
+              <EqualizerBars class="loading-eq" :active="true" /><span>加载中…</span>
+            </div>
+            <div v-else-if="music.bilibiliPopular.length === 0" class="no-data">暂无热门视频</div>
+            <SongRow v-for="s in music.bilibiliPopular" :key="s.id" :song="s" @play="handlePlay" />
+          </div>
+        </section>
       </template>
 
       <!-- 网易云/QQ 未登录 -->

@@ -1,3 +1,14 @@
+## v0.4.0 (2026-07-04)
+
+### Feat
+
+- **B 站收藏夹**：我的音乐 → B 站 tab 登录后展示收藏夹列表，点开看视频、单首点播、整单入队，自动过滤失效视频（需 TSMusicBot fork 配合：上游 BiliBiliProvider 新增 `getUserPlaylists` / `getPlaylistSongs`，用 B 站 v3 收藏夹 API）
+- **扫码登录自动确认**：平台账号扫码后自动检测确认、关闭弹窗并刷新登录态（轮询 `qrcode/status`）；二维码过期自动提示重新获取
+
+### Fix
+
+- 扫码登录后弹窗不自动关闭：PowerfulTS 之前只查 `auth/status`，未调 fork 的 `qrcode/status` 触发 cookie 持久化，导致 fork 不知扫码完成、cookie 不存、窗口永不关
+
 ## v0.3.2 (2026-06-28)
 
 ### Fix

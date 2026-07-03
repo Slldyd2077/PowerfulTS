@@ -480,6 +480,19 @@ class TSMusicClient:
         except (httpx.HTTPError, ValueError):
             return {"platform": platform, "loggedIn": False}
 
+    async def get_qrcode_status(self, key: str, platform: str, bot_id: str | None = None) -> dict:
+        """轮询二维码扫码状态。fork 在 confirmed 时自动持久化平台 cookie。
+        返回 {status: waiting|scanned|confirmed|expired}。"""
+        await self._ensure_login()
+        try:
+            params: dict[str, str] = {"key": key, "platform": platform}
+            if bot_id:
+                params["botId"] = bot_id
+            resp = await self._http.get("/api/auth/qrcode/status", params=params)
+            return resp.json()
+        except (httpx.HTTPError, ValueError):
+            return {"status": "waiting"}
+
     async def get_qrcode(self, platform: str, bot_id: str | None = None) -> dict:
         await self._ensure_login()
         payload: dict = {"platform": platform}
@@ -546,11 +559,11 @@ class TSMusicClient:
             return {"ok": False, "unsupported": False, "data": [], "error": str(exc)}
 
     async def user_playlists(self, platform: str, bot_id: str | None = None) -> dict:
-        """用户歌单（自建 + 收藏，per-bot）。B 站上游不支持 → unsupported=True。"""
+        """用户歌单（自建 + 收藏，per-bot）。网易云/QQ 为歌单，B 站为收藏夹列表（需登录）。"""
         return await self._fetch_list("/api/music/user/playlists", "playlists", platform, bot_id=bot_id)
 
     async def playlist_songs(self, playlist_id: str, platform: str | None = None, bot_id: str | None = None) -> dict:
-        """歌单内歌曲（per-bot；缓存元数据，供入队后队列回填）。"""
+        """歌单内歌曲（per-bot；缓存元数据，供入队后队列回填）。B 站时 playlist_id 为收藏夹 id，返回夹内视频。"""
         return await self._fetch_list(
             f"/api/music/playlist/{playlist_id}", "songs", platform, cache_meta=True, bot_id=bot_id
         )
