@@ -528,6 +528,12 @@ async def auth_status(platform: str, tsmusic: TsmusicDep, _account: AccountDep, 
     return await tsmusic.get_auth_status(platform, bot_id=bot_id)
 
 
+@router.get("/auth/qrcode/status")
+async def auth_qrcode_status(key: str, platform: str, tsmusic: TsmusicDep, _account: AccountDep, bot_id: OwnedBotId = None):
+    """轮询二维码扫码状态（per-bot；fork 在 confirmed 时自动持久化 cookie）。"""
+    return await tsmusic.get_qrcode_status(key, platform, bot_id=bot_id)
+
+
 @router.post("/auth/qrcode")
 async def auth_qrcode(body: dict, tsmusic: TsmusicDep, _account: AccountDep, bot_id: OwnedBotId = None):
     """获取某平台登录二维码（per-bot）。"""

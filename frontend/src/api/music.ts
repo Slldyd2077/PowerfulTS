@@ -345,6 +345,14 @@ export async function getQrcode(platform: string, botId?: string) {
   return data
 }
 
+/** 轮询二维码扫码状态（confirmed 时 fork 自动持久化平台 cookie） */
+export async function getQrcodeStatus(key: string, platform: string, botId?: string) {
+  const params: Record<string, string> = { key, platform }
+  if (botId) params.botId = botId
+  const { data } = await apiClient.get('/music/auth/qrcode/status', { params })
+  return data as { status: 'waiting' | 'scanned' | 'confirmed' | 'expired' }
+}
+
 /** 手动设置某平台 cookie（per-bot：绑定到该 bot；botId 走 query） */
 export async function setCookie(platform: string, cookie: string, botId?: string) {
   const { data } = await apiClient.post('/music/auth/cookie', { platform, cookie }, botId ? { params: { botId } } : undefined)

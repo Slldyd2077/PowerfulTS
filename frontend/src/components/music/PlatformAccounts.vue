@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import QRCode from 'qrcode'
-import { getAuthStatus, getQrcode, setCookie, logoutPlatform } from '@/api/music'
+import { getAuthStatus, getQrcode, getQrcodeStatus, setCookie, logoutPlatform } from '@/api/music'
 import { ElMessage } from 'element-plus'
 import { useMusicStore } from '@/stores/music'
 
@@ -23,6 +23,7 @@ const music = useMusicStore()
 const status = computed(() => music.platformStatus)
 const activePlatform = ref('')
 const qrImg = ref('')
+const currentQrKey = ref('') // 当前二维码 key（轮询 qrcode/status 用）
 const loading = ref(false)
 let pollTimer: number | null = null
 
@@ -37,6 +38,7 @@ async function startLogin(p: PlatformInfo) {
   stopPolling()
   try {
     const res = await getQrcode(p.value, music.activeBotId)
+    currentQrKey.value = res.key || ''
     // 优先用 API 返回的 qrImg；没有则用 qrUrl 本地生成二维码
     if (res.qrImg) {
       qrImg.value = res.qrImg
@@ -60,15 +62,25 @@ function startPolling(platform: string) {
   stopPolling()
   pollTimer = window.setInterval(async () => {
     try {
-      const res = await getAuthStatus(platform, music.activeBotId)
-      if (res.loggedIn) {
-        // 写回 store，解除 MyMusic 的置灰
-        music.platformStatus[platform] = { loggedIn: true, nickname: res.nickname }
+      const key = currentQrKey.value
+      if (!key) return
+      // 轮询扫码状态：fork 在 confirmed 时自动持久化平台 cookie
+      const r = await getQrcodeStatus(key, platform, music.activeBotId)
+      if (r.status === 'confirmed') {
+        const auth = await getAuthStatus(platform, music.activeBotId)
+        music.platformStatus[platform] = { loggedIn: !!auth.loggedIn, nickname: auth.nickname }
         qrImg.value = ''
+        currentQrKey.value = ''
         activePlatform.value = ''
         stopPolling()
         const p = platforms.find((x) => x.value === platform)
         ElMessage.success(`${p?.label} 登录成功`)
+      } else if (r.status === 'expired') {
+        stopPolling()
+        qrImg.value = ''
+        currentQrKey.value = ''
+        activePlatform.value = ''
+        ElMessage.warning('二维码已过期，请重新获取')
       }
     } catch {
       // 静默
@@ -86,6 +98,7 @@ function stopPolling() {
 function closeQr() {
   activePlatform.value = ''
   qrImg.value = ''
+  currentQrKey.value = ''
   stopPolling()
 }
 
