@@ -107,6 +107,76 @@ async function handleClear() { try { await music.clear(); ElMessage.success('已
 async function handleRemove(index: number) { try { await music.removeQueueAt(index) } catch { ElMessage.error('移除失败') } }
 async function handlePlayAt(index: number) { try { await music.playQueueAt(index) } catch { ElMessage.error('切换失败') } }
 
+// ── 队列长按拖动调序 ──
+const QUEUE_ROW_H = 56 // 队列项大致高度（封面 + padding）
+const pressTimer = ref<number | null>(null)
+const draggingIdx = ref<number | null>(null)    // 正在拖动的 index
+const dragOverIdx = ref<number | null>(null)    // 指针悬停的目标 index
+const pressStartY = ref(0)
+const dragOffsetY = ref(0)                       // 拖动项跟随指针的 translateY
+const didDrag = ref(false)                       // 本次交互是否真拖动过（抑制随后的 click）
+
+function onQueuePointerDown(e: PointerEvent, i: number) {
+  if (e.button !== 0) return // 仅主键 / 触摸
+  pressStartY.value = e.clientY
+  didDrag.value = false
+  if (pressTimer.value) clearTimeout(pressTimer.value)
+  pressTimer.value = window.setTimeout(() => {
+    draggingIdx.value = i
+    ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+  }, 450)
+}
+function onQueuePointerMove(e: PointerEvent) {
+  // 移动超过阈值则取消长按定时器（避免误触进入拖动）
+  if (pressTimer.value && Math.abs(e.clientY - pressStartY.value) > 10) {
+    clearTimeout(pressTimer.value)
+    pressTimer.value = null
+  }
+  if (draggingIdx.value === null) return
+  didDrag.value = true
+  const listEl = (e.currentTarget as HTMLElement).parentElement
+  if (!listEl) return
+  const relY = e.clientY - listEl.getBoundingClientRect().top + listEl.scrollTop
+  const n = music.queue.length
+  let target = Math.floor(relY / QUEUE_ROW_H)
+  target = Math.max(0, Math.min(n - 1, target))
+  dragOverIdx.value = target
+  dragOffsetY.value = e.clientY - pressStartY.value
+}
+function onQueuePointerUp(e: PointerEvent) {
+  if (pressTimer.value) { clearTimeout(pressTimer.value); pressTimer.value = null }
+  if (draggingIdx.value !== null) {
+    const from = draggingIdx.value
+    const to = dragOverIdx.value
+    ;(e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId)
+    draggingIdx.value = null
+    dragOverIdx.value = null
+    dragOffsetY.value = 0
+    if (to !== null && to !== from) {
+      music.moveQueueItem(from, to).catch(() => ElMessage.error('调序失败'))
+    }
+  }
+}
+// 每个项的 transform：拖动项跟随指针 + 放大，其余项按目标位置让位
+function queueItemStyle(i: number): Record<string, string> | undefined {
+  if (draggingIdx.value === null) return undefined
+  if (i === draggingIdx.value) {
+    return { transform: `translateY(${dragOffsetY.value}px) scale(1.04)`, 'z-index': '5' }
+  }
+  const from = draggingIdx.value
+  const to = dragOverIdx.value
+  let off = 0
+  if (to !== null && from !== to) {
+    if (from < to) off = i > from && i <= to ? -QUEUE_ROW_H : 0
+    else off = i >= to && i < from ? QUEUE_ROW_H : 0
+  }
+  return off ? { transform: `translateY(${off}px)` } : undefined
+}
+function onQueueClick(i: number) {
+  if (didDrag.value) { didDrag.value = false; return } // 拖动结束的 pointerup 会顺带触发 click，抑制掉
+  handlePlayAt(i)
+}
+
 // 播放模式：单控件循环切换
 const MODES = [
   { value: 'seq', label: '顺序播放' },
@@ -244,9 +314,14 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
           v-for="(item, i) in music.queue"
           :key="(item.platform || '') + ':' + (item.id || i)"
           class="queue-item row-scan"
-          :class="{ current: isCurrent(item) }"
-          :title="isCurrent(item) ? '正在播放' : '点击播放此曲'"
-          @click="handlePlayAt(i)"
+          :class="{ current: isCurrent(item), dragging: draggingIdx === i }"
+          :style="queueItemStyle(i)"
+          :title="isCurrent(item) ? '正在播放' : '点击播放 / 长按拖动调序'"
+          @click="onQueueClick(i)"
+          @pointerdown="onQueuePointerDown($event, i)"
+          @pointermove="onQueuePointerMove($event)"
+          @pointerup="onQueuePointerUp($event)"
+          @pointercancel="onQueuePointerUp($event)"
         >
           <span class="q-idx mono">{{ String(i + 1).padStart(2, '0') }}</span>
           <img v-if="item.coverUrl && !brokenCovers.has(item.coverUrl)" :src="item.coverUrl" class="q-cover" referrerpolicy="no-referrer" @error="onCoverError(item.coverUrl)" />
@@ -634,8 +709,16 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
   gap: 10px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--border-subtle);
-  transition: background 0.15s;
+  transition: background 0.15s, transform 0.15s var(--ease-out-expo);
   cursor: pointer;
+  touch-action: none; /* 长按拖动优先（队列短，触摸滚动受限可接受） */
+  user-select: none;
+}
+.queue-item.dragging {
+  background: var(--surface-4);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+  cursor: grabbing;
+  transition: none; /* 拖动时跟随指针，不要过渡 */
 }
 .queue-item:last-child {
   border-bottom: none;

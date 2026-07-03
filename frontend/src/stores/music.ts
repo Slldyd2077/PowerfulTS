@@ -15,6 +15,7 @@ import {
   getQueue as apiGetQueue,
   removeQueueItem as apiRemoveQueueItem,
   playQueueAt as apiPlayQueueAt,
+  moveQueueItem as apiMoveQueueItem,
   getAuthStatus as apiGetAuthStatus,
   getMyPlaylists as apiGetMyPlaylists,
   getPlaylistSongs as apiGetPlaylistSongs,
@@ -203,6 +204,12 @@ export const useMusicStore = defineStore('music', () => {
     await fetchNowplaying()
     await fetchQueue()
     return res
+  }
+
+  /** 拖动调序：移动队列项到新位置 */
+  async function moveQueueItem(from: number, to: number) {
+    await apiMoveQueueItem(from, to, activeBotId.value)
+    await fetchQueue()
   }
 
   /** 当前播放 */
@@ -566,6 +573,7 @@ export const useMusicStore = defineStore('music', () => {
     clear,
     removeQueueAt,
     playQueueAt,
+    moveQueueItem,
     setMode,
     fetchNowplaying,
     fetchQueue,

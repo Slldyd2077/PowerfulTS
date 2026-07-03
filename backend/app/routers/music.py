@@ -85,6 +85,10 @@ class SeekRequest(BaseModel):
     position: int = Field(ge=0, description="跳转到的播放位置（秒）")
 
 
+class MoveRequest(BaseModel):
+    to: int = Field(ge=0, description="队列项移动到的目标位置（0-based）")
+
+
 class VolumeRequest(BaseModel):
     volume: int = Field(ge=0, le=100)
 
@@ -250,6 +254,21 @@ async def play_at(
     """跳转到队列中指定位置播放（点击队列项切歌；index 越界或不可播时 400）。"""
     await _ensure_follow(request, tsmusic, account, bot_id)
     result = await tsmusic.play_at(index, bot_id=bot_id)
+    if isinstance(result, dict) and result.get("error"):
+        raise HTTPException(status_code=400, detail=str(result["error"]))
+    return result
+
+
+@router.post("/queue/{index}/move")
+async def move_queue_item(
+    index: Annotated[int, Path(ge=0)],
+    body: MoveRequest,
+    tsmusic: TsmusicDep,
+    _account: AccountDep,
+    bot_id: OwnedBotId = None,
+):
+    """拖动调序：移动队列项到新位置（index=from，body.to=目标）。"""
+    result = await tsmusic.move_queue_item(index, body.to, bot_id=bot_id)
     if isinstance(result, dict) and result.get("error"):
         raise HTTPException(status_code=400, detail=str(result["error"]))
     return result
