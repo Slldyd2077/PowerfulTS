@@ -132,6 +132,28 @@ export async function moveQueueItem(from: number, to: number, botId?: string) {
   return data
 }
 
+/** 共享 bot 给好友（owner，按好友 TS 昵称） */
+export async function shareBot(botId: string, friendTsNickname: string) {
+  const { data } = await apiClient.post(`/music/bots/${botId}/share`, { friendTsNickname })
+  return data
+}
+
+/** 撤销共享（owner） */
+export async function unshareBot(botId: string, friendAccountId: number) {
+  const { data } = await apiClient.delete(`/music/bots/${botId}/share/${friendAccountId}`)
+  return data
+}
+
+/** 我共享出去的 bot（按 bot 聚合，含共享给谁） */
+export interface MyShare {
+  botId: string
+  sharedTo: { accountId: number; nickname: string }[]
+}
+export async function getMyShares() {
+  const { data } = await apiClient.get('/music/bots/my-shares')
+  return data as { shares: MyShare[] }
+}
+
 // ───────────────────────── bot 实例管理 ─────────────────────────
 
 /** bot 实例信息（后端归一化后） */
@@ -142,6 +164,8 @@ export interface BotInfo {
   playing: boolean
   paused: boolean
   default?: boolean
+  shared?: boolean       // 好友共享给我的 bot（非自己拥有）
+  ownerNickname?: string // 共享 bot 的主人昵称
 }
 
 /** 创建 bot 的请求体 */

@@ -3,6 +3,8 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useMusicStore } from '@/stores/music'
 import type { BotInfo, BotCreate } from '@/api/music'
+import { shareBot, unshareBot, getMyShares, type MyShare } from '@/api/music'
+import { getFriends, type Friend } from '@/api/social'
 import BotBehaviorPanel from './BotBehaviorPanel.vue'
 
 const music = useMusicStore()
@@ -107,9 +109,64 @@ async function onDelete(b: BotInfo) {
   }
 }
 
+// ── 共享管理 ──
+const showShare = ref(false)
+const shareTarget = ref<BotInfo | null>(null)
+const friends = ref<Friend[]>([])
+const selectedFriend = ref<string>('') // ts_nickname
+const myShares = ref<MyShare[]>([])
+
+async function onShare(b: BotInfo) {
+  shareTarget.value = b
+  selectedFriend.value = ''
+  try {
+    const res = await getFriends()
+    friends.value = res.friends
+  } catch {
+    friends.value = []
+  }
+  showShare.value = true
+}
+async function confirmShare() {
+  if (!shareTarget.value || !selectedFriend.value) return
+  try {
+    await shareBot(shareTarget.value.id, selectedFriend.value)
+    ElMessage.success(`已共享给 ${selectedFriend.value}`)
+    showShare.value = false
+    await fetchMyShares()
+  } catch (e: unknown) {
+    ElMessage.error(e instanceof Error ? e.message : '共享失败')
+  }
+}
+async function onUnshare(botId: string, friendAccountId: number, nickname: string) {
+  try {
+    await unshareBot(botId, friendAccountId)
+    ElMessage.success(`已撤销对 ${nickname} 的共享`)
+    await fetchMyShares()
+  } catch {
+    ElMessage.error('撤销失败')
+  }
+}
+async function fetchMyShares() {
+  try {
+    const res = await getMyShares()
+    myShares.value = res.shares
+  } catch {
+    myShares.value = []
+  }
+}
+
+// bot 名查（共享列表展示用）
+const botNameById = computed(() => {
+  const m: Record<string, string> = {}
+  for (const b of bots.value) m[b.id] = b.name
+  return m
+})
+
 onMounted(() => {
   music.fetchBots()
   music.fetchFollowSetting()
+  fetchMyShares()
 })
 </script>
 
@@ -154,7 +211,10 @@ onMounted(() => {
             @click="chooseBot(b.id)"
           >
             <span class="bot-dot" :class="b.status === 'connected' ? 'dot-on' : 'dot-off'"></span>
-            <span class="bot-option-name">{{ b.name }}</span>
+            <span class="bot-option-name">
+              {{ b.name }}
+              <span v-if="b.shared" class="shared-tag">共享·{{ b.ownerNickname }}</span>
+            </span>
             <span class="bot-option-status">{{ statusText(b.status) }}{{ b.playing ? ' · 播放中' : '' }}</span>
             <svg v-if="b.id === music.activeBotId" class="bot-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7" /></svg>
           </button>
@@ -173,6 +233,7 @@ onMounted(() => {
           <span class="bot-name">
             {{ b.name }}
             <span v-if="b.default" class="default-tag">默认</span>
+            <span v-if="b.shared" class="shared-tag">共享·{{ b.ownerNickname }}</span>
           </span>
           <span class="bot-status">{{ statusText(b.status) }}{{ b.playing ? ' · 播放中' : '' }}</span>
         </div>
@@ -183,7 +244,8 @@ onMounted(() => {
           <button v-else class="mini-btn mini-btn--ghost" :disabled="!!busy[b.id]" @click="onStop(b)">
             {{ busy[b.id] === 'stop' ? '…' : '停止' }}
           </button>
-          <button class="mini-btn mini-btn--ghost mini-btn--danger" :disabled="!!busy[b.id]" @click="onDelete(b)">删</button>
+          <button v-if="!b.shared" class="mini-btn mini-btn--ghost" :disabled="!!busy[b.id]" @click="onShare(b)">共享</button>
+          <button v-if="!b.shared" class="mini-btn mini-btn--ghost mini-btn--danger" :disabled="!!busy[b.id]" @click="onDelete(b)">删</button>
         </div>
       </div>
     </div>
@@ -231,6 +293,39 @@ onMounted(() => {
         <button class="submit-btn" :disabled="creating" @click="submitCreate">{{ creating ? '创建中…' : '创建' }}</button>
       </div>
     </div>
+
+    <!-- 我的共享（owner 管理：撤销） -->
+    <div v-if="myShares.length" class="my-shares">
+      <div class="shares-title">我的共享</div>
+      <div v-for="s in myShares" :key="s.botId" class="share-group">
+        <span class="share-bot">{{ botNameById[s.botId] || s.botId.slice(0, 8) }}</span>
+        <span v-for="t in s.sharedTo" :key="t.accountId" class="share-chip">
+          {{ t.nickname }}
+          <button class="chip-x" title="撤销共享" @click="onUnshare(s.botId, t.accountId, t.nickname)">×</button>
+        </span>
+      </div>
+    </div>
+
+    <!-- 共享给好友（dialog） -->
+    <el-dialog v-model="showShare" :title="`共享「${shareTarget?.name}」给好友`" width="340" append-to-body>
+      <div v-if="!friends.length" class="no-friends">还没有好友，先去「好友」页添加</div>
+      <div v-else class="friend-pick">
+        <label
+          v-for="f in friends"
+          :key="f.ts_nickname"
+          class="friend-opt"
+          :class="{ on: selectedFriend === f.ts_nickname }"
+        >
+          <input type="radio" :value="f.ts_nickname" v-model="selectedFriend" />
+          <span>{{ f.ts_nickname }}</span>
+          <span class="friend-dot" :class="f.online_status === 'online' ? 'dot-on' : 'dot-off'"></span>
+        </label>
+      </div>
+      <template #footer>
+        <button class="mini-btn mini-btn--ghost" @click="showShare = false">取消</button>
+        <button class="submit-btn" :disabled="!selectedFriend" @click="confirmShare">共享</button>
+      </template>
+    </el-dialog>
 
     <!-- 机器人行为设置（空闲下线 / 头像 / 昵称等） -->
     <BotBehaviorPanel v-if="hasBots" />
@@ -348,6 +443,14 @@ onMounted(() => {
   border-radius: 3px;
   padding: 0 4px;
 }
+.shared-tag {
+  font-size: 0.78em;
+  color: var(--color-accent, #60a5fa);
+  border: 1px solid var(--color-accent, #60a5fa);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-weight: 500;
+}
 .bot-status { font-size: 0.64em; color: var(--text-muted); }
 .bot-actions { display: flex; gap: 4px; flex-shrink: 0; }
 
@@ -383,6 +486,36 @@ onMounted(() => {
   transition: all 0.15s;
 }
 .add-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
+
+/* 我的共享 */
+.my-shares { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
+.shares-title { font-size: 0.66em; color: var(--text-muted); margin-bottom: 5px; }
+.share-group { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; padding: 3px 0; }
+.share-bot { font-size: 0.72em; font-weight: 600; color: var(--text-secondary); min-width: 60px; }
+.share-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 0.68em; color: var(--text-secondary);
+  background: var(--surface-4); border: 1px solid var(--border-default);
+  border-radius: 999px; padding: 1px 4px 1px 8px;
+}
+.chip-x {
+  width: 16px; height: 16px; border: 0; border-radius: 50%;
+  background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.1em; line-height: 1;
+}
+.chip-x:hover { color: var(--color-danger); }
+
+/* 好友选择 dialog */
+.no-friends { text-align: center; color: var(--text-muted); padding: 16px; font-size: 0.8em; }
+.friend-pick { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
+.friend-opt {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: var(--radius-sm); cursor: pointer;
+  font-size: 0.82em; color: var(--text-secondary);
+}
+.friend-opt:hover { background: var(--surface-4); }
+.friend-opt.on { background: rgba(45, 212, 191, 0.12); color: var(--color-primary); }
+.friend-opt input { accent-color: var(--color-primary); }
+.friend-dot { width: 7px; height: 7px; border-radius: 50%; margin-left: auto; }
 
 .create-form {
   margin-top: 8px;
