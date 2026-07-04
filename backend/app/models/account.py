@@ -52,6 +52,30 @@ class BotOwnership(Base):
     __table_args__ = (UniqueConstraint("account_id", "bot_id", name="uq_account_bot"),)
 
 
+class BotShare(Base):
+    """bot 共享：owner 把一个 bot 共享给好友 account。
+    接受方可播放/点播/启停（用 owner 的 VIP 平台账号），不能 delete/配置/改平台账号。
+    """
+
+    __tablename__ = "bot_shares"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    owner_account_id: Mapped[int] = mapped_column(
+        ForeignKey("accounts.id", ondelete="CASCADE"), index=True
+    )
+    bot_id: Mapped[str] = mapped_column(String(64), index=True)
+    shared_to_account_id: Mapped[int] = mapped_column(
+        ForeignKey("accounts.id", ondelete="CASCADE"), index=True
+    )
+    shared_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_account_id", "bot_id", "shared_to_account_id", name="uq_bot_share"
+        ),
+    )
+
+
 class Session(Base):
     """登录会话。TTL 由 expires_at 字段 + 惰性清理实现（替代 Redis EXPIRE）。"""
 

@@ -14,13 +14,13 @@ import re
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import get_settings
 from ..core.database import get_db
 from ..deps import AccountDep, TsmusicDep, get_current_account
-from ..models import Account, BotOwnership
+from ..models import Account, BotOwnership, BotShare, Friend
 from ..services import bot_mover
 from ..services.tsmusic_client import TSMusicClient
 
@@ -44,26 +44,35 @@ async def _owned_bot_id(
     account: Account = Depends(get_current_account),
     db: AsyncSession = Depends(get_db),
 ) -> str | None:
-    """解析 botId 并校验归属：非空时必须是当前 account 拥有的 bot，否则 403。
+    """解析 botId 并校验可访问性：非空时必须是当前 account **拥有或被共享**的 bot，否则 403。
 
-    防 activeBotId 残留/伪造导致用户用他人 bot 的平台 cookie（per-bot 隔离的关键边界）。
+    放宽以支持好友共享 bot（接受方可播放/点播/启停）。管理类操作（delete/配置/平台账号）
+    用 _strict_owned_bot_id（仅 owner）。
     """
     if bot_id:
-        row = (
-            await db.execute(
-                select(BotOwnership.bot_id).where(
-                    BotOwnership.account_id == account.id,
-                    BotOwnership.bot_id == bot_id,
-                )
-            )
-        ).first()
-        if row is None:
-            raise HTTPException(status_code=403, detail="无权操作该 Bot（不属于你）")
+        accessible = await _accessible_bot_ids(db, account.id)
+        if bot_id not in accessible:
+            raise HTTPException(status_code=403, detail="无权操作该 Bot（不属于你，也未共享给你）")
     return bot_id
 
 
-# 带 owner 校验的 botId 依赖（所有音乐/bili 端点用，确保 botId 归当前用户）
+async def _strict_owned_bot_id(
+    bot_id: BotIdQuery = None,
+    account: Account = Depends(get_current_account),
+    db: AsyncSession = Depends(get_db),
+) -> str | None:
+    """严格 owner 校验：仅 bot 的 owner 可用（delete/配置/profile/avatar/平台账号 auth）。"""
+    if bot_id:
+        owned = await _owned_bot_ids(db, account.id)
+        if bot_id not in owned:
+            raise HTTPException(status_code=403, detail="仅 Bot 主人可执行此操作")
+    return bot_id
+
+
+# 播放/点播/启停类：owner 或被共享者可用
 OwnedBotId = Annotated[str | None, Depends(_owned_bot_id)]
+# 管理类（delete/配置/平台账号）：仅 owner
+StrictOwnedBotId = Annotated[str | None, Depends(_strict_owned_bot_id)]
 
 
 # ───────────────────────── 请求模型 ─────────────────────────
@@ -87,6 +96,10 @@ class SeekRequest(BaseModel):
 
 class MoveRequest(BaseModel):
     to: int = Field(ge=0, description="队列项移动到的目标位置（0-based）")
+
+
+class ShareRequest(BaseModel):
+    friendTsNickname: str = Field(min_length=1, max_length=64, description="被共享好友的 TS 昵称")
 
 
 class VolumeRequest(BaseModel):
@@ -378,26 +391,69 @@ class BotCreate(BaseModel):
 
 
 async def _owned_bot_ids(db: AsyncSession, account_id: int) -> set[str]:
-    """当前 account 拥有的 bot_id 集合（owner 软隔离）。"""
+    """当前 account **拥有**的 bot_id 集合（严格 owner，管理操作用）。"""
     rows = await db.execute(
         select(BotOwnership.bot_id).where(BotOwnership.account_id == account_id)
     )
     return {r[0] for r in rows.all()}
 
 
+async def _accessible_bot_ids(db: AsyncSession, account_id: int) -> set[str]:
+    """当前 account 可访问的 bot_id 集合 = 拥有的 ∪ 别人共享给我的（播放/点播/启停用）。"""
+    owned = await _owned_bot_ids(db, account_id)
+    shared_rows = await db.execute(
+        select(BotShare.bot_id).where(BotShare.shared_to_account_id == account_id)
+    )
+    return owned | {r[0] for r in shared_rows.all()}
+
+
 async def _check_bot_owner(db: AsyncSession, account_id: int, bot_id: str) -> None:
-    """校验当前 account 拥有该 bot，否则 403（防越权操作他人 bot）。"""
+    """严格校验当前 account **拥有**该 bot，否则 403（delete/配置等管理操作用）。"""
     owned = await _owned_bot_ids(db, account_id)
     if bot_id not in owned:
         raise HTTPException(status_code=403, detail="无权操作该 Bot（不属于你）")
 
 
+async def _check_bot_accessible(db: AsyncSession, account_id: int, bot_id: str) -> None:
+    """校验当前 account 可访问该 bot（拥有或被共享），否则 403（start/stop 用）。"""
+    accessible = await _accessible_bot_ids(db, account_id)
+    if bot_id not in accessible:
+        raise HTTPException(status_code=403, detail="无权操作该 Bot（不属于你，也未共享给你）")
+
+
 @router.get("/bots")
 async def list_bots(tsmusic: TsmusicDep, account: AccountDep, db: AsyncSession = Depends(get_db)):
-    """bot 实例列表（仅当前用户拥有的；含连接 / 播放状态）。"""
+    """bot 实例列表（自己拥有的 + 好友共享给我的；含连接 / 播放状态）。"""
     all_bots = await tsmusic.list_bots()
     owned = await _owned_bot_ids(db, account.id)
-    return {"bots": [b for b in all_bots if b.get("id") in owned]}
+    # 共享给我的：bot_id -> owner_account_id
+    shared_rows = (
+        await db.execute(
+            select(BotShare.bot_id, BotShare.owner_account_id).where(
+                BotShare.shared_to_account_id == account.id
+            )
+        )
+    ).all()
+    shared_map = {r[0]: r[1] for r in shared_rows}
+    # 共享 bot 的 owner 昵称
+    owner_ids = {oid for oid in shared_map.values() if oid is not None}
+    owner_nicks: dict[int, str] = {}
+    if owner_ids:
+        nick_rows = (
+            await db.execute(
+                select(Account.id, Account.ts_nickname).where(Account.id.in_(owner_ids))
+            )
+        ).all()
+        owner_nicks = {r[0]: r[1] for r in nick_rows}
+
+    out = []
+    for b in all_bots:
+        bid = b.get("id")
+        if bid in owned:
+            out.append(b)
+        elif bid in shared_map:
+            out.append({**b, "shared": True, "ownerNickname": owner_nicks.get(shared_map[bid], "好友")})
+    return {"bots": out}
 
 
 @router.post("/bots")
@@ -414,11 +470,92 @@ async def create_bot(body: BotCreate, tsmusic: TsmusicDep, account: AccountDep, 
     return result
 
 
+@router.post("/bots/{bot_id}/share")
+async def share_bot(
+    bot_id: str,
+    body: ShareRequest,
+    _tsmusic: TsmusicDep,
+    account: AccountDep,
+    db: AsyncSession = Depends(get_db),
+):
+    """把 bot 共享给好友（仅 owner；需双方为好友；即时生效、持久）。"""
+    _check_bot_id(bot_id)
+    await _check_bot_owner(db, account.id, bot_id)
+    friend = (
+        await db.execute(
+            select(Account).where(Account.ts_nickname == body.friendTsNickname)
+        )
+    ).first()
+    if not friend:
+        raise HTTPException(status_code=400, detail="用户不存在")
+    friend_id = friend.id
+    if friend_id == account.id:
+        raise HTTPException(status_code=400, detail="不能共享给自己")
+    is_friend = (
+        await db.execute(
+            select(Friend.id).where(
+                Friend.account_id == account.id,
+                Friend.friend_account_id == friend_id,
+            )
+        )
+    ).first()
+    if not is_friend:
+        raise HTTPException(status_code=400, detail="对方不是你的好友")
+    db.add(BotShare(owner_account_id=account.id, bot_id=bot_id, shared_to_account_id=friend_id))
+    try:
+        await db.commit()
+    except IntegrityError:
+        raise HTTPException(status_code=400, detail="已经共享给该好友了")
+    return {"success": True}
+
+
+@router.delete("/bots/{bot_id}/share/{friend_account_id}")
+async def unshare_bot(
+    bot_id: str,
+    friend_account_id: int,
+    _tsmusic: TsmusicDep,
+    account: AccountDep,
+    db: AsyncSession = Depends(get_db),
+):
+    """撤销共享（仅 owner）。"""
+    _check_bot_id(bot_id)
+    await _check_bot_owner(db, account.id, bot_id)
+    rows = (
+        await db.execute(
+            select(BotShare).where(
+                BotShare.owner_account_id == account.id,
+                BotShare.bot_id == bot_id,
+                BotShare.shared_to_account_id == friend_account_id,
+            )
+        )
+    ).scalars().all()
+    for r in rows:
+        await db.delete(r)
+    await db.commit()
+    return {"success": True}
+
+
+@router.get("/bots/my-shares")
+async def my_shares(_tsmusic: TsmusicDep, account: AccountDep, db: AsyncSession = Depends(get_db)):
+    """我共享出去的 bot（按 bot 聚合，含共享给谁）。"""
+    rows = (
+        await db.execute(
+            select(BotShare.bot_id, BotShare.shared_to_account_id, Account.ts_nickname)
+            .join(Account, Account.id == BotShare.shared_to_account_id)
+            .where(BotShare.owner_account_id == account.id)
+        )
+    ).all()
+    shares: dict[str, list[dict]] = {}
+    for bid, fid, nick in rows:
+        shares.setdefault(bid, []).append({"accountId": fid, "nickname": nick})
+    return {"shares": [{"botId": bid, "sharedTo": lst} for bid, lst in shares.items()]}
+
+
 @router.post("/bots/{bot_id}/start")
 async def start_bot(bot_id: str, tsmusic: TsmusicDep, account: AccountDep, db: AsyncSession = Depends(get_db)):
     """启动 bot 连接 TS。"""
     _check_bot_id(bot_id)
-    await _check_bot_owner(db, account.id, bot_id)
+    await _check_bot_accessible(db, account.id, bot_id)
     try:
         return await tsmusic.start_bot(bot_id)
     except (httpx.HTTPError, ValueError):
@@ -429,7 +566,7 @@ async def start_bot(bot_id: str, tsmusic: TsmusicDep, account: AccountDep, db: A
 async def stop_bot(bot_id: str, tsmusic: TsmusicDep, account: AccountDep, db: AsyncSession = Depends(get_db)):
     """停止 bot（断开 TS）。"""
     _check_bot_id(bot_id)
-    await _check_bot_owner(db, account.id, bot_id)
+    await _check_bot_accessible(db, account.id, bot_id)
     try:
         return await tsmusic.stop_bot(bot_id)
     except (httpx.HTTPError, ValueError):
@@ -484,9 +621,10 @@ async def get_bot_profile(bot_id: str, tsmusic: TsmusicDep, _account: AccountDep
 
 
 @router.put("/bots/{bot_id}/profile")
-async def put_bot_profile(bot_id: str, body: BotProfileRequest, tsmusic: TsmusicDep, _account: AccountDep):
-    """更新 per-bot profile 开关（仅透传非 None 字段；上游立即生效）。"""
+async def put_bot_profile(bot_id: str, body: BotProfileRequest, tsmusic: TsmusicDep, _account: AccountDep, db: AsyncSession = Depends(get_db)):
+    """更新 per-bot profile 开关（仅 owner；仅透传非 None 字段；上游立即生效）。"""
     _check_bot_id(bot_id)
+    await _check_bot_owner(db, _account.id, bot_id)
     try:
         return await tsmusic.set_bot_profile(body.model_dump(exclude_none=True), bot_id)
     except (httpx.HTTPError, ValueError):
@@ -511,9 +649,10 @@ async def get_bot_avatar(bot_id: str, tsmusic: TsmusicDep, _account: AccountDep)
 
 
 @router.put("/bots/{bot_id}/avatar")
-async def put_bot_avatar(bot_id: str, body: BotAvatarRequest, tsmusic: TsmusicDep, _account: AccountDep):
-    """上传/替换 bot 固定头像（png/jpeg/webp，≤200KB）。"""
+async def put_bot_avatar(bot_id: str, body: BotAvatarRequest, tsmusic: TsmusicDep, _account: AccountDep, db: AsyncSession = Depends(get_db)):
+    """上传/替换 bot 固定头像（仅 owner；png/jpeg/webp，≤200KB）。"""
     _check_bot_id(bot_id)
+    await _check_bot_owner(db, _account.id, bot_id)
     # 前置校验：仅放行 image/* data URL，避免任意大 payload 转发到上游
     if not body.dataUrl.startswith("data:image/"):
         raise HTTPException(status_code=400, detail="仅支持 image/* data URL")
@@ -528,9 +667,10 @@ async def put_bot_avatar(bot_id: str, body: BotAvatarRequest, tsmusic: TsmusicDe
 
 
 @router.delete("/bots/{bot_id}/avatar")
-async def delete_bot_avatar(bot_id: str, tsmusic: TsmusicDep, _account: AccountDep):
-    """移除 bot 固定头像。"""
+async def delete_bot_avatar(bot_id: str, tsmusic: TsmusicDep, _account: AccountDep, db: AsyncSession = Depends(get_db)):
+    """移除 bot 固定头像（仅 owner）。"""
     _check_bot_id(bot_id)
+    await _check_bot_owner(db, _account.id, bot_id)
     try:
         await tsmusic.delete_bot_avatar(bot_id)
         return {"success": True}
@@ -548,13 +688,13 @@ async def auth_status(platform: str, tsmusic: TsmusicDep, _account: AccountDep, 
 
 
 @router.get("/auth/qrcode/status")
-async def auth_qrcode_status(key: str, platform: str, tsmusic: TsmusicDep, _account: AccountDep, bot_id: OwnedBotId = None):
+async def auth_qrcode_status(key: str, platform: str, tsmusic: TsmusicDep, _account: AccountDep, bot_id: StrictOwnedBotId = None):
     """轮询二维码扫码状态（per-bot；fork 在 confirmed 时自动持久化 cookie）。"""
     return await tsmusic.get_qrcode_status(key, platform, bot_id=bot_id)
 
 
 @router.post("/auth/qrcode")
-async def auth_qrcode(body: dict, tsmusic: TsmusicDep, _account: AccountDep, bot_id: OwnedBotId = None):
+async def auth_qrcode(body: dict, tsmusic: TsmusicDep, _account: AccountDep, bot_id: StrictOwnedBotId = None):
     """获取某平台登录二维码（per-bot）。"""
     platform = body.get("platform", "netease")
     return await tsmusic.get_qrcode(platform, bot_id=bot_id)
@@ -566,12 +706,12 @@ class CookieRequest(BaseModel):
 
 
 @router.post("/auth/cookie")
-async def auth_cookie(body: CookieRequest, tsmusic: TsmusicDep, _account: AccountDep, bot_id: OwnedBotId = None):
+async def auth_cookie(body: CookieRequest, tsmusic: TsmusicDep, _account: AccountDep, bot_id: StrictOwnedBotId = None):
     """手动设置某平台 cookie（per-bot：绑定到该 bot）。"""
     return await tsmusic.set_cookie(body.platform, body.cookie, bot_id=bot_id)
 
 
 @router.delete("/auth/cookie")
-async def auth_logout(platform: str, tsmusic: TsmusicDep, _account: AccountDep, bot_id: OwnedBotId = None):
+async def auth_logout(platform: str, tsmusic: TsmusicDep, _account: AccountDep, bot_id: StrictOwnedBotId = None):
     """退出某平台登录（清除该 bot 的平台 cookie）。"""
     return await tsmusic.delete_cookie(platform, bot_id=bot_id)

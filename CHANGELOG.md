@@ -1,3 +1,10 @@
+## v0.6.0 (2026-07-05)
+
+### Feat
+
+- **好友共享 Bot 实例**：owner 可在 TS Bot 面板把带 VIP 平台账号的 bot 共享给好友（即时授权、持久）；好友播放器 bot 下拉出现「共享·{owner}」选项，点播时用 owner 的 VIP 账号播放自己歌单的 VIP 曲目。接受方可播放/点播/队列/读 VIP 曲库 + start/stop bot；不可 delete/改配置/改平台账号（仅 owner）。
+- 新增 BotShare 模型；`_owned_bot_id` 放宽（owned OR shared）覆盖播放/启停，新增 `_strict_owned_bot_id` 守住管理操作；list_bots 含共享 bot（标 shared+ownerNickname）。
+
 ## v0.5.0 (2026-07-04)
 
 ### Feat
