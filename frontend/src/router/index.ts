@@ -28,6 +28,12 @@ const routes: RouteRecordRaw[] = [
         name: 'Friends',
         component: () => import('@/views/FriendsView.vue'),
       },
+      {
+        path: 'admin',
+        name: 'Admin',
+        component: () => import('@/views/AdminView.vue'),
+        meta: { requiresAdmin: true },
+      },
     ],
   },
   {

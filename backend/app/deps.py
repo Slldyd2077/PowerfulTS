@@ -32,6 +32,16 @@ async def get_current_account(
 AccountDep = Annotated[Account, Depends(get_current_account)]
 
 
+async def require_admin(account: AccountDep) -> Account:
+    """要求当前账号是 admin，否则 403。供管理类端点（系统设置等）用。"""
+    if account.role != "admin":
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    return account
+
+
+AdminDep = Annotated[Account, Depends(require_admin)]
+
+
 def get_tsmusic(request: Request) -> TSMusicClient:
     """单例 TSMusicClient（连接单一共享 TSMusicBot 容器）。"""
     return request.app.state.tsmusic

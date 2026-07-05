@@ -1,3 +1,16 @@
+## v0.7.0 (2026-07-06)
+
+### Feat
+
+- **RBAC 权限控制**：`require_admin`/`AdminDep` 依赖（管理端点仅 admin）；首个注册用户自动 admin
+- **管理后台**：`/admin` 系统设置页（admin 专属），网页配置 NapCat/TSMusicBot/TS3/CORS/Netease；NapCat/TSMusicBot/Netease 改后热重载（不重启），TS3/CORS 标记需重启；敏感项脱敏 `****`
+- **NapCat 连接状态检测**：管理页一键检测 NapCat 连接 + 登录态（显示 QQ 昵称或失败原因）
+
+### Fix
+
+- element-plus 弹窗（el-dialog / ElMessageBox / ElMessage / el-select 下拉）亮色 → 暗色（导入 `dark/css-vars.css` + `html.dark`）
+- `music.py` `IntegrityError` 导入路径修正（`sqlalchemy` → `sqlalchemy.exc`）
+
 ## v0.6.0 (2026-07-05)
 
 ### Feat

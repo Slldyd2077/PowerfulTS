@@ -5,6 +5,7 @@ import {
   Monitor,
   Headset,
   User,
+  Setting,
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
@@ -20,6 +21,7 @@ const activeIndex = computed(() => {
   if (route.path === '/') return 'dashboard'
   if (route.path === '/music') return 'music'
   if (route.path === '/friends') return 'friends'
+  if (route.path === '/admin') return 'admin'
   return ''
 })
 
@@ -32,6 +34,7 @@ function navigate(key: string) {
   if (key === 'dashboard') router.push('/')
   else if (key === 'music') router.push('/music')
   else if (key === 'friends') router.push('/friends')
+  else if (key === 'admin') router.push('/admin')
 }
 </script>
 
@@ -73,6 +76,11 @@ function navigate(key: string) {
         <el-icon><User /></el-icon>
         <span>好友列表</span>
         <span v-if="auth.isGuest" class="lock-hint label-mono">登录后查看</span>
+      </el-menu-item>
+
+      <el-menu-item v-if="auth.isAdmin" index="admin">
+        <el-icon><Setting /></el-icon>
+        <span>系统设置</span>
       </el-menu-item>
     </el-menu>
 

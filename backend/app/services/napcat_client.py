@@ -40,5 +40,25 @@ class NapCatClient:
             return False
         return True
 
+    async def check_status(self) -> dict:
+        """探测 NapCat 连接 + 登录态（供管理后台状态检测）。
+
+        返回 {connected, user_id?, nickname?} 或 {connected:False, error}。
+        """
+        try:
+            resp = await self._http.get("/get_login_info")
+        except (httpx.HTTPError, ValueError) as exc:
+            return {"connected": False, "error": f"连接失败: {exc}"}
+        if resp.status_code != 200:
+            return {"connected": False, "error": f"NapCat 返回 HTTP {resp.status_code}"}
+        try:
+            body = resp.json()
+        except ValueError:
+            return {"connected": False, "error": "NapCat 非 JSON 响应"}
+        if body.get("retcode") not in (0, None):
+            return {"connected": False, "error": f"retcode={body.get('retcode')}: {body.get('wording') or body.get('msg') or ''}"}
+        info = body.get("data") or {}
+        return {"connected": True, "user_id": str(info.get("user_id", "")), "nickname": info.get("nickname", "")}
+
     async def close(self) -> None:
         await self._http.aclose()
