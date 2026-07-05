@@ -11,7 +11,7 @@ import logging
 import secrets
 from datetime import datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.security import generate_token, hash_password, verify_password
@@ -61,11 +61,13 @@ class AuthService:
     async def create_account(
         self, ts_nickname: str, unique_identifier: str, password: str
     ) -> Account:
+        # 首个注册者自动 admin（系统初始化）；后续都是 member
+        is_first = (await self.db.execute(select(func.count(Account.id)))).scalar_one() == 0
         account = Account(
             ts_nickname=ts_nickname,
             unique_identifier=unique_identifier,
             password_hash=hash_password(password),
-            role="member",
+            role="admin" if is_first else "member",
             status="active",
         )
         self.db.add(account)

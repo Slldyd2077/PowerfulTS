@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from ._version import __version__
 from .core.config import get_settings
 from .core.database import AsyncSessionLocal, dispose_db, init_db
-from .routers import auth, bilibili, friends, intro_music, monitor, music
+from .routers import admin, auth, bilibili, friends, intro_music, monitor, music
 from .services.netease import NeteaseClient
 from .services.napcat_client import NapCatClient
 from .services.online_notifier import OnlineNotifier
@@ -129,6 +129,8 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(friends.router, prefix="/api")
 # 开屏背景音乐：/api/intro-music/* (本地音乐目录扫描 + 流式, 登录页随机播放 + 真实频谱)
 app.include_router(intro_music.router, prefix="/api")
+# 管理后台：/api/admin/*（RBAC：仅 admin）
+app.include_router(admin.router, prefix="/api")
 
 
 # ─────────────────────────────────────────────────────
