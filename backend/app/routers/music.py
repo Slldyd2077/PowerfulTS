@@ -471,6 +471,49 @@ async def create_bot(body: BotCreate, tsmusic: TsmusicDep, account: AccountDep, 
     return result
 
 
+class BotUpdateRequest(BaseModel):
+    name: str | None = None
+    serverAddress: str | None = None
+    serverPort: int | None = None
+    nickname: str | None = None
+    defaultChannel: str | None = None
+    channelPassword: str | None = None
+    serverPassword: str | None = None
+
+
+@router.put("/bots/{bot_id}")
+async def update_bot(
+    bot_id: str,
+    body: BotUpdateRequest,
+    tsmusic: TsmusicDep,
+    account: AccountDep,
+    db: AsyncSession = Depends(get_db),
+):
+    """更新 bot 配置（仅 owner；连接类字段需先停止 bot 再改才生效）。"""
+    _check_bot_id(bot_id)
+    await _check_bot_owner(db, account.id, bot_id)
+    payload = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not payload:
+        raise HTTPException(status_code=400, detail="没有要更新的字段")
+    result = await tsmusic.update_bot(bot_id, payload)
+    if isinstance(result, dict) and result.get("error"):
+        raise HTTPException(status_code=400, detail=str(result["error"]))
+    return {"success": True}
+
+
+@router.get("/bots/{bot_id}/config")
+async def get_bot_config_endpoint(
+    bot_id: str,
+    tsmusic: TsmusicDep,
+    account: AccountDep,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取 bot 配置（仅 owner；编辑表单预填用，上游已排除 identity/apiKey）。"""
+    _check_bot_id(bot_id)
+    await _check_bot_owner(db, account.id, bot_id)
+    return await tsmusic.get_bot_config(bot_id)
+
+
 @router.post("/bots/{bot_id}/share")
 async def share_bot(
     bot_id: str,

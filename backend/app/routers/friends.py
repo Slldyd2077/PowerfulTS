@@ -10,9 +10,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import select
+
 from ..core.database import get_db
 from ..deps import get_current_account
-from ..models import Account
+from ..models import Account, Friend
 from ..services.friend_service import FriendService
 
 router = APIRouter(tags=["friends"])
@@ -30,11 +32,29 @@ async def list_friends(
 ):
     """好友列表（含在线状态，从 TS3 监控内存查询）。"""
     monitor = request.app.state.ts3_monitor
-    nicks = await FriendService(db).list_friend_nicknames(account)
+    # 我加的好友（id + 昵称）
+    my_rows = (
+        await db.execute(
+            select(Account.id, Account.ts_nickname)
+            .join(Friend, Friend.friend_account_id == Account.id)
+            .where(Friend.account_id == account.id)
+        )
+    ).all()
+    # 反向：把我加为好友的 account_id 集合（mutual 判断）
+    reverse_ids = set(
+        (await db.execute(
+            select(Friend.account_id).where(Friend.friend_account_id == account.id)
+        )).scalars().all()
+    )
     friends = []
-    for nick in nicks:
+    for fid, nick in my_rows:
         status, game = monitor.get_status(nick)
-        friends.append({"ts_nickname": nick, "online_status": status, "game": game})
+        friends.append({
+            "ts_nickname": nick,
+            "online_status": status,
+            "game": game,
+            "mutual": fid in reverse_ids,
+        })
     return {"logged_in": True, "friends": friends}
 
 

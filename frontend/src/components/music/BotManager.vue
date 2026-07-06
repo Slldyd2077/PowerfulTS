@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useMusicStore } from '@/stores/music'
 import type { BotInfo, BotCreate } from '@/api/music'
-import { shareBot, unshareBot, getMyShares, type MyShare } from '@/api/music'
+import { shareBot, unshareBot, getMyShares, updateBot, getBotConfig, type MyShare } from '@/api/music'
 import { getFriends, type Friend } from '@/api/social'
 import BotBehaviorPanel from './BotBehaviorPanel.vue'
 
@@ -156,6 +156,49 @@ async function fetchMyShares() {
   }
 }
 
+// ── 编辑 bot 配置 ──
+const showEdit = ref(false)
+const editTarget = ref<BotInfo | null>(null)
+const editForm = ref<BotCreate>({ name: '', nickname: '', serverAddress: '', serverPort: 9987, defaultChannel: '', channelPassword: '', serverPassword: '' })
+const editBusy = ref(false)
+
+async function onEdit(b: BotInfo) {
+  editTarget.value = b
+  showEdit.value = true
+  editBusy.value = true
+  try {
+    const cfg = await getBotConfig(b.id)
+    editForm.value = {
+      name: cfg.name || b.name,
+      nickname: cfg.nickname || '',
+      serverAddress: cfg.serverAddress || '',
+      serverPort: cfg.serverPort || 9987,
+      defaultChannel: cfg.defaultChannel || '',
+      channelPassword: '',
+      serverPassword: '',
+    }
+  } catch {
+    editForm.value = { name: b.name, nickname: '', serverAddress: '', serverPort: 9987, defaultChannel: '', channelPassword: '', serverPassword: '' }
+  } finally {
+    editBusy.value = false
+  }
+}
+
+async function submitEdit() {
+  if (!editTarget.value) return
+  editBusy.value = true
+  try {
+    await updateBot(editTarget.value.id, editForm.value)
+    ElMessage.success('已更新，连接类参数需重启 bot 生效')
+    showEdit.value = false
+    await music.fetchBots()
+  } catch (e: unknown) {
+    ElMessage.error(e instanceof Error ? e.message : '更新失败')
+  } finally {
+    editBusy.value = false
+  }
+}
+
 // bot 名查（共享列表展示用）
 const botNameById = computed(() => {
   const m: Record<string, string> = {}
@@ -244,6 +287,7 @@ onMounted(() => {
           <button v-else class="mini-btn mini-btn--ghost" :disabled="!!busy[b.id]" @click="onStop(b)">
             {{ busy[b.id] === 'stop' ? '…' : '停止' }}
           </button>
+          <button v-if="!b.shared" class="mini-btn mini-btn--ghost" :disabled="!!busy[b.id]" @click="onEdit(b)">编辑</button>
           <button v-if="!b.shared" class="mini-btn mini-btn--ghost" :disabled="!!busy[b.id]" @click="onShare(b)">共享</button>
           <button v-if="!b.shared" class="mini-btn mini-btn--ghost mini-btn--danger" :disabled="!!busy[b.id]" @click="onDelete(b)">删</button>
         </div>
@@ -324,6 +368,24 @@ onMounted(() => {
       <template #footer>
         <button class="mini-btn mini-btn--ghost" @click="showShare = false">取消</button>
         <button class="submit-btn" :disabled="!selectedFriend" @click="confirmShare">共享</button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑 bot 配置 -->
+    <el-dialog v-model="showEdit" :title="`编辑「${editTarget?.name}」`" width="360" append-to-body>
+      <div class="create-form" style="margin-top:0">
+        <div class="field"><label>Bot 名称</label><input v-model="editForm.name" /></div>
+        <div class="field"><label>TS 昵称</label><input v-model="editForm.nickname" /></div>
+        <div class="field"><label>TS 服务器地址</label><input v-model="editForm.serverAddress" placeholder="host.docker.internal" /></div>
+        <div class="field"><label>端口</label><input v-model.number="editForm.serverPort" type="number" /></div>
+        <div class="field"><label>默认频道</label><input v-model="editForm.defaultChannel" placeholder="留空进根频道" /></div>
+        <div class="field"><label>频道密码</label><input v-model="editForm.channelPassword" type="password" placeholder="留空不改" /></div>
+        <div class="field"><label>服务器密码</label><input v-model="editForm.serverPassword" type="password" placeholder="留空不改" /></div>
+        <p class="warn-line" style="font-size:0.62em;color:var(--text-muted);margin:0">连接类参数（地址/端口/昵称/频道）需先停止 bot 再改才生效</p>
+      </div>
+      <template #footer>
+        <button class="mini-btn mini-btn--ghost" @click="showEdit = false">取消</button>
+        <button class="submit-btn" :disabled="editBusy" @click="submitEdit">{{ editBusy ? '保存中…' : '保存' }}</button>
       </template>
     </el-dialog>
 
