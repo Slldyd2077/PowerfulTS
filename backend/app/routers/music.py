@@ -523,34 +523,41 @@ async def share_bot(
     db: AsyncSession = Depends(get_db),
 ):
     """把 bot 共享给好友（仅 owner；需双方为好友；即时生效、持久）。"""
-    _check_bot_id(bot_id)
-    await _check_bot_owner(db, account.id, bot_id)
-    friend = (
-        await db.execute(
-            select(Account).where(Account.ts_nickname == body.friendTsNickname)
-        )
-    ).first()
-    if not friend:
-        raise HTTPException(status_code=400, detail="用户不存在")
-    friend_id = friend.id
-    if friend_id == account.id:
-        raise HTTPException(status_code=400, detail="不能共享给自己")
-    is_friend = (
-        await db.execute(
-            select(Friend.id).where(
-                Friend.account_id == account.id,
-                Friend.friend_account_id == friend_id,
-            )
-        )
-    ).first()
-    if not is_friend:
-        raise HTTPException(status_code=400, detail="对方不是你的好友")
-    db.add(BotShare(owner_account_id=account.id, bot_id=bot_id, shared_to_account_id=friend_id))
     try:
-        await db.commit()
-    except IntegrityError:
-        raise HTTPException(status_code=400, detail="已经共享给该好友了")
-    return {"success": True}
+        _check_bot_id(bot_id)
+        await _check_bot_owner(db, account.id, bot_id)
+        friend = (
+            await db.execute(
+                select(Account).where(Account.ts_nickname == body.friendTsNickname)
+            )
+        ).scalars().first()
+        if not friend:
+            raise HTTPException(status_code=400, detail="用户不存在")
+        friend_id = friend.id
+        if friend_id == account.id:
+            raise HTTPException(status_code=400, detail="不能共享给自己")
+        is_friend = (
+            await db.execute(
+                select(Friend.id).where(
+                    Friend.account_id == account.id,
+                    Friend.friend_account_id == friend_id,
+                )
+            )
+        ).first()
+        if not is_friend:
+            raise HTTPException(status_code=400, detail="对方不是你的好友")
+        db.add(BotShare(owner_account_id=account.id, bot_id=bot_id, shared_to_account_id=friend_id))
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(status_code=400, detail="已经共享给该好友了")
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("share_bot 500 异常")
+        raise HTTPException(status_code=500, detail="共享失败，请查看后端日志")
 
 
 @router.delete("/bots/{bot_id}/share/{friend_account_id}")
