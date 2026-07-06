@@ -367,6 +367,12 @@ class TSMusicClient:
         resp = await self._http.post("/api/bot", json=payload)
         return self._json(resp)
 
+    async def update_bot(self, bot_id: str, payload: dict) -> dict:
+        """PUT /api/bot/:id → 更新 bot 配置（连接类字段需先停止 bot 再改才生效）。"""
+        await self._ensure_login()
+        resp = await self._http.put(f"/api/bot/{bot_id}", json=payload)
+        return self._json(resp)
+
     async def start_bot(self, bot_id: str) -> dict:
         """POST /api/bot/:id/start → 连接 TS（首次生成并持久化 identity）。"""
         await self._ensure_login()
@@ -646,6 +652,12 @@ class TSMusicClient:
         """持久化跟随开关并刷新内存缓存。"""
         await app_setting.set_setting(session, "follow_enabled", "1" if enabled else "0")
         self._follow_enabled = enabled
+
+    async def get_bot_config(self, bot_id: str) -> dict:
+        """GET /api/bot/:id/config → bot 配置（编辑表单预填用；上游已排除 identity/apiKey）。"""
+        await self._ensure_login()
+        resp = await self._http.get(f"/api/bot/{bot_id}/config")
+        return self._json(resp)
 
     async def get_bot_nickname(self, bot_id: str | None = None) -> str | None:
         """获取 bot 的 TS 昵称（供 bot_mover 在 clientlist 中定位 bot client）。

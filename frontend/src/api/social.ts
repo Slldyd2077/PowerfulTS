@@ -4,6 +4,7 @@ export interface Friend {
   ts_nickname: string
   online_status: string
   game?: string
+  mutual?: boolean
 }
 
 export interface FriendsResponse {

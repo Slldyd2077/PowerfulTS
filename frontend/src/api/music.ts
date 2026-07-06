@@ -191,6 +191,18 @@ export async function createBot(payload: BotCreate): Promise<BotInfo> {
   return data
 }
 
+/** 更新 bot 配置（连接类字段需先停止 bot 再改） */
+export async function updateBot(botId: string, payload: Partial<BotCreate>) {
+  const { data } = await apiClient.put(`/music/bots/${botId}`, payload)
+  return data
+}
+
+/** 获取 bot 配置（编辑表单预填） */
+export async function getBotConfig(botId: string): Promise<Partial<BotCreate>> {
+  const { data } = await apiClient.get(`/music/bots/${botId}/config`)
+  return data
+}
+
 /** 启动 bot（连接 TS） */
 export async function startBot(botId: string) {
   const { data } = await apiClient.post(`/music/bots/${botId}/start`)

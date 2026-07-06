@@ -97,7 +97,11 @@ onBeforeUnmount(() => {
       >
         <div class="friend-avatar">{{ friend.ts_nickname.charAt(0) }}</div>
         <div class="friend-info">
-          <span class="friend-name">{{ friend.ts_nickname }}</span>
+          <span class="friend-name">
+            {{ friend.ts_nickname }}
+            <span v-if="friend.mutual" class="relation-tag relation-mutual" title="对方也加了你为好友">互关</span>
+            <span v-else class="relation-tag relation-single" title="对方还没加你">单向</span>
+          </span>
           <span v-if="friend.game" class="friend-game mono">{{ friend.game }}</span>
         </div>
         <span
@@ -218,10 +222,23 @@ onBeforeUnmount(() => {
   font-weight: 600;
   font-size: 0.86em;
   color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.relation-tag {
+  font-size: 0.7em;
+  font-weight: 600;
+  padding: 0 4px;
+  border-radius: 3px;
+  line-height: 1.6;
+  flex-shrink: 0;
+}
+.relation-mutual { color: var(--color-success); border: 1px solid var(--color-success); }
+.relation-single { color: var(--text-muted); border: 1px solid var(--border-emphasis); }
 
 .friend-game {
   font-size: 0.62em;
