@@ -12,7 +12,7 @@ import logging
 import re
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -286,6 +286,29 @@ async def move_queue_item(
     if isinstance(result, dict) and result.get("error"):
         raise HTTPException(status_code=400, detail=str(result["error"]))
     return result
+
+
+# ───────────────────────── 音质设置 ─────────────────────────
+
+
+@router.get("/quality")
+async def get_quality(tsmusic: TsmusicDep, _account: AccountDep):
+    """获取当前音质配置（各平台独立）。"""
+    return await tsmusic.get_quality()
+
+
+@router.post("/quality")
+async def set_quality(
+    body: Annotated[dict, Body(description="音质设置 {quality, platform?}")],
+    tsmusic: TsmusicDep,
+    _account: AccountDep,
+):
+    """设置音质（quality 必填，platform 可选）。"""
+    quality = body.get("quality")
+    if not quality:
+        raise HTTPException(status_code=400, detail="quality is required")
+    platform = body.get("platform")
+    return await tsmusic.set_quality(quality, platform)
 
 
 # ───────────────────────── 我的音乐 / 歌单 ─────────────────────────

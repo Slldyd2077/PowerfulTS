@@ -18,24 +18,35 @@ const platforms = [
   { value: 'netease', label: '网易云' },
   { value: 'qq', label: 'QQ音乐' },
   { value: 'bilibili', label: 'B站' },
+  { value: 'kugou', label: '酷狗' },
 ] as const
 
 const platformLabels: Record<string, string> = {
   netease: '网易云',
   qq: 'QQ音乐',
   bilibili: 'B站',
+  kugou: '酷狗',
 }
 const platformColors: Record<string, string> = {
   netease: '#e60026',
   qq: '#31c27c',
   bilibili: '#fb7299',
+  kugou: '#009afb',
 }
 
 async function handleSearch() {
   if (!keyword.value.trim()) return
+  if (!music.activeBotId) {
+    ElMessage.warning('请先在「TS Bot」面板创建一个 Bot，再进行搜索（搜索需要连接到 TSMusicBot）')
+    return
+  }
   // 新搜索：重置封面失败标记，让本轮结果封面重新尝试加载
   brokenCovers.clear()
-  await music.search(keyword.value)
+  try {
+    await music.search(keyword.value)
+  } catch (e: unknown) {
+    ElMessage.error(e instanceof Error ? e.message : '搜索失败，请稍后重试')
+  }
 }
 
 async function handlePlay(song: Song, queued = false) {
@@ -146,7 +157,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
       <div v-if="music.searching" class="searching-row">
         <EqualizerBars class="searching-eq" :active="true" />
         <span>搜索中…</span>
-        <span v-if="music.searchPlatform === 'all'" class="searching-hint label-mono">三平台并行</span>
+        <span v-if="music.searchPlatform === 'all'" class="searching-hint label-mono">四平台并行</span>
       </div>
 
       <div
@@ -169,11 +180,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
               title="VIP / 版权受限：非会员仅能试听片段"
             >VIP</span>
             <span
-              v-if="song.platform && platformColors[song.platform]"
-              class="platform-dot"
+              v-if="song.platform && platformLabels[song.platform]"
+              class="platform-tag"
               :style="{ background: platformColors[song.platform] }"
-              :title="platformLabels[song.platform] || song.platform"
-            ></span>
+              :title="song.platform"
+            >{{ platformLabels[song.platform] }}</span>
           </div>
           <span class="song-artist">{{ song.artist }}{{ song.album ? ' · ' + song.album : '' }}</span>
         </div>
@@ -468,10 +479,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
   padding: 0 4px;
   line-height: 1.6;
 }
-.platform-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
+.platform-tag {
+  font-size: 0.58em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #fff;
+  background: var(--color-primary);
+  border-radius: 3px;
+  padding: 1px 5px;
+  line-height: 1.5;
   flex-shrink: 0;
 }
 .song-artist {

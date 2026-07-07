@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { ElMessage } from 'element-plus'
 import {
   searchMusic as apiSearch,
   playMusic as apiPlay,
@@ -57,7 +58,7 @@ export const useMusicStore = defineStore('music', () => {
   // 本地进度（每秒递增，轮询校正）
   const localPosition = ref(0)
 
-  const searchPlatform = ref<'all' | 'netease' | 'qq' | 'bilibili'>('all')
+  const searchPlatform = ref<'all' | 'netease' | 'qq' | 'bilibili' | 'kugou'>('all')
 
   // ── bot 实例：多 bot 选择，activeBotId 经 localStorage 持久化 ──
   const LS_ACTIVE_BOT = 'active_bot_id'
@@ -83,7 +84,41 @@ export const useMusicStore = defineStore('music', () => {
 
   // ── 我的音乐：平台登录态（提升自 PlatformAccounts，供 MyMusic 置灰判断）──
   const platformStatus = ref<Record<string, { loggedIn: boolean; nickname?: string }>>({})
-  const myActivePlatform = ref<'netease' | 'qq' | 'bilibili'>('netease')
+  const myActivePlatform = ref<'netease' | 'qq' | 'bilibili' | 'kugou'>('netease')
+
+  // ── 音质设置 ──
+  // 当前各平台音质（{ netease, qq, bilibili, kugou }）
+  const quality = ref<Record<string, string>>({})
+  // 音质选项定义
+  const QUALITY_OPTIONS = {
+    netease: [
+      { value: 'standard', label: '标准 (128k)', vip: false },
+      { value: 'higher', label: '较高 (192k)', vip: false },
+      { value: 'exhigh', label: '极高 (320k)', vip: false },
+      { value: 'lossless', label: '无损 (FLAC)', vip: false },
+      { value: 'hires', label: 'Hi-Res', vip: false },
+      { value: 'jyeffect', label: '鲸音效2.0', vip: true },
+      { value: 'jymaster', label: '臻品母带', vip: true },
+    ],
+    qq: [
+      { value: 'standard', label: '标准 (128k)', vip: false },
+      { value: 'higher', label: '较高 (192k)', vip: false },
+      { value: 'exhigh', label: '极高 (320k)', vip: false },
+      { value: 'lossless', label: '无损 (FLAC)', vip: true },
+      { value: 'hires', label: 'Hi-Res', vip: true },
+    ],
+    bilibili: [
+      { value: 'low', label: '低 (320k)', vip: false },
+      { value: 'high', label: '高 (806k)', vip: false },
+    ],
+    kugou: [
+      { value: 'standard', label: '标准 (128k)', vip: false },
+      { value: 'higher', label: '较高 (320k)', vip: false },
+      { value: 'exhigh', label: '极高 (320k)', vip: false },
+      { value: 'lossless', label: '无损 (FLAC)', vip: true },
+      { value: 'hires', label: 'Hi-Res', vip: true },
+    ],
+  } as const
   // 各平台歌单 / 推荐 / FM 缓存 + 展开的歌单歌曲
   const myPlaylists = ref<Record<string, Playlist[]>>({})
   const myRecommend = ref<Record<string, Song[]>>({})
@@ -94,23 +129,59 @@ export const useMusicStore = defineStore('music', () => {
   const myLoading = ref<Record<string, boolean>>({})
   const myUnsupported = ref<Record<string, boolean>>({})
 
-  /** 搜索（按当前平台；all=三平台并行） */
+  /** 搜索（按当前平台；all=四平台并行） */
   async function search(q: string) {
     if (!q.trim()) return
     searching.value = true
     searchKeyword.value = q
     try {
       if (searchPlatform.value === 'all') {
-        // 三平台并行搜索，合并结果
-        const [ne, qq, bili] = await Promise.allSettled([
-          apiSearch(q, 'netease', activeBotId.value),
-          apiSearch(q, 'qq', activeBotId.value),
-          apiSearch(q, 'bilibili', activeBotId.value),
+        // 四平台并行搜索，合并结果并按平台分组
+        const resultsByPlatform = await Promise.allSettled([
+          apiSearch(q, 'netease', activeBotId.value).catch(() => ({ results: [] })).then((r) => ({ platform: 'netease', results: r.results || [] })),
+          apiSearch(q, 'qq', activeBotId.value).catch(() => ({ results: [] })).then((r) => ({ platform: 'qq', results: r.results || [] })),
+          apiSearch(q, 'bilibili', activeBotId.value).catch(() => ({ results: [] })).then((r) => ({ platform: 'bilibili', results: r.results || [] })),
+          apiSearch(q, 'kugou', activeBotId.value).catch(() => ({ results: [] })).then((r) => ({ platform: 'kugou', results: r.results || [] })),
         ])
         const all: Song[] = []
-        for (const r of [ne, qq, bili]) {
-          if (r.status === 'fulfilled') all.push(...(r.value.results || []))
+        for (const r of resultsByPlatform) {
+          if (r.status === 'fulfilled' && r.value) {
+            // 确保每个歌曲都有 platform 标识
+            const songs = (r.value.results || []).map((s: Song) => ({
+              ...s,
+              platform: s.platform || r.value.platform,
+            }))
+            all.push(...songs)
+          }
         }
+        // 按相关性排序：歌名完全匹配 > 歌名包含关键词 > 歌手名包含关键词
+        const query = q.toLowerCase().trim()
+        all.sort((a, b) => {
+          const aName = (a.name || '').toLowerCase()
+          const bName = (b.name || '').toLowerCase()
+          const aArtist = (a.artist || '').toLowerCase()
+          const bArtist = (b.artist || '').toLowerCase()
+
+          // 完全匹配优先
+          const aExact = aName === query
+          const bExact = bName === query
+          if (aExact && !bExact) return -1
+          if (!aExact && bExact) return 1
+
+          // 歌名包含关键词
+          const aNameContains = aName.includes(query)
+          const bNameContains = bName.includes(query)
+          if (aNameContains && !bNameContains) return -1
+          if (!aNameContains && bNameContains) return 1
+
+          // 歌手名包含关键词
+          const aArtistContains = aArtist.includes(query)
+          const bArtistContains = bArtist.includes(query)
+          if (aArtistContains && !bArtistContains) return -1
+          if (!aArtistContains && bArtistContains) return 1
+
+          return 0
+        })
         searchResults.value = all
       } else {
         const res = await apiSearch(q, searchPlatform.value, activeBotId.value)
@@ -248,9 +319,9 @@ export const useMusicStore = defineStore('music', () => {
 
   // ── 我的音乐 ──
 
-  /** 拉取三平台登录态（并发；逐 key 写入避免整对象展开读快照导致的并发覆盖） */
+  /** 拉取各平台登录态（并发；逐 key 写入避免整对象展开读快照导致的并发覆盖） */
   async function fetchPlatformStatus() {
-    const platforms = ['netease', 'qq', 'bilibili'] as const
+    const platforms = ['netease', 'qq', 'bilibili', 'kugou'] as const
     const results = await Promise.all(
       platforms.map(async (p) => {
         try {
@@ -454,6 +525,53 @@ export const useMusicStore = defineStore('music', () => {
     followEnabled.value = enabled
   }
 
+  // ── 音质设置 ──
+
+  /** 拉取当前各平台音质配置 */
+  async function fetchQuality() {
+    try {
+      const token = localStorage.getItem('session_token')
+      const res = await fetch('/api/music/quality', {
+        headers: {
+          'X-Session-Token': token || '',
+        },
+      }).then((r) => r.json())
+      quality.value = res
+    } catch {
+      // 静默失败
+    }
+  }
+
+  /** 设置音质（platform 未传则全局设置） */
+  async function setQuality(q: string, platform?: string) {
+    try {
+      const token = localStorage.getItem('session_token')
+      const res = await fetch('/api/music/quality', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': token || '',
+        },
+        body: JSON.stringify({ quality: q, platform }),
+      }).then((r) => r.json())
+      if (res.success) {
+        await fetchQuality()
+        ElMessage.success(`音质已切换为：${q}`)
+      } else {
+        ElMessage.error(res.error || '音质切换失败')
+      }
+    } catch (e) {
+      ElMessage.error('音质切换失败，请稍后重试')
+      console.error('setQuality error:', e)
+    }
+  }
+
+  /** 根据平台和 VIP 状态获取可用音质选项 */
+  function getAvailableQualities(platform: 'netease' | 'qq' | 'bilibili' | 'kugou', isVip: boolean) {
+    const all = QUALITY_OPTIONS[platform] || []
+    return isVip ? all : all.filter((opt) => !opt.vip)
+  }
+
   // ── bot 行为 / 外观设置 ──
 
   /** 拉取全局 bot 行为设置 */
@@ -593,6 +711,11 @@ export const useMusicStore = defineStore('music', () => {
     followEnabled,
     fetchFollowSetting,
     setFollow,
+    quality,
+    QUALITY_OPTIONS,
+    fetchQuality,
+    setQuality,
+    getAvailableQualities,
     botSettings,
     activeBotProfile,
     activeBotAvatarUrl,

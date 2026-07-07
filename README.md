@@ -14,6 +14,7 @@
   <img alt="Docker" src="https://img.shields.io/badge/Docker-一键部署-2496ED?logo=docker&logoColor=white">
   <img alt="TS3" src="https://img.shields.io/badge/TS3-支持-2580C3?logo=teamspeak&logoColor=white">
   <img alt="TS6" src="https://img.shields.io/badge/TS6-支持-2580C3?logo=teamspeak&logoColor=white">
+  <a href="https://github.com/sealdong/napcat-dotnet" target="_blank"><img alt="NapCat" src="https://img.shields.io/badge/NapCat-QQ通知-12B1E9?logo=tencentqq&logoColor=white"></a>
   <img alt="License" src="https://img.shields.io/badge/License-MIT-blue?logo=mit&logoColor=white">
 </p>
 
@@ -40,9 +41,10 @@
 | 👥 在线用户 | ✅ | 昵称 · 游戏 · 所在频道 · 在线时长 |
 | 🎮 游戏统计 | ✅ | 各游戏实时人数分布 |
 | 📡 频道列表 | ✅ | 频道树浏览 |
-| 🎵 音乐中心 | ✅ | 搜索 · 点歌 · 队列 · 音量 · 播放模式（网易云 / QQ） |
+| 🎵 音乐中心 | ✅ | 搜索 · 点歌 · 队列 · 音量 · 播放模式（网易云 / QQ / 酷狗） |
 | 🎬 Bilibili | ✅ | 番剧 / 视频浏览与点播（TSMusicBot 多平台） |
-| 🔐 平台账号 | ✅ | 网易云 / QQ 扫码登录（解锁 VIP / 个人歌单） |
+| 🔐 平台账号 | ✅ | 网易云 / QQ / 酷狗 扫码登录（解锁 VIP / 个人歌单） |
+| 📱 QQ通知 | ✅ | 通过 NapCat/OneBot 实现QQ好友上线通知（需配置 NapCat） |
 | 🤝 社交 | ✅ | 好友添加 / 删除 / 在线状态 |
 | 🎼 开屏音乐 | ✅ | 登录页真实音频频谱 + 随机背景音乐（本地目录，不入库） |
 | 📱 移动端 | ✅ | 手机 / 平板自适应（抽屉导航 · 响应式布局 · 触屏长按操作） |
@@ -274,10 +276,11 @@ PowerfulTS 本身不含 TS3 服务端与音乐引擎，需接入两个上游：
 | 功能 | 入口 | 说明 |
 |------|------|------|
 | 📊 监控 | 首页 Dashboard | 服务器概览、在线用户、游戏统计、频道树，每 5 秒自动刷新 |
-| 🎵 音乐 | 音乐中心 | 搜索（默认网易云，可切 QQ/B 站）、播放/暂停/上下首/进度/音量/播放模式/清空队列 |
+| 🎵 音乐 | 音乐中心 | 搜索（默认网易云，可切 QQ/酷狗/B 站）、播放/暂停/上下首/进度/音量/播放模式/清空队列 |
 | 🎬 B站点播 | Bilibili | 搜索 B 站视频，点击播放（音频由 TSMusicBot 拉取） |
-| 🔐 平台账号 | 音乐中心 → 账号 | 网易云 / QQ 扫码登录，解锁 VIP 曲库与个人歌单 |
+| 🔐 平台账号 | 音乐中心 → 账号 | 网易云 / QQ / 酷狗 扫码登录，解锁 VIP 曲库与个人歌单 |
 | 🤝 社交 | 好友 | 添加 / 删除好友，查看好友在线状态 |
+| 📱 QQ通知 | 配置 NapCat | 通过 NapCat/OneBot 在 QQ 上接收好友上线通知 |
 | 👤 账户 | 登录 / 注册 | QQ + TS 昵称绑定，ServerQuery 私聊下发验证码完成实名 |
 
 > 音乐、点播、社交等功能**需登录后使用**；浏览器会自动在请求头注入会话 Token。

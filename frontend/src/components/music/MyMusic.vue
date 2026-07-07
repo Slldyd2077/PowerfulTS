@@ -12,6 +12,7 @@ const myPlatforms = [
   { value: 'netease', label: '网易云', color: '#e60026' },
   { value: 'qq', label: 'QQ音乐', color: '#31c27c' },
   { value: 'bilibili', label: 'B站', color: '#fb7299' },
+  { value: 'kugou', label: '酷狗', color: '#009afb' },
 ] as const
 
 // 歌单封面失败回退（切换平台时 clear，让新平台封面重新尝试）
@@ -29,8 +30,8 @@ const playlists = computed(() => music.myPlaylists[active.value] || [])
 const recommend = computed(() => music.myRecommend[active.value] || [])
 const fm = computed(() => music.myFm[active.value] || [])
 
-function selectPlatform(value: 'netease' | 'qq' | 'bilibili') {
-  // 网易云/QQ 未登录禁止切换；B站热门无需登录
+function selectPlatform(value: 'netease' | 'qq' | 'bilibili' | 'kugou') {
+  // 网易云/QQ/酷狗 未登录禁止切换；B站热门无需登录
   if (value !== 'bilibili' && !music.platformStatus[value]?.loggedIn) {
     ElMessage.info('请先在右侧「平台账号」登录该平台')
     return

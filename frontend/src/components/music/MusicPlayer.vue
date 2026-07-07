@@ -190,6 +190,50 @@ function cycleMode() {
   music.setMode(MODES[(i + 1) % MODES.length].value)
 }
 
+// ── 音质选择 ──
+const qualityLoading = ref(false)
+
+// 当前播放歌曲的平台（用于音质选项）
+const currentPlatform = computed<'netease' | 'qq' | 'bilibili' | 'kugou' | null>(() => {
+  const p = np.value?.platform
+  if (p === 'netease' || p === 'qq' || p === 'bilibili' || p === 'kugou') return p
+  return null
+})
+
+// 当前平台的音质选项（根据 VIP 状态过滤）
+const qualityOptions = computed(() => {
+  if (!currentPlatform.value) return []
+  const platformStatus = music.platformStatus[currentPlatform.value]
+  const isVip = !!platformStatus?.nickname?.toLowerCase().includes('vip') || false
+  return music.getAvailableQualities(currentPlatform.value, isVip)
+})
+
+// 当前音质标签
+const qualityLabel = computed(() => {
+  if (!currentPlatform.value) return '音质'
+  const q = music.quality[currentPlatform.value]
+  const opt = qualityOptions.value.find((o) => o.value === q)
+  return opt?.label || '音质'
+})
+
+async function cycleQuality() {
+  if (!currentPlatform.value || qualityLoading.value) return
+  const opts = qualityOptions.value
+  if (opts.length === 0) return
+
+  // 循环到下一个
+  const currentQ = music.quality[currentPlatform.value] || opts[0].value
+  const i = opts.findIndex((o) => o.value === currentQ)
+  const next = opts[(i + 1) % opts.length]
+
+  qualityLoading.value = true
+  try {
+    await music.setQuality(next.value, currentPlatform.value)
+  } finally {
+    qualityLoading.value = false
+  }
+}
+
 // 用 id+platform 精确判断队列中哪首是当前播放（歌名匹配会误判同名/翻唱）
 const npSong = computed(() => {
   const np = music.nowplaying
@@ -265,13 +309,27 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
       </button>
     </div>
 
-    <!-- Secondary：模式 + 音量 -->
+    <!-- Secondary：模式 + 音质 + 音量 -->
     <div class="secondary">
       <button class="mode-pill" :title="'切换播放模式（当前：' + currentMode.label + '）'" @click="cycleMode">
         <svg v-if="currentMode.value === 'seq'" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>
         <svg v-else-if="currentMode.value === 'loop'" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
         <svg v-else viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20L21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg>
         <span>{{ currentMode.label }}</span>
+      </button>
+
+      <button
+        v-if="currentPlatform"
+        class="mode-pill quality-pill"
+        :title="'切换音质（当前：' + qualityLabel + '）'"
+        :disabled="qualityLoading || qualityOptions.length <= 1"
+        :class="{ loading: qualityLoading }"
+        @click="cycleQuality"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+        </svg>
+        <span>{{ qualityLabel }}</span>
       </button>
 
       <div class="vol">
@@ -601,6 +659,17 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
 .mode-pill:hover {
   color: var(--color-primary);
   border-color: var(--color-primary);
+}
+.mode-pill:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.quality-pill.loading {
+  animation: pulse 1s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 .vol {

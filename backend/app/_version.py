@@ -8,4 +8,4 @@
 （见 ``backend/Dockerfile``）只 ``COPY app``、后端以 ``uvicorn app.main:app``
 裸源码运行、未作为包安装，dist-info 元数据不存在，importlib 拿不到版本。
 """
-__version__ = "0.3.3"
+__version__ = "0.7.3"
