@@ -16,6 +16,7 @@ const platforms: PlatformInfo[] = [
   { value: 'netease', label: '网易云', color: '#e60026', icon: 'N' },
   { value: 'qq', label: 'QQ音乐', color: '#31c27c', icon: 'Q' },
   { value: 'bilibili', label: 'B站', color: '#fb7299', icon: 'B' },
+  { value: 'kugou', label: '酷狗', color: '#009afb', icon: 'K' },
 ]
 
 const music = useMusicStore()

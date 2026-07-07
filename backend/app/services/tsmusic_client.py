@@ -32,10 +32,12 @@ class TSMusicClient:
         self._user = user
         self._pass = password
         self._bot_id = bot_id
+        # 启用 cookie 跟踪，以维持登录 session
         self._http = httpx.AsyncClient(
             base_url=self._base,
             timeout=httpx.Timeout(15.0),
             headers=_HEADERS,
+            cookies=httpx.Cookies(),  # 启用 cookie 支持
         )
         self._logged_in = False
         # 歌曲元数据缓存：上游 TSMusicBot 入队 QQ 音乐时会丢失 name/coverUrl/duration，
@@ -682,3 +684,33 @@ class TSMusicClient:
         if nick:
             self._bot_nickname_cache[bid] = nick
         return nick or None
+
+    # ───────────────────────── 音质设置 ─────────────────────────
+
+    async def get_quality(self) -> dict:
+        """获取当前音质配置（netease/qq/bilibili）。"""
+        await self._ensure_login()
+        try:
+            resp = await self._http.get("/api/music/quality")
+            return self._json(resp)
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("获取音质失败: %s", exc)
+            return {}
+
+    async def set_quality(self, quality: str, platform: str | None = None) -> dict:
+        """设置音质（platform 指定平台，未传则所有平台）。
+
+        Args:
+            quality: 音质级别，如 standard/higher/exhigh/lossless/hires 等
+            platform: 平台标识（netease/qq/bilibili），None 表示全局设置
+        """
+        await self._ensure_login()
+        try:
+            payload = {"quality": quality}
+            if platform:
+                payload["platform"] = platform
+            resp = await self._http.post("/api/music/quality", json=payload)
+            return self._json(resp)
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("设置音质失败: %s", exc)
+            return {"error": str(exc)}
