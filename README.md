@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="PowerfulTS — TS3 Monitoring Dashboard" width="480" />
+  <img src="assets/banner.png" alt="PowerfulTS — TS3 Monitoring Dashboard" width="800" />
 </p>
 
 <p align="center">

@@ -79,7 +79,8 @@ const showAddFriend = ref(false)
 
 /* 移动端：间距收缩、标题流式缩放、添加好友按钮加大触摸区 */
 @media (max-width: 768px) {
-  .friends-view { gap: 14px; }
+  .friends-view { gap: 14px; height: auto; overflow: visible; }
+  .page-header { padding-bottom: 12px; }
   .page-title {
     font-size: clamp(1.1em, 4vw, 1.4em);
   }

@@ -154,14 +154,21 @@ function formatTime(seconds: number): string {
   }
 }
 
-/* 小屏：卡片单列堆叠，数值字号略缩防溢出 */
+/* 手机保持双列，让四个核心指标无需长距离滚动即可扫完。 */
 @media (max-width: 480px) {
   .stats-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
   }
+  .stat-card { padding: 13px 12px 12px; gap: 7px; }
   .stat-value {
-    font-size: 1.7em;
+    font-size: 1.62em;
   }
+  .stat-spark { height: 24px; }
+}
+
+@media (max-width: 340px) {
+  .stats-row { grid-template-columns: 1fr; }
 }
 
 .stat-card {

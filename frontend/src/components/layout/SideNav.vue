@@ -43,13 +43,7 @@ function navigate(key: string) {
     <!-- 品牌 -->
     <div class="nav-brand">
       <div class="brand-logo">
-        <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
-          <!-- 信号条：单一青绿，呼应「监控」语义 -->
-          <rect x="3" y="14" width="3.5" height="8" rx="0.5" fill="var(--color-primary)" opacity="0.45" />
-          <rect x="8.5" y="9" width="3.5" height="13" rx="0.5" fill="var(--color-primary)" opacity="0.7" />
-          <rect x="14" y="5" width="3.5" height="17" rx="0.5" fill="var(--color-primary)" />
-          <rect x="19.5" y="11" width="3.5" height="11" rx="0.5" fill="var(--color-primary)" opacity="0.55" />
-        </svg>
+        <img src="/logo-mark.svg" alt="PowerfulTS" width="26" height="26" />
       </div>
       <div class="brand-text">
         <span class="brand-kicker label-mono">PowerfulTS</span>
