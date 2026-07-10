@@ -373,6 +373,8 @@ class TSMusicClient:
         """PUT /api/bot/:id → 更新 bot 配置（连接类字段需先停止 bot 再改才生效）。"""
         await self._ensure_login()
         resp = await self._http.put(f"/api/bot/{bot_id}", json=payload)
+        if "nickname" in payload:
+            self._bot_nickname_cache.pop(bot_id, None)
         return self._json(resp)
 
     async def start_bot(self, bot_id: str) -> dict:

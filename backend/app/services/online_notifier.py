@@ -8,12 +8,13 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import distinct, select
 from sqlalchemy.orm import aliased
 
 from ..models.account import Account
 from ..models.community import Friend
 from .napcat_client import NapCatClient
+from .notification_utils import unique_qq_numbers
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ class OnlineNotifier:
         onlinee = aliased(Account)
         async with self._sessions() as db:
             result = await db.execute(
-                select(adder.qq_number)
+                select(distinct(adder.qq_number))
                 .join(Friend, Friend.account_id == adder.id)
                 .join(onlinee, Friend.friend_account_id == onlinee.id)
                 .where(onlinee.ts_nickname == nickname)
@@ -43,7 +44,7 @@ class OnlineNotifier:
                 .where(adder.qq_number.isnot(None))
                 .where(adder.qq_number != "")
             )
-            return [str(q) for q in result.scalars().all() if q]
+            return unique_qq_numbers(result.scalars().all())
 
     async def on_online(self, nickname: str) -> None:
         """某用户上线 → 反查订阅者 → 发 QQ 提醒（nickname 级去重）。"""
