@@ -23,6 +23,7 @@ from .core.database import AsyncSessionLocal, dispose_db, init_db
 from .routers import admin, auth, bilibili, friends, intro_music, monitor, music
 from .services.netease import NeteaseClient
 from .services.napcat_client import NapCatClient
+from .services.bot_idle_manager import BotIdleManager
 from .services.online_notifier import OnlineNotifier
 from .services.tsmusic_client import TSMusicClient
 from .services.ts3_monitor import TS3Monitor
@@ -87,6 +88,8 @@ async def lifespan(app: FastAPI):
         settings.tsmusic_url, settings.tsmusic_user, settings.tsmusic_password,
         bot_id=settings.tsmusic_bot_id,
     )
+    app.state.bot_idle_manager = BotIdleManager(settings, app.state.tsmusic)
+    app.state.bot_idle_manager.start()
     # 预加载播放跟随开关到单例（保证重启后关闭态生效；失败不阻断启动）
     try:
         async with AsyncSessionLocal() as session:
@@ -97,6 +100,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         app.state.ts3_monitor.stop()
+        await app.state.bot_idle_manager.stop()
         await app.state.netease.close()
         await app.state.tsmusic.close()
         await app.state.napcat.close()
