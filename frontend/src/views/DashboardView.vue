@@ -151,15 +151,20 @@ usePolling(() => monitor.fetchStats(), 5000)
 @media (max-width: 1100px) {
   .dashboard {
     flex-direction: column;
+    height: auto;
+  }
+  .dashboard-main {
+    flex: none;
+    overflow: visible;
+    padding-right: 0;
   }
   .dashboard-panels {
     grid-template-columns: 1fr;
   }
   .dashboard-sidebar {
     width: 100%;
-    /* 纵向堆叠后限制高度，避免频道列表把页面撑得过长 */
-    max-height: 56vh;
-    overflow-y: auto;
+    max-height: none;
+    overflow-y: visible;
   }
 }
 
@@ -178,6 +183,7 @@ usePolling(() => monitor.fetchStats(), 5000)
   .page-header {
     flex-wrap: wrap;
     gap: 8px;
+    padding-bottom: 12px;
   }
   .page-title {
     font-size: clamp(1.1em, 4vw, 1.4em);

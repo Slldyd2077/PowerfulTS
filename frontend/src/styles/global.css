@@ -19,6 +19,12 @@ body,
   overflow: hidden;
 }
 
+html {
+  background: var(--surface-0);
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   font-family: 'Noto Sans SC', 'Segoe UI', system-ui, -apple-system, sans-serif;
   background-color: var(--surface-0);
@@ -26,6 +32,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   line-height: 1.6;
+  overscroll-behavior: none;
 }
 
 /* ── 数据 / 数字专用字体 ── */
@@ -282,11 +289,33 @@ body {
    解决对话框超屏（AddFriendDialog 等） */
 @media (max-width: 480px) {
   .el-dialog {
-    width: 92% !important;
-    margin: 8vh auto !important;
+    width: calc(100% - 24px) !important;
+    max-height: calc(100dvh - 32px);
+    margin: 16px auto !important;
+    overflow-y: auto;
   }
   .el-message-box {
-    width: 88% !important;
+    width: calc(100% - 24px) !important;
+  }
+}
+
+@media (max-width: 768px) {
+  /* iOS 会在字号小于 16px 时自动放大输入框，造成页面横向跳动。 */
+  input,
+  textarea,
+  select,
+  .el-input__inner,
+  .el-textarea__inner {
+    font-size: 16px !important;
+  }
+
+  .el-button {
+    min-height: 42px;
+  }
+
+  .el-message {
+    width: calc(100% - 24px) !important;
+    min-width: 0 !important;
   }
 }
 

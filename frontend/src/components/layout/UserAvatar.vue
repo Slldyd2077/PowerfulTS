@@ -105,4 +105,16 @@ async function handleLogout() {
   color: var(--color-danger);
   background: rgba(248, 113, 113, 0.06);
 }
+
+@media (max-width: 768px) {
+  .user-avatar { gap: 8px; }
+  .user-info { gap: 8px; }
+  .avatar-circle { width: 32px; height: 32px; }
+  .logout-btn { width: 42px; height: 42px; }
+  .user-name { max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+@media (max-width: 360px) {
+  .user-meta { display: none; }
+}
 </style>

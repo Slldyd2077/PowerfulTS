@@ -170,4 +170,32 @@ onMounted(load)
 }
 .ns-btn:hover:not(:disabled) { color: var(--color-primary); border-color: var(--color-primary); }
 .ns-btn:disabled { opacity: 0.5; cursor: default; }
+
+@media (max-width: 768px) {
+  .no-admin { padding: 32px 16px; }
+  .admin-panel { gap: 8px; }
+  .panel-header { margin-bottom: 10px; }
+  .panel-title { font-size: 1.15em; }
+  .napcat-status-card {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 12px;
+  }
+  .ns-left { align-items: flex-start; }
+  .ns-dot { margin-top: 7px; }
+  .ns-text { white-space: normal; overflow: visible; line-height: 1.55; }
+  .ns-btn { width: 100%; min-height: 44px; font-size: 0.84em; }
+  .settings-form { gap: 16px; }
+  .field label { flex-wrap: wrap; }
+  .field-label { font-size: 0.82em; }
+  .field input {
+    width: 100%;
+    min-height: 44px;
+    padding: 9px 11px;
+    font-size: 16px;
+  }
+  .actions { flex-direction: column; align-items: stretch; gap: 12px; }
+  .hint { line-height: 1.6; }
+  .save-btn { width: 100%; min-height: 46px; }
+}
 </style>

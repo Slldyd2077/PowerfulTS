@@ -1277,6 +1277,10 @@ async function handleRegister() {
 @media (max-width: 900px) {
   .login-page {
     flex-direction: column;
+    height: auto;
+    min-height: 100dvh;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 
   .panel-visual {
@@ -1306,7 +1310,9 @@ async function handleRegister() {
 
   .panel-form {
     width: 100%;
-    flex: 1;
+    flex: none;
+    min-height: 65dvh;
+    justify-content: flex-start;
     padding: 24px;
   }
 
@@ -1316,6 +1322,12 @@ async function handleRegister() {
 
   .form-wrapper {
     max-width: 420px;
+  }
+
+  .form-footer {
+    position: static;
+    margin-top: 28px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
   }
 }
 
@@ -1327,14 +1339,29 @@ async function handleRegister() {
 
   .brand-title {
     font-size: 1.8rem;
+    margin-bottom: 4px;
   }
 
   .brand-tagline {
     font-size: 0.9em;
+    margin-bottom: 0;
+  }
+
+  .brand-logo {
+    width: 48px;
+    height: 48px;
+    margin-bottom: 10px;
+    border-radius: 14px;
   }
 
   .panel-form {
-    padding: 20px 16px;
+    min-height: 72dvh;
+    padding: 20px 16px 24px;
   }
+
+  .mode-indicator { margin-bottom: 28px; }
+  .form-header { margin-bottom: 22px; }
+  .code-row { align-items: stretch; }
+  .code-btn { min-height: 44px; padding: 0 12px; }
 }
 </style>

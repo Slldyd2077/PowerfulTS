@@ -560,6 +560,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
 @media (max-width: 768px) {
   .panel { padding: 14px; }
   .platform-tabs { flex-wrap: wrap; }
+  .platform-tab { min-height: 40px; padding: 7px 14px; }
+  .search-bar { height: 48px; }
+  .sb-kbd { display: none; }
+  .sb-go { min-width: 48px; justify-content: center; padding: 0 14px; }
+  .sb-go-text { display: none; }
   .results { max-height: none; }
+  .song-item { gap: 8px; padding: 9px 4px; }
+  .act { width: 42px; height: 42px; }
+  .song-actions { gap: 4px; }
 }
 </style>
