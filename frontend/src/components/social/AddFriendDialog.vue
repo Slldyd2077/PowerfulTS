@@ -19,7 +19,15 @@ async function handleAdd() {
   try {
     const res = await addFriend(friendTsNickname.value.trim())
     if (res.success) {
-      ElMessage.success('好友添加成功')
+      let message = '好友添加成功'
+
+      // 如果好友在线，显示额外提示
+      if (res.friend_online) {
+        const gameText = res.game ? `（正在 ${res.game}）` : ''
+        message += `，对方当前在线${gameText}！`
+      }
+
+      ElMessage.success(message)
       friendTsNickname.value = ''
       visible.value = false
       emit('added')

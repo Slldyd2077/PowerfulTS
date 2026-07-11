@@ -425,7 +425,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
 }
 .song-item:hover {
   background: var(--surface-4);
@@ -459,16 +459,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
   gap: 3px;
   min-width: 0;
   flex: 1;
+  max-width: calc(100% - 44px - 12px - 32px - 32px - 24px);
+  overflow: hidden;
 }
 .song-name-row {
   display: flex;
   align-items: center;
   gap: 7px;
   min-width: 0;
+  width: 100%;
 }
 .song-name {
   flex: 1;
   min-width: 0;
+  max-width: 100%;
   font-weight: 600;
   font-size: 0.86em;
   color: var(--text-primary);
@@ -575,10 +579,43 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
   .sb-go { min-width: 48px; justify-content: center; padding: 0 14px; }
   .sb-go-text { display: none; }
   .results { max-height: none; }
-  .song-item { gap: 8px; padding: 9px 4px; }
-  .cover { width: 40px; height: 40px; }
-  .song-actions { margin-left: auto; }
-  .act { width: 42px; height: 42px; }
-  .song-actions { gap: 4px; }
+  .song-item {
+    gap: 8px;
+    padding: 10px 6px;
+    min-width: 0;
+    width: 100%;
+    flex-wrap: nowrap;
+  }
+  .cover { width: 40px; height: 40px; flex-shrink: 0; }
+  .song-info {
+    flex: 1;
+    min-width: 0;
+    max-width: calc(100% - 48px - 40px - 16px);
+    overflow: hidden;
+  }
+  .song-name-row {
+    gap: 4px;
+  }
+  .song-name {
+    font-size: 0.9em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .vip-badge, .platform-tag {
+    flex-shrink: 0;
+  }
+  .song-artist {
+    font-size: 0.75em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .song-actions {
+    margin-left: auto;
+    flex-shrink: 0;
+    gap: 4px;
+  }
+  .act { width: 38px; height: 38px; }
 }
 </style>

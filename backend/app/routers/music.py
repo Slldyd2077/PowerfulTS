@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import get_settings
 from ..core.database import get_db
-from ..deps import AccountDep, TsmusicDep, get_current_account
+from ..deps import AccountDep, AdminDep, TsmusicDep, get_current_account
 from ..models import Account, BotOwnership, BotShare, Friend
 from ..services import bot_mover
 from ..services.tsmusic_client import TSMusicClient
@@ -198,7 +198,8 @@ async def pause(tsmusic: TsmusicDep, _account: AccountDep, bot_id: OwnedBotId = 
 
 
 @router.post("/resume")
-async def resume(tsmusic: TsmusicDep, _account: AccountDep, bot_id: OwnedBotId = None):
+async def resume(request: Request, tsmusic: TsmusicDep, account: AccountDep, bot_id: OwnedBotId = None):
+    await _ensure_follow(request, tsmusic, account, bot_id)
     return await tsmusic.resume(bot_id=bot_id)
 
 
@@ -673,6 +674,12 @@ async def delete_bot(bot_id: str, tsmusic: TsmusicDep, account: AccountDep, db: 
 async def get_bot_settings(tsmusic: TsmusicDep, _account: AccountDep):
     """全局 bot 行为设置（空闲下线分钟 + 空频道自动暂停）。"""
     return await tsmusic.get_bot_settings()
+
+
+@router.get("/bot-idle-status")
+async def get_bot_idle_status(request: Request, _account: AdminDep):
+    """空闲下线管理器诊断状态（管理员）。"""
+    return request.app.state.bot_idle_manager.snapshot()
 
 
 @router.put("/bot-settings")

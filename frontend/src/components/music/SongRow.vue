@@ -66,7 +66,7 @@ function fmt(sec?: number): string {
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
 }
 .song-item:hover { background: var(--surface-4); }
 .cover {
@@ -89,16 +89,20 @@ function fmt(sec?: number): string {
   gap: 3px;
   min-width: 0;
   flex: 1;
+  max-width: calc(100% - 44px - 12px - 32px - 32px - 20px);
+  overflow: hidden;
 }
 .song-name-row {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
+  width: 100%;
 }
 .song-name {
   flex: 1;
   min-width: 0;
+  max-width: 100%;
   font-weight: 600;
   font-size: 0.86em;
   color: var(--text-primary);
@@ -165,9 +169,48 @@ function fmt(sec?: number): string {
 /* 小屏：隐藏时长让位标题、放大操作按钮触摸区 */
 @media (max-width: 480px) {
   .song-dur { display: none; }
-  .song-item { gap: 8px; padding: 9px 4px; }
-  .cover { width: 40px; height: 40px; }
-  .song-actions { gap: 4px; margin-left: auto; }
-  .act { width: 40px; height: 40px; }
+  .song-item {
+    gap: 8px;
+    padding: 10px 6px;
+    min-width: 0;
+    width: 100%;
+    flex-wrap: nowrap;
+  }
+  .cover {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+  }
+  .song-info {
+    flex: 1;
+    min-width: 0;
+    max-width: calc(100% - 40px - 32px - 14px);
+    overflow: hidden;
+  }
+  .song-name-row {
+    gap: 4px;
+    min-width: 0;
+  }
+  .song-name {
+    font-size: 0.9em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .vip-badge {
+    flex-shrink: 0;
+  }
+  .song-artist {
+    font-size: 0.75em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .song-actions {
+    gap: 4px;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+  .act { width: 38px; height: 38px; }
 }
 </style>
