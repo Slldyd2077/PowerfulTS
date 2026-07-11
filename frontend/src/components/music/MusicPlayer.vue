@@ -790,6 +790,7 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
   width: 100%;
   min-width: 0;
   max-width: 100%;
+  flex-shrink: 0;
   overflow: hidden;
 }
 .queue-item.dragging {
