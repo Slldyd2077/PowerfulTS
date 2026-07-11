@@ -363,6 +363,24 @@ class TSMusicClient:
             logger.warning("TSMusicBot list_bots 失败: %s", exc)
             return []
 
+    async def list_bots_checked(self) -> list[dict]:
+        """严格读取 bot 列表，供后台任务区分“确实为空”和“查询失败”。
+
+        面向 UI 的 :meth:`list_bots` 为了优雅降级会在网络/解析失败时返回空
+        列表；空闲管理器不能使用该语义，否则一次瞬时故障就会被误判为没有
+        在线 bot，并清空所有正在进行的空闲计时。
+        """
+        await self._ensure_login()
+        resp = await self._http.get("/api/bot")
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data, dict):
+            raise ValueError("TSMusicBot bot list response is not an object")
+        raw = data.get("bots", data.get("data", {}).get("bots", []))
+        if not isinstance(raw, list):
+            raise ValueError("TSMusicBot bot list response has no bots array")
+        return [self._map_bot(b) for b in raw if isinstance(b, dict)]
+
     async def create_bot(self, payload: dict) -> dict:
         """POST /api/bot → 创建 bot（identity 自动生成，不自动连接）。"""
         await self._ensure_login()
@@ -386,6 +404,13 @@ class TSMusicClient:
     async def stop_bot(self, bot_id: str) -> dict:
         await self._ensure_login()
         resp = await self._http.post(f"/api/bot/{bot_id}/stop")
+        return self._json(resp)
+
+    async def stop_bot_checked(self, bot_id: str) -> dict:
+        """停止 bot，且将上游非 2xx 响应视为失败。"""
+        await self._ensure_login()
+        resp = await self._http.post(f"/api/bot/{bot_id}/stop")
+        resp.raise_for_status()
         return self._json(resp)
 
     async def delete_bot(self, bot_id: str) -> dict:
@@ -412,6 +437,19 @@ class TSMusicClient:
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("TSMusicBot 读取 bot 设置失败: %s", exc)
             return {"idleTimeoutMinutes": 0, "autoPauseOnEmpty": False}
+        return {
+            "idleTimeoutMinutes": data.get("idleTimeoutMinutes", 0),
+            "autoPauseOnEmpty": bool(data.get("autoPauseOnEmpty", False)),
+        }
+
+    async def get_bot_settings_checked(self) -> dict:
+        """严格读取空闲设置，避免读取失败被静默降级为“功能已关闭”。"""
+        await self._ensure_login()
+        resp = await self._http.get("/api/bot/settings")
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data, dict):
+            raise ValueError("TSMusicBot settings response is not an object")
         return {
             "idleTimeoutMinutes": data.get("idleTimeoutMinutes", 0),
             "autoPauseOnEmpty": bool(data.get("autoPauseOnEmpty", False)),

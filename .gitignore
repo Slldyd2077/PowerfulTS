@@ -43,3 +43,10 @@ backend/data/intro-music/*
 
 # Claude Code 本地配置
 .claude/
+
+# 运行日志（uvicorn 输出等，勿提交）
+backend/uvicorn.err.log
+backend/uvicorn.out.log
+
+# 部署备份目录（本地发布前的快照，勿提交）
+.deploy-backup/

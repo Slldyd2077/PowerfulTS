@@ -88,7 +88,9 @@ async def lifespan(app: FastAPI):
         settings.tsmusic_url, settings.tsmusic_user, settings.tsmusic_password,
         bot_id=settings.tsmusic_bot_id,
     )
-    app.state.bot_idle_manager = BotIdleManager(settings, app.state.tsmusic)
+    # Resolve the client lazily: admin hot reload replaces app.state.tsmusic.
+    # Capturing the object here would leave the idle manager using a closed client.
+    app.state.bot_idle_manager = BotIdleManager(settings, lambda: app.state.tsmusic)
     app.state.bot_idle_manager.start()
     # 预加载播放跟随开关到单例（保证重启后关闭态生效；失败不阻断启动）
     try:

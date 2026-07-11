@@ -10,7 +10,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Iterable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from ..core.config import Settings
 from .ts3_query import TS3QueryClient
@@ -89,15 +89,50 @@ class BotIdleManager:
     def __init__(
         self,
         settings: Settings,
-        tsmusic: TSMusicClient,
+        tsmusic: TSMusicClient | Callable[[], TSMusicClient],
         poll_interval: int = DEFAULT_POLL_INTERVAL,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._settings = settings
-        self._tsmusic = tsmusic
+        self._tsmusic_provider = tsmusic if callable(tsmusic) else lambda: tsmusic
         self._poll_interval = max(5, poll_interval)
+        self._clock = clock
         self._task: asyncio.Task | None = None
         self._idle_since: dict[str, float] = {}
+        self._unknown_since: dict[str, float] = {}
         self._auto_paused: set[str] = set()
+        self._bot_status: dict[str, dict] = {}
+        self._idle_timeout_minutes = 0
+        self._auto_pause_enabled = False
+        self._last_poll_at: float | None = None
+        self._last_error: str | None = None
+
+    def _tsmusic(self) -> TSMusicClient:
+        """Resolve the live client so admin hot reload cannot leave a stale reference."""
+        return self._tsmusic_provider()
+
+    def snapshot(self) -> dict:
+        """Return a JSON-safe diagnostic snapshot for the admin/UI."""
+        now = self._clock()
+        bots = []
+        for bot_id, raw in sorted(self._bot_status.items()):
+            item = {"botId": bot_id, **raw}
+            idle_since = self._idle_since.get(bot_id)
+            effective_now = self._unknown_since.get(bot_id, now)
+            item["idleSeconds"] = (
+                max(0, int(effective_now - idle_since)) if idle_since is not None else 0
+            )
+            item["timeoutSeconds"] = self._idle_timeout_minutes * 60
+            bots.append(item)
+        return {
+            "running": bool(self._task and not self._task.done()),
+            "pollIntervalSeconds": self._poll_interval,
+            "idleTimeoutMinutes": self._idle_timeout_minutes,
+            "autoPauseOnEmpty": self._auto_pause_enabled,
+            "lastPollAt": self._last_poll_at,
+            "lastError": self._last_error,
+            "bots": bots,
+        }
 
     def start(self) -> None:
         if self._task and not self._task.done():
@@ -122,82 +157,142 @@ class BotIdleManager:
                 await self.poll_once()
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                self._last_error = f"{type(exc).__name__}: {exc}"
+                self._mark_all_unknown("poll_failed")
                 logger.exception("bot idle manager 巡检异常")
             await asyncio.sleep(self._poll_interval)
 
     async def poll_once(self) -> None:
+        self._last_poll_at = time.time()
         if not self._settings.ts3_query_user or not self._settings.ts3_query_password:
+            self._last_error = "TS3 ServerQuery credentials are not configured"
             return
 
-        bot_settings = await self._tsmusic.get_bot_settings()
+        tsmusic = self._tsmusic()
+        bot_settings = await tsmusic.get_bot_settings_checked()
         idle_timeout_minutes = _int_or_none(bot_settings.get("idleTimeoutMinutes")) or 0
         auto_pause = bool(bot_settings.get("autoPauseOnEmpty", False))
+        self._idle_timeout_minutes = idle_timeout_minutes
+        self._auto_pause_enabled = auto_pause
+        self._last_error = None
         if idle_timeout_minutes <= 0:
             self._idle_since.clear()
+            self._unknown_since.clear()
         if idle_timeout_minutes <= 0 and not auto_pause:
             self._auto_paused.clear()
+            self._bot_status.clear()
             return
 
         bots = [
-            bot for bot in await self._tsmusic.list_bots()
+            bot for bot in await tsmusic.list_bots_checked()
             if bot.get("id") and bot.get("status") == "connected"
         ]
         if not bots:
             self._idle_since.clear()
+            self._unknown_since.clear()
             self._auto_paused.clear()
+            self._bot_status.clear()
             return
 
         nick_results = await asyncio.gather(
-            *(self._tsmusic.get_bot_nickname(str(bot["id"])) for bot in bots),
+            *(tsmusic.get_bot_nickname(str(bot["id"])) for bot in bots),
             return_exceptions=True,
         )
         bot_nick_by_id: dict[str, str] = {}
         for bot, result in zip(bots, nick_results, strict=False):
             if isinstance(result, Exception):
                 logger.warning("获取 bot %s 昵称失败: %s", bot.get("id"), result)
+                self._set_unknown(str(bot["id"]), str(bot.get("name") or bot["id"]), "bot_nickname_query_failed")
                 continue
             nick = _norm_nickname(result)
             if nick:
                 bot_nick_by_id[str(bot["id"])] = nick
-
-        if not bot_nick_by_id:
-            return
+            else:
+                self._set_unknown(str(bot["id"]), str(bot.get("name") or bot["id"]), "bot_nickname_unknown")
 
         clients = await asyncio.to_thread(fetch_ts_clients, self._settings)
         bot_nicks = set(bot_nick_by_id.values())
         channels_by_nick = bot_channel_map(clients, bot_nicks)
-        now = time.monotonic()
+        now = self._clock()
         active_bot_ids = {str(bot["id"]) for bot in bots}
 
         for stale_bot_id in set(self._idle_since) - active_bot_ids:
             self._idle_since.pop(stale_bot_id, None)
+            self._unknown_since.pop(stale_bot_id, None)
             self._auto_paused.discard(stale_bot_id)
+        for stale_bot_id in set(self._bot_status) - active_bot_ids:
+            self._bot_status.pop(stale_bot_id, None)
 
         for bot in bots:
             bot_id = str(bot["id"])
             nick = bot_nick_by_id.get(bot_id)
             cid = channels_by_nick.get(nick or "")
             if cid is None:
-                self._idle_since.pop(bot_id, None)
-                self._auto_paused.discard(bot_id)
+                # Unknown is not active: preserve an existing timer, but never stop
+                # while the bot cannot be located authoritatively.
+                self._set_unknown(bot_id, nick or str(bot.get("name") or bot_id), "bot_not_visible_in_serverquery")
                 continue
 
             humans = channel_human_count(clients, cid, bot_nicks)
             if humans > 0:
                 self._idle_since.pop(bot_id, None)
+                self._unknown_since.pop(bot_id, None)
+                self._bot_status[bot_id] = {
+                    "label": nick or str(bot.get("name") or bot_id),
+                    "state": "active",
+                    "channelId": cid,
+                    "humanCount": humans,
+                    "reason": None,
+                }
                 if bot_id in self._auto_paused:
-                    await self._resume_auto_paused(bot_id)
+                    await self._resume_auto_paused(tsmusic, bot_id)
                 continue
 
             if auto_pause and bot.get("playing") and not bot.get("paused") and bot_id not in self._auto_paused:
-                await self._pause_empty_bot(bot_id, nick or bot_id)
+                await self._pause_empty_bot(tsmusic, bot_id, nick or bot_id)
 
             if idle_timeout_minutes <= 0:
+                self._unknown_since.pop(bot_id, None)
+                self._bot_status[bot_id] = {
+                    "label": nick or str(bot.get("name") or bot_id),
+                    "state": "empty",
+                    "channelId": cid,
+                    "humanCount": 0,
+                    "reason": "idle_disconnect_disabled",
+                }
                 continue
 
-            idle_since = self._idle_since.setdefault(bot_id, now)
+            idle_since = self._idle_since.get(bot_id)
+            if idle_since is None:
+                idle_since = now
+                self._idle_since[bot_id] = idle_since
+                logger.info(
+                    "bot %s cid=%s humans=0，开始 %s 分钟空闲倒计时",
+                    nick or bot_id,
+                    cid,
+                    idle_timeout_minutes,
+                )
+            unknown_since = self._unknown_since.pop(bot_id, None)
+            if unknown_since is not None:
+                # Unknown time is not evidence of an empty channel. Shift the
+                # start point forward so only confirmed-empty time accumulates.
+                idle_since += now - unknown_since
+                self._idle_since[bot_id] = idle_since
+            self._bot_status[bot_id] = {
+                "label": nick or str(bot.get("name") or bot_id),
+                "state": "idle",
+                "channelId": cid,
+                "humanCount": 0,
+                "reason": None,
+            }
             if now - idle_since < idle_timeout_minutes * 60:
+                logger.debug(
+                    "bot %s 已空闲 %s/%s 秒",
+                    nick or bot_id,
+                    int(now - idle_since),
+                    idle_timeout_minutes * 60,
+                )
                 continue
 
             logger.info(
@@ -206,21 +301,40 @@ class BotIdleManager:
                 cid,
                 idle_timeout_minutes,
             )
-            await self._tsmusic.stop_bot(bot_id)
+            self._bot_status[bot_id]["state"] = "disconnecting"
+            await tsmusic.stop_bot_checked(bot_id)
             self._idle_since.pop(bot_id, None)
+            self._unknown_since.pop(bot_id, None)
             self._auto_paused.discard(bot_id)
+            self._bot_status[bot_id]["state"] = "disconnected"
+            logger.info("bot %s 自动下线成功", nick or bot_id)
 
-    async def _pause_empty_bot(self, bot_id: str, label: str) -> None:
+    def _set_unknown(self, bot_id: str, label: str, reason: str) -> None:
+        if bot_id in self._idle_since:
+            self._unknown_since.setdefault(bot_id, self._clock())
+        self._bot_status[bot_id] = {
+            "label": label,
+            "state": "unknown",
+            "channelId": None,
+            "humanCount": None,
+            "reason": reason,
+        }
+
+    def _mark_all_unknown(self, reason: str) -> None:
+        for bot_id, status in list(self._bot_status.items()):
+            self._set_unknown(bot_id, str(status.get("label") or bot_id), reason)
+
+    async def _pause_empty_bot(self, tsmusic: TSMusicClient, bot_id: str, label: str) -> None:
         try:
-            await self._tsmusic.pause(bot_id)
+            await tsmusic.pause(bot_id)
             self._auto_paused.add(bot_id)
             logger.info("bot %s 频道无人，已自动暂停", label)
         except Exception:
             logger.warning("bot %s 自动暂停失败", label, exc_info=True)
 
-    async def _resume_auto_paused(self, bot_id: str) -> None:
+    async def _resume_auto_paused(self, tsmusic: TSMusicClient, bot_id: str) -> None:
         try:
-            await self._tsmusic.resume(bot_id)
+            await tsmusic.resume(bot_id)
         except Exception:
             logger.warning("bot %s 自动恢复失败", bot_id, exc_info=True)
         finally:
