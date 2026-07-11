@@ -4,7 +4,8 @@ import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import {
   getAdminSettings, putAdminSettings, checkNapcatStatus, getMemberNotifications, putMemberNotifications,
-  type SettingItem, type NapcatStatus, type MemberNotification,
+  getFriendMessageTemplates, getNotificationMessageTemplates,
+  type SettingItem, type NapcatStatus, type MemberNotification, type MessageTemplates, type NotificationMessageTemplates,
 } from '@/api/admin'
 
 const auth = useAuthStore()
@@ -16,6 +17,10 @@ const memberNotifications = ref<MemberNotification[]>([])
 const memberNotificationsLoading = ref(false)
 const savingMemberId = ref<number | null>(null)
 const napcatEnabled = ref(false)
+const friendTemplates = ref<MessageTemplates | null>(null)
+const notificationTemplates = ref<NotificationMessageTemplates | null>(null)
+const templatesLoading = ref(false)
+const savingTemplates = ref(false)
 
 async function load() {
   loading.value = true
@@ -40,6 +45,46 @@ async function loadMemberNotifications() {
     ElMessage.error('加载成员通知设置失败')
   } finally {
     memberNotificationsLoading.value = false
+  }
+}
+
+async function loadMessageTemplates() {
+  templatesLoading.value = true
+  try {
+    const [friendRes, notificationRes] = await Promise.all([
+      getFriendMessageTemplates(),
+      getNotificationMessageTemplates()
+    ])
+    friendTemplates.value = friendRes
+    notificationTemplates.value = notificationRes
+  } catch {
+    ElMessage.error('加载消息模板失败')
+  } finally {
+    templatesLoading.value = false
+  }
+}
+
+async function saveMessageTemplates() {
+  if (!friendTemplates.value || !notificationTemplates.value) return
+
+  savingTemplates.value = true
+  try {
+    const items: Record<string, string> = {
+      'friend_add_ts_message': friendTemplates.value.friend_add_ts_message,
+      'friend_add_qq_message': friendTemplates.value.friend_add_qq_message,
+      'friend_online_notice_message': friendTemplates.value.friend_online_notice_message,
+      'friend_online_notice': notificationTemplates.value.friend_online_notice,
+      'server_online_notice': notificationTemplates.value.server_online_notice,
+      'server_first_join_notice': notificationTemplates.value.server_first_join_notice,
+    }
+
+    await putAdminSettings(items)
+    ElMessage.success('消息模板已保存')
+    await loadMessageTemplates()
+  } catch (e: unknown) {
+    ElMessage.error(e instanceof Error ? e.message : '保存消息模板失败')
+  } finally {
+    savingTemplates.value = false
   }
 }
 
@@ -105,6 +150,7 @@ async function checkNapcat() {
 onMounted(() => {
   load()
   loadMemberNotifications()
+  loadMessageTemplates()
 })
 </script>
 
@@ -135,6 +181,110 @@ onMounted(() => {
 
     <div v-if="loading" class="loading-row">加载中…</div>
     <div v-else class="settings-form">
+      <!-- 消息模板设置 -->
+      <section class="message-templates">
+        <div class="templates-header">
+          <h3>消息模板设置</h3>
+          <p>自定义好友添加和成员上线通知的消息内容</p>
+        </div>
+
+        <div v-if="templatesLoading" class="member-loading">加载消息模板中…</div>
+        <div v-else-if="friendTemplates && notificationTemplates" class="templates-content">
+          <!-- 好友添加通知模板 -->
+          <div class="template-group">
+            <h4>好友添加通知</h4>
+            <div class="field">
+              <label>
+                <span class="field-label">TS 通知消息</span>
+                <span class="tag tag-variable">变量: {nickname}</span>
+              </label>
+              <textarea
+                v-model="friendTemplates.friend_add_ts_message"
+                class="template-textarea"
+                rows="2"
+                placeholder="输入TS通知消息模板"
+              />
+            </div>
+            <div class="field">
+              <label>
+                <span class="field-label">QQ 通知消息</span>
+                <span class="tag tag-variable">变量: {nickname}</span>
+              </label>
+              <textarea
+                v-model="friendTemplates.friend_add_qq_message"
+                class="template-textarea"
+                rows="2"
+                placeholder="输入QQ通知消息模板"
+              />
+            </div>
+            <div class="field">
+              <label>
+                <span class="field-label">在线提醒消息</span>
+                <span class="tag tag-variable">变量: {nickname}, {game}</span>
+              </label>
+              <textarea
+                v-model="friendTemplates.friend_online_notice_message"
+                class="template-textarea"
+                rows="2"
+                placeholder="输入在线提醒消息模板"
+              />
+            </div>
+          </div>
+
+          <!-- 成员上线通知模板 -->
+          <div class="template-group">
+            <h4>成员上线通知</h4>
+            <div class="field">
+              <label>
+                <span class="field-label">好友上线通知</span>
+                <span class="tag tag-variable">变量: {nick}</span>
+              </label>
+              <textarea
+                v-model="notificationTemplates.friend_online_notice"
+                class="template-textarea"
+                rows="2"
+                placeholder="输入好友上线通知模板"
+              />
+            </div>
+            <div class="field">
+              <label>
+                <span class="field-label">成员上线通知</span>
+                <span class="tag tag-variable">变量: {nick}</span>
+              </label>
+              <textarea
+                v-model="notificationTemplates.server_online_notice"
+                class="template-textarea"
+                rows="2"
+                placeholder="输入成员上线通知模板"
+              />
+            </div>
+            <div class="field">
+              <label>
+                <span class="field-label">新成员首次加入通知</span>
+                <span class="tag tag-variable">变量: {nick}</span>
+              </label>
+              <textarea
+                v-model="notificationTemplates.server_first_join_notice"
+                class="template-textarea"
+                rows="2"
+                placeholder="输入新成员首次加入通知模板"
+              />
+            </div>
+          </div>
+
+          <div class="template-actions">
+            <button
+              class="save-btn"
+              :disabled="savingTemplates"
+              @click="saveMessageTemplates"
+            >
+              {{ savingTemplates ? '保存中…' : '保存消息模板' }}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 系统设置 -->
       <div v-for="(s, key) in settings" :key="key" class="field">
         <label>
           <span class="field-label">{{ s.label }}</span>
@@ -266,6 +416,89 @@ onMounted(() => {
 .ns-btn:hover:not(:disabled) { color: var(--color-primary); border-color: var(--color-primary); }
 .ns-btn:disabled { opacity: 0.5; cursor: default; }
 
+.message-templates {
+  padding: 18px;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.08), transparent 45%), var(--surface-3);
+  margin-bottom: 16px;
+}
+
+.templates-header {
+  margin-bottom: 16px;
+}
+
+.templates-header h3 {
+  margin: 0 0 4px;
+  font-size: 0.9em;
+  color: var(--text-primary);
+}
+
+.templates-header p {
+  margin: 0;
+  font-size: 0.72em;
+  color: var(--text-muted);
+}
+
+.templates-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.template-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.template-group h4 {
+  margin: 0;
+  font-size: 0.82em;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.template-textarea {
+  width: 100%;
+  min-height: 60px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--text-primary);
+  font-size: 0.8em;
+  font-family: 'JetBrains Mono', monospace;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.template-textarea:focus {
+  border-color: var(--color-primary);
+}
+
+.template-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.tag-variable {
+  font-size: 0.7em;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-weight: 600;
+  line-height: 1.6;
+  color: var(--color-primary);
+  border: 1px solid var(--color-primary);
+  background: rgba(64, 158, 255, 0.1);
+}
+
 @media (max-width: 768px) {
   .no-admin { padding: 32px 16px; }
   .admin-panel { gap: 8px; }
@@ -281,6 +514,21 @@ onMounted(() => {
   .ns-text { white-space: normal; overflow: visible; line-height: 1.55; }
   .ns-btn { width: 100%; min-height: 44px; font-size: 0.84em; }
   .settings-form { gap: 16px; }
+  .message-templates { padding: 14px 12px; }
+  .templates-header h3 { font-size: 1em; }
+  .template-group { padding: 12px; }
+  .template-textarea {
+    min-height: 80px;
+    font-size: 16px;
+    padding: 10px 12px;
+  }
+  .template-actions {
+    justify-content: stretch;
+  }
+  .template-actions .save-btn {
+    width: 100%;
+    min-height: 46px;
+  }
   .member-notifications { padding: 14px 12px; }
   .member-notifications-header { flex-direction: column; }
   .member-notification-row { grid-template-columns: 1fr; gap: 10px; padding: 14px 0; }

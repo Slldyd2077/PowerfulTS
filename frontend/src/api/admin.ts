@@ -49,3 +49,27 @@ export async function putMemberNotifications(id: number, payload: Pick<MemberNot
   const { data } = await apiClient.put(`/admin/member-notifications/${id}`, payload)
   return data as { success: boolean }
 }
+
+export interface MessageTemplates {
+  friend_add_ts_message: string
+  friend_add_qq_message: string
+  friend_online_notice_message: string
+  variables: string[]
+}
+
+export async function getFriendMessageTemplates(): Promise<MessageTemplates> {
+  const { data } = await apiClient.get('/admin/friend-message-templates')
+  return data
+}
+
+export interface NotificationMessageTemplates {
+  friend_online_notice: string
+  server_online_notice: string
+  server_first_join_notice: string
+  variables: string[]
+}
+
+export async function getNotificationMessageTemplates(): Promise<NotificationMessageTemplates> {
+  const { data } = await apiClient.get('/admin/notification-message-templates')
+  return data
+}

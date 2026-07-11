@@ -103,7 +103,6 @@ function navigate(key: string) {
 .brand-logo {
   width: 65px;
   height: 65px;
-  position: relative;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -111,19 +110,7 @@ function navigate(key: string) {
   padding: 0;
 }
 
-.brand-logo::before {
-  content: '';
-  position: absolute;
-  inset: 6px;
-  border: 1px solid rgba(148, 190, 242, 0.32);
-  border-radius: 13px;
-  background: linear-gradient(145deg, #90c4f8, #dbeafe);
-  box-shadow: 0 9px 24px rgba(1, 30, 77, 0.42), inset 0 0 0 1px rgba(255, 255, 255, 0.72);
-}
-
 .brand-logo img {
-  position: relative;
-  z-index: 1;
   width: 100%;
   height: 100%;
   display: block;

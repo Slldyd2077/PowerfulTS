@@ -86,6 +86,14 @@ SPEC: list[dict] = [
     {"key": "ts3_query_password", "label": "TS3 ServerQuery 密码", "sensitive": True, "restart": True},
     {"key": "ts3_sid", "label": "TS3 虚拟服务器 ID", "sensitive": False, "restart": True},
     {"key": "cors_origins", "label": "CORS 允许来源（逗号分隔）", "sensitive": False, "restart": True},
+    # 好友添加通知消息模板
+    {"key": "friend_add_ts_message", "label": "好友添加 TS 通知消息", "sensitive": False},
+    {"key": "friend_add_qq_message", "label": "好友添加 QQ 通知消息", "sensitive": False},
+    {"key": "friend_online_notice_message", "label": "好友在线提醒消息", "sensitive": False},
+    # 好友上线通知消息模板
+    {"key": "friend_online_notice", "label": "好友上线通知消息", "sensitive": False},
+    {"key": "server_online_notice", "label": "成员上线通知消息", "sensitive": False},
+    {"key": "server_first_join_notice", "label": "新成员首次加入通知消息", "sensitive": False},
 ]
 
 SPEC_BY_KEY = {s["key"]: s for s in SPEC}
@@ -196,3 +204,47 @@ async def _reload_clients(request: Request, db: AsyncSession, kinds: list[str]) 
 async def napcat_status(request: Request, account: AdminDep):
     """探测 NapCat 连接 + 登录态（管理后台状态检测用）。"""
     return await request.app.state.napcat.check_status()
+
+
+@router.get("/friend-message-templates")
+async def get_friend_message_templates(account: AdminDep, db: AsyncSession = Depends(get_db)):
+    """获取好友添加通知消息模板（admin）。"""
+    from ..routers.friends import DEFAULT_ONLINE_NOTICE, DEFAULT_QQ_MESSAGE, DEFAULT_TS_MESSAGE
+
+    ts_msg = await app_setting.get_setting(db, "sys.friend_add_ts_message", DEFAULT_TS_MESSAGE)
+    qq_msg = await app_setting.get_setting(db, "sys.friend_add_qq_message", DEFAULT_QQ_MESSAGE)
+    online_notice = await app_setting.get_setting(db, "sys.friend_online_notice_message", DEFAULT_ONLINE_NOTICE)
+
+    return {
+        "friend_add_ts_message": ts_msg,
+        "friend_add_qq_message": qq_msg,
+        "friend_online_notice_message": online_notice,
+        "variables": ["{nickname}", "{game}"],  # 可用的模板变量
+    }
+
+
+@router.get("/notification-message-templates")
+async def get_notification_message_templates(account: AdminDep, db: AsyncSession = Depends(get_db)):
+    """获取所有通知消息模板（admin）。"""
+    from ..services.online_notifier import (
+        DEFAULT_FRIEND_ONLINE_NOTICE,
+        DEFAULT_SERVER_FIRST_JOIN_NOTICE,
+        DEFAULT_SERVER_ONLINE_NOTICE,
+    )
+
+    friend_online = await app_setting.get_setting(
+        db, "sys.friend_online_notice", DEFAULT_FRIEND_ONLINE_NOTICE
+    )
+    server_online = await app_setting.get_setting(
+        db, "sys.server_online_notice", DEFAULT_SERVER_ONLINE_NOTICE
+    )
+    server_first_join = await app_setting.get_setting(
+        db, "sys.server_first_join_notice", DEFAULT_SERVER_FIRST_JOIN_NOTICE
+    )
+
+    return {
+        "friend_online_notice": friend_online,
+        "server_online_notice": server_online,
+        "server_first_join_notice": server_first_join,
+        "variables": ["{nick}"],  # 可用的模板变量
+    }

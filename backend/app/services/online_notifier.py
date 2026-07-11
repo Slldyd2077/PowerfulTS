@@ -11,15 +11,17 @@ from sqlalchemy.orm import aliased
 from ..core.config import Settings
 from ..models.account import Account, ServerMember
 from ..models.community import Friend
+from ..services import app_setting
 from . import ts3_auth
 from .napcat_client import NapCatClient
 from .notification_utils import unique_qq_numbers
 
 logger = logging.getLogger(__name__)
 
-FRIEND_ONLINE_NOTICE = "✅ 你的好友「{nick}」已上线 TeamSpeak"
-SERVER_ONLINE_NOTICE = "🟢 服务器动态：{nick} 已上线 TeamSpeak"
-SERVER_FIRST_JOIN_NOTICE = "👋 新成员提醒：{nick} 首次进入 TeamSpeak 服务器"
+# 默认消息模板
+DEFAULT_FRIEND_ONLINE_NOTICE = "✅ 你的好友「{nick}」已上线 TeamSpeak"
+DEFAULT_SERVER_ONLINE_NOTICE = "🟢 服务器动态：{nick} 已上线 TeamSpeak"
+DEFAULT_SERVER_FIRST_JOIN_NOTICE = "👋 新成员提醒：{nick} 首次进入 TeamSpeak 服务器"
 
 
 class OnlineNotifier:
@@ -89,24 +91,41 @@ class OnlineNotifier:
                 sent += 1
         return sent
 
+    async def _get_notice_templates(self) -> tuple[str, str, str]:
+        """获取通知消息模板，返回 (friend_online, server_online, server_first_join)。"""
+        async with self._sessions() as db:
+            friend_online = await app_setting.get_setting(
+                db, "sys.friend_online_notice", DEFAULT_FRIEND_ONLINE_NOTICE
+            )
+            server_online = await app_setting.get_setting(
+                db, "sys.server_online_notice", DEFAULT_SERVER_ONLINE_NOTICE
+            )
+            server_first_join = await app_setting.get_setting(
+                db, "sys.server_first_join_notice", DEFAULT_SERVER_FIRST_JOIN_NOTICE
+            )
+            return friend_online, server_online, server_first_join
+
     async def on_online(self, nickname: str, unique_identifier: str | None = None) -> None:
         async with self._lock:
             if nickname in self._notified:
                 return
             self._notified.add(nickname)
 
+        # 获取自定义消息模板
+        friend_online_msg, server_online_msg, server_first_join_msg = await self._get_notice_templates()
+
         friend_subscribers = await self._resolve_friend_subscribers(nickname)
         if friend_subscribers:
-            await self._send_qq(friend_subscribers, FRIEND_ONLINE_NOTICE.format(nick=nickname))
+            await self._send_qq(friend_subscribers, friend_online_msg.format(nick=nickname))
 
         online_subscribers = await self._resolve_server_subscribers("notify_server_online")
         if online_subscribers:
-            await self._send_server_notice(online_subscribers, SERVER_ONLINE_NOTICE.format(nick=nickname))
+            await self._send_server_notice(online_subscribers, server_online_msg.format(nick=nickname))
 
         if unique_identifier and await self._mark_first_seen(unique_identifier, nickname):
             first_join_subscribers = await self._resolve_server_subscribers("notify_server_first_join")
             if first_join_subscribers:
-                await self._send_server_notice(first_join_subscribers, SERVER_FIRST_JOIN_NOTICE.format(nick=nickname))
+                await self._send_server_notice(first_join_subscribers, server_first_join_msg.format(nick=nickname))
 
     async def on_offline(self, nickname: str) -> None:
         self._notified.discard(nickname)

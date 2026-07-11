@@ -6,7 +6,7 @@ import logging
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Account, Friend
+from ..models import Account, Friend, FriendRequest
 
 logger = logging.getLogger(__name__)
 
@@ -42,3 +42,83 @@ class FriendService:
             )
         )
         await self.db.commit()
+
+    async def check_is_friend(self, account_id: int, friend_account_id: int) -> bool:
+        """检查是否已经是好友关系。"""
+        result = await self.db.execute(
+            select(Friend).where(
+                Friend.account_id == account_id,
+                Friend.friend_account_id == friend_account_id,
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def check_mutual_friends(self, account_id: int, friend_account_id: int) -> bool:
+        """检查是否是双向好友关系。"""
+        result1 = await self.db.execute(
+            select(Friend).where(
+                Friend.account_id == account_id,
+                Friend.friend_account_id == friend_account_id,
+            )
+        )
+        result2 = await self.db.execute(
+            select(Friend).where(
+                Friend.account_id == friend_account_id,
+                Friend.friend_account_id == account_id,
+            )
+        )
+        return result1.scalar_one_or_none() is not None and result2.scalar_one_or_none() is not None
+
+    async def create_friend_request(self, requester_id: int, recipient_id: int) -> FriendRequest | None:
+        """创建好友申请。如果已存在待处理申请则返回 None。"""
+        # 检查是否已存在待处理申请
+        existing = await self.db.execute(
+            select(FriendRequest).where(
+                FriendRequest.requester_id == requester_id,
+                FriendRequest.recipient_id == recipient_id,
+                FriendRequest.status == "pending"
+            )
+        )
+        if existing.scalar_one_or_none():
+            return None
+
+        request = FriendRequest(requester_id=requester_id, recipient_id=recipient_id, status="pending")
+        self.db.add(request)
+        await self.db.commit()
+        await self.db.refresh(request)
+        return request
+
+    async def get_pending_requests(self, account_id: int) -> list[FriendRequest]:
+        """获取待处理的好友申请列表。"""
+        result = await self.db.execute(
+            select(FriendRequest).where(
+                FriendRequest.recipient_id == account_id,
+                FriendRequest.status == "pending"
+            )
+        )
+        return list(result.scalars().all())
+
+    async def accept_friend_request(self, request_id: int) -> bool:
+        """接受好友申请，建立双向好友关系。"""
+        request = await self.db.get(FriendRequest, request_id)
+        if not request or request.status != "pending":
+            return False
+
+        # 建立双向好友关系
+        self.db.add(Friend(account_id=request.requester_id, friend_account_id=request.recipient_id))
+        self.db.add(Friend(account_id=request.recipient_id, friend_account_id=request.requester_id))
+
+        # 更新申请状态
+        request.status = "accepted"
+        await self.db.commit()
+        return True
+
+    async def reject_friend_request(self, request_id: int) -> bool:
+        """拒绝好友申请。"""
+        request = await self.db.get(FriendRequest, request_id)
+        if not request or request.status != "pending":
+            return False
+
+        request.status = "rejected"
+        await self.db.commit()
+        return True
