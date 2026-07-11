@@ -36,6 +36,9 @@ import MyMusic from '@/components/music/MyMusic.vue'
   flex-direction: column;
   gap: 20px;
   height: 100%;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   overflow-y: auto;
 }
 
@@ -52,28 +55,32 @@ import MyMusic from '@/components/music/MyMusic.vue'
 
 .music-grid {
   display: grid;
-  grid-template-columns: 1fr 384px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 384px);
   gap: 20px;
   align-items: start;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .music-main {
   min-width: 0;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
   gap: 20px;
 }
-.music-side { position: sticky; top: 0; display: flex; flex-direction: column; gap: 16px; }
+.music-side { position: sticky; top: 0; display: flex; flex-direction: column; gap: 16px; min-width: 0; max-width: 100%; }
 
 @media (max-width: 1100px) {
-  .music-grid { grid-template-columns: 1fr; }
+  .music-grid { grid-template-columns: minmax(0, 1fr); }
   .music-side { position: static; }
 }
 
 /* 移动端：间距收缩、标题流式缩放 */
 @media (max-width: 768px) {
   .music-view { gap: 14px; height: auto; overflow: visible; }
-  .music-grid { gap: 14px; }
+  .music-grid { gap: 14px; overflow-x: clip; }
   .music-main { gap: 14px; }
   .page-title {
     font-size: clamp(1.1em, 4vw, 1.4em);

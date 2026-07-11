@@ -298,6 +298,8 @@ async function onRemoveAvatar() {
   border-top: 1px solid var(--border-subtle);
   padding-top: 12px;
   margin-top: 12px;
+  min-width: 0;
+  max-width: 100%;
 }
 .panel-header { margin-bottom: 10px; }
 .panel-title-group { display: flex; align-items: baseline; gap: 8px; }
@@ -328,8 +330,8 @@ async function onRemoveAvatar() {
   border-color: rgba(var(--color-primary-rgb), 0.45);
   color: var(--color-primary);
 }
-.bh-head-text { display: flex; align-items: baseline; gap: 8px; }
-.bh-head-right { display: flex; align-items: center; gap: 9px; }
+.bh-head-text { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.bh-head-right { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
 .bh-summary { font-size: 0.62em; color: var(--text-muted); white-space: nowrap; }
 .bh-chev {
   width: 14px; height: 14px; color: var(--text-muted);
@@ -402,7 +404,7 @@ async function onRemoveAvatar() {
   transition: transform 0.18s var(--ease-out-expo), background 0.18s;
 }
 .switch-row.on .switch-track {
-  background: rgba(45, 212, 191, 0.25);
+  background: rgba(var(--color-primary-rgb), 0.25);
   border-color: var(--color-primary);
 }
 .switch-row.on .switch-knob {
@@ -475,5 +477,9 @@ async function onRemoveAvatar() {
 @media (max-width: 768px) {
   .mini-btn { padding: 5px 10px; }
   .field-row--inline { flex-wrap: wrap; }
+  .behavior-head { padding: 10px; }
+  .bh-summary { display: none; }
+  .switch-row { min-height: 48px; }
+  .create-actions .submit-btn { width: 100%; min-height: 42px; }
 }
 </style>

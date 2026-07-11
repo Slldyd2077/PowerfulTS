@@ -27,6 +27,11 @@ class Account(Base):
     # QQ 绑定 + 好友上线提醒开关（NapCat 推送用）
     qq_number: Mapped[str | None] = mapped_column(String(16), nullable=True)
     notify_friends_online: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+    # 管理员可为每位成员配置的服务器动态通知（发送至该成员绑定的 QQ）。
+    notify_server_online: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+    notify_server_first_join: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+    # 成员动态的投递渠道：默认 TS 私聊；NapCat 已启用时管理员可切换为 QQ。
+    notification_channel: Mapped[str] = mapped_column(String(8), default="ts", server_default="ts", nullable=False)
     # ── 专属 TSMusicBot 容器归属（per-user 隔离：每用户独立容器 → 独立 bot + 平台账号）──
     tsmusic_container_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     tsmusic_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -35,6 +40,16 @@ class Account(Base):
     container_status: Mapped[str] = mapped_column(String(16), default="none", server_default="none")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class ServerMember(Base):
+    """已被监测到的 TS3 成员；用于跨重启识别首次进入服务器事件。"""
+
+    __tablename__ = "server_members"
+
+    unique_identifier: Mapped[str] = mapped_column(String(128), primary_key=True)
+    first_nickname: Mapped[str] = mapped_column(String(64))
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class BotOwnership(Base):

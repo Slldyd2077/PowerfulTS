@@ -74,7 +74,7 @@ async def lifespan(app: FastAPI):
     # NapCat QQ 推送客户端 (好友上线提醒; 未配置则发送时优雅降级)
     app.state.napcat = NapCatClient(settings.napcat_url, settings.napcat_token)
     # 上线提醒编排器 (反查订阅者 → NapCat 发私聊)
-    app.state.online_notifier = OnlineNotifier(app.state.napcat, AsyncSessionLocal)
+    app.state.online_notifier = OnlineNotifier(app.state.napcat, AsyncSessionLocal, settings)
     # 原生 TS3 监控 (后台线程 ServerQuery 轮询; 未配置则优雅降级)
     # 注入主 event loop + notifier，使监控线程能把上线事件投递回 async 主循环
     app.state.ts3_monitor = TS3Monitor(settings)

@@ -208,6 +208,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   padding: 18px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .panel-header {
@@ -420,6 +422,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
   border-radius: var(--radius-sm);
   border-bottom: 1px solid var(--border-subtle);
   transition: background 0.15s;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 .song-item:hover {
   background: var(--surface-4);
@@ -458,8 +464,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
   display: flex;
   align-items: center;
   gap: 7px;
+  min-width: 0;
 }
 .song-name {
+  flex: 1;
+  min-width: 0;
   font-weight: 600;
   font-size: 0.86em;
   color: var(--text-primary);
@@ -567,6 +576,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
   .sb-go-text { display: none; }
   .results { max-height: none; }
   .song-item { gap: 8px; padding: 9px 4px; }
+  .cover { width: 40px; height: 40px; }
+  .song-actions { margin-left: auto; }
   .act { width: 42px; height: 42px; }
   .song-actions { gap: 4px; }
 }

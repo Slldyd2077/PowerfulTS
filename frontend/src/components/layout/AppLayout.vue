@@ -43,7 +43,7 @@ const { isMobile } = useBreakpoint()
 .layout-sidebar {
   width: 230px;
   flex-shrink: 0;
-  background: rgba(13, 16, 20, 0.85);
+  background: rgba(7, 16, 31, 0.88);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-right: 1px solid var(--border-subtle);
@@ -67,7 +67,7 @@ const { isMobile } = useBreakpoint()
   justify-content: space-between;
   padding: 0 24px;
   border-bottom: 1px solid var(--border-subtle);
-  background: rgba(13, 16, 20, 0.7);
+  background: rgba(7, 16, 31, 0.78);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   flex-shrink: 0;

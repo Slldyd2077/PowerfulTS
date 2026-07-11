@@ -30,3 +30,22 @@ export async function checkNapcatStatus(): Promise<NapcatStatus> {
   const { data } = await apiClient.get('/admin/napcat/status')
   return data
 }
+
+export interface MemberNotification {
+  id: number
+  ts_nickname: string
+  qq_bound: boolean
+  notify_server_online: boolean
+  notify_server_first_join: boolean
+  notification_channel: 'ts' | 'qq'
+}
+
+export async function getMemberNotifications(): Promise<{ napcat_enabled: boolean; members: MemberNotification[] }> {
+  const { data } = await apiClient.get('/admin/member-notifications')
+  return data
+}
+
+export async function putMemberNotifications(id: number, payload: Pick<MemberNotification, 'notify_server_online' | 'notify_server_first_join' | 'notification_channel'>) {
+  const { data } = await apiClient.put(`/admin/member-notifications/${id}`, payload)
+  return data as { success: boolean }
+}
