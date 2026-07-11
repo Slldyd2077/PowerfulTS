@@ -237,6 +237,8 @@ onUnmounted(stopPolling)
 .accounts {
   border-top: 1px solid var(--border-subtle);
   padding-top: 12px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .accounts-header {
@@ -292,6 +294,9 @@ onUnmounted(stopPolling)
 .platform-status {
   font-size: 0.64em;
   color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .platform-status.logged {
   color: var(--color-success);
@@ -461,7 +466,18 @@ onUnmounted(stopPolling)
 
 /* 移动端：加大登录按钮触摸区、行允许折行 */
 @media (max-width: 768px) {
-  .login-btn { padding: 5px 12px; }
+  .login-btn { flex: 1; min-height: 40px; padding: 6px 12px; }
   .platform-row { flex-wrap: wrap; }
+  .platform-info { flex-basis: calc(100% - 42px); }
+  .login-actions,
+  .logout-actions {
+    width: 100%;
+    padding-left: 40px;
+  }
+  .logout-actions { justify-content: flex-end; }
+  .logout-btn { min-height: 40px; padding: 6px 16px; }
+  .cookie-box { width: calc(100vw - 24px); max-width: none; padding: 18px; }
+  .cookie-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cookie-actions button { min-width: 0; min-height: 42px; }
 }
 </style>

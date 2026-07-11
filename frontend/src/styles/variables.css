@@ -1,23 +1,23 @@
 :root {
   /* ───────────────────────────────────────────────────────────
-     Signal · 石墨观测台调色板
+     Signal · 深海蓝观测台调色板
      设计原则：
-       1. 单一信号色（青绿）+ 翡翠绿状态色，琥珀/红仅用于状态
-       2. 冷调石墨灰底（去除原蓝紫倾向），近黑不发蓝
+       1. 取 Logo 品牌蓝作为主信号色，绿色仅保留在线状态语义
+       2. 深海军蓝表面承接 Logo 的 #011e4d 深色层次
        3. 发丝线为结构性主角，霓虹辉光改为聚焦环
        4. 渐变去彩虹，仅保留同色相单色（CTA / 进度条克制使用）
      令牌名不变，其他页面平滑继承新气质。
      ─────────────────────────────────────────────────────────── */
 
-  /* 主信号色：青绿（live metric / 主操作） */
-  --color-primary: #2dd4bf;
-  --color-primary-dim: #14b8a6;
-  --color-primary-rgb: 45, 212, 191;
+  /* 主信号色：取自新 Logo 的亮蓝 / 品牌蓝 */
+  --color-primary: #5293e2;
+  --color-primary-dim: #116ce0;
+  --color-primary-rgb: 82, 147, 226;
 
-  /* 次要：翡翠绿（在线 / 活跃态） */
-  --color-secondary: #34d399;
-  --color-secondary-dim: #059669;
-  --color-secondary-rgb: 52, 211, 153;
+  /* 次要：冷调天蓝，用于数据层次与次级反馈 */
+  --color-secondary: #38bdf8;
+  --color-secondary-dim: #0284c7;
+  --color-secondary-rgb: 56, 189, 248;
 
   /* 强调：琥珀（仅警示 / 累计类语义点缀，克制使用） */
   --color-accent: #f59e0b;
@@ -29,24 +29,24 @@
   --color-danger: #f87171;
   --color-danger-rgb: 248, 113, 113;
 
-  /* ── 表面层级：冷调石墨灰（由深到浅）── */
-  --surface-0: #07080a;       /* 最深底色 */
-  --surface-1: #0b0d10;       /* 主背景 */
-  --surface-2: #111418;       /* 侧边栏 / 顶栏 */
-  --surface-3: rgba(255, 255, 255, 0.026);  /* 卡片 */
-  --surface-3-hover: rgba(255, 255, 255, 0.05);
-  --surface-4: rgba(255, 255, 255, 0.04);   /* 行 hover */
+  /* ── 表面层级：深海军蓝（由深到浅）── */
+  --surface-0: #030812;       /* 最深底色 */
+  --surface-1: #07101f;       /* 主背景 */
+  --surface-2: #0b1729;       /* 侧边栏 / 顶栏 */
+  --surface-3: rgba(82, 147, 226, 0.045);  /* 卡片 */
+  --surface-3-hover: rgba(82, 147, 226, 0.085);
+  --surface-4: rgba(82, 147, 226, 0.065);   /* 行 hover */
 
   /* ── 边框：发丝线（结构性主角）── */
-  --border-subtle: rgba(255, 255, 255, 0.05);
-  --border-default: rgba(255, 255, 255, 0.08);
-  --border-emphasis: rgba(255, 255, 255, 0.13);
+  --border-subtle: rgba(148, 190, 242, 0.07);
+  --border-default: rgba(148, 190, 242, 0.11);
+  --border-emphasis: rgba(148, 190, 242, 0.18);
 
   /* ── 文字层级（对比度已对近黑底加固）── */
-  --text-primary: #e8ebef;
-  --text-secondary: #a6aeba;
-  --text-muted: #7c848f;
-  --text-inverse: #05120e;
+  --text-primary: #edf4ff;
+  --text-secondary: #a9b9d0;
+  --text-muted: #7387a5;
+  --text-inverse: #ffffff;
 
   /* ── 圆角：收敛，更「仪器」── */
   --radius-sm: 4px;
@@ -54,9 +54,9 @@
   --radius-lg: 12px;
 
   /* ── 辉光 → 聚焦环（极克制，糊光已废弃）── */
-  --glow-primary: 0 0 0 1px rgba(45, 212, 191, 0.35);
-  --glow-primary-strong: 0 0 0 1px rgba(45, 212, 191, 0.5), 0 0 22px -8px rgba(45, 212, 191, 0.45);
-  --glow-secondary: 0 0 0 1px rgba(52, 211, 153, 0.3);
+  --glow-primary: 0 0 0 1px rgba(82, 147, 226, 0.38);
+  --glow-primary-strong: 0 0 0 1px rgba(82, 147, 226, 0.52), 0 0 24px -8px rgba(17, 108, 224, 0.58);
+  --glow-secondary: 0 0 0 1px rgba(56, 189, 248, 0.32);
   --glow-accent: 0 0 0 1px rgba(245, 158, 11, 0.3);
 
   /* ── 阴影：克制，深而透 ── */
@@ -65,11 +65,11 @@
   --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.55);
 
   /* ── 渐变：去彩虹，仅同色相单色 ── */
-  --gradient-brand: linear-gradient(180deg, #2dd4bf, #14b8a6);
-  --gradient-brand-subtle: linear-gradient(180deg, rgba(45, 212, 191, 0.12), rgba(45, 212, 191, 0.03));
+  --gradient-brand: linear-gradient(135deg, #116ce0 0%, #5293e2 100%);
+  --gradient-brand-subtle: linear-gradient(135deg, rgba(17, 108, 224, 0.18), rgba(82, 147, 226, 0.045));
   --gradient-gold: linear-gradient(180deg, #f59e0b, #d97706);
   --gradient-danger: linear-gradient(180deg, #f87171, #dc2626);
-  --gradient-surface: linear-gradient(180deg, rgba(255, 255, 255, 0.022) 0%, rgba(255, 255, 255, 0.005) 100%);
+  --gradient-surface: linear-gradient(180deg, rgba(82, 147, 226, 0.055) 0%, rgba(3, 8, 18, 0.015) 100%);
 
   /* ── 间距节奏 ── */
   --space-1: 4px;

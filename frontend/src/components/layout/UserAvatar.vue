@@ -47,8 +47,8 @@ async function handleLogout() {
   width: 30px;
   height: 30px;
   border-radius: var(--radius-sm);
-  background: rgba(45, 212, 191, 0.1);
-  border: 1px solid rgba(45, 212, 191, 0.25);
+  background: rgba(var(--color-primary-rgb), 0.1);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.28);
   color: var(--color-primary);
   display: flex;
   align-items: center;

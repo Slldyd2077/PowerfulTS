@@ -94,17 +94,40 @@ function navigate(key: string) {
 }
 
 .nav-brand {
-  padding: 22px 18px 14px;
+  padding: 18px 14px 14px;
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 12px;
 }
 
 .brand-logo {
+  width: 65px;
+  height: 65px;
+  position: relative;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
+}
+
+.brand-logo::before {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border: 1px solid rgba(148, 190, 242, 0.32);
+  border-radius: 13px;
+  background: linear-gradient(145deg, #90c4f8, #dbeafe);
+  box-shadow: 0 9px 24px rgba(1, 30, 77, 0.42), inset 0 0 0 1px rgba(255, 255, 255, 0.72);
+}
+
+.brand-logo img {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
 }
 
 .brand-text {
@@ -115,13 +138,13 @@ function navigate(key: string) {
 }
 
 .brand-kicker {
-  font-size: 0.58em;
+  font-size: 0.62em;
   color: var(--color-primary);
   letter-spacing: 0.16em;
 }
 
 .brand-title {
-  font-size: 1em;
+  font-size: 1.04em;
   font-weight: 700;
   color: var(--text-primary);
   margin: 0;

@@ -51,7 +51,7 @@ function navigate(path: string, restricted: boolean) {
   padding: 5px;
   border: 1px solid var(--border-default);
   border-radius: 14px;
-  background: rgba(17, 20, 24, 0.94);
+  background: rgba(8, 19, 37, 0.95);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);

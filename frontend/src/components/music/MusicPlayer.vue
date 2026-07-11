@@ -413,6 +413,8 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .panel-header {
@@ -443,6 +445,7 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
 .np-hero {
   display: flex;
   gap: 14px;
+  min-width: 0;
 }
 
 .np-cover-wrap {
@@ -456,7 +459,7 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
   transition: box-shadow 0.3s var(--ease-out-expo);
 }
 .np-hero.playing .np-cover-wrap {
-  box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.5), 0 0 22px -6px rgba(45, 212, 191, 0.45);
+  box-shadow: 0 0 0 1px rgba(var(--color-primary-rgb), 0.52), 0 0 24px -6px rgba(var(--color-primary-rgb), 0.46);
 }
 .np-cover {
   width: 100%;
@@ -701,6 +704,8 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
   margin-top: 10px;
   padding-top: 12px;
   border-top: 1px solid var(--border-subtle);
+  min-width: 0;
+  max-width: 100%;
 }
 .queue-header {
   display: flex;
@@ -782,6 +787,10 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
   cursor: pointer;
   touch-action: none; /* 长按拖动优先（队列短，触摸滚动受限可接受） */
   user-select: none;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 .queue-item.dragging {
   background: var(--surface-4);
@@ -830,6 +839,8 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
   gap: 1px;
 }
 .q-name {
+  flex: 1;
+  min-width: 0;
   font-size: 0.8em;
   font-weight: 600;
   color: var(--text-primary);
@@ -901,6 +912,14 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
   .scrubber { gap: 8px; }
   .transport { gap: 14px; }
   .queue-list { max-height: 280px; }
+  .secondary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .mode-pill { min-width: 0; justify-content: center; padding: 8px 10px; }
+  .vol { grid-column: 1 / -1; width: 100%; min-width: 0; }
+  .q-remove { width: 36px; height: 36px; opacity: 0.7; }
 }
 
 /* 小屏：进一步缩小封面、隐藏队列序号让位标题 */

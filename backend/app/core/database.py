@@ -88,6 +88,9 @@ async def init_db() -> None:
         # 对已存在的库补新列（create_all 不改已存在表结构）
         await _ensure_column(conn, "accounts", "qq_number", "VARCHAR(16)")
         await _ensure_column(conn, "accounts", "notify_friends_online", "BOOLEAN DEFAULT 0 NOT NULL")
+        await _ensure_column(conn, "accounts", "notify_server_online", "BOOLEAN DEFAULT 0 NOT NULL")
+        await _ensure_column(conn, "accounts", "notify_server_first_join", "BOOLEAN DEFAULT 0 NOT NULL")
+        await _ensure_column(conn, "accounts", "notification_channel", "VARCHAR(8) DEFAULT 'ts' NOT NULL")
         # per-user 专属 TSMusicBot 容器归属字段
         await _ensure_column(conn, "accounts", "tsmusic_container_name", "VARCHAR(64)")
         await _ensure_column(conn, "accounts", "tsmusic_port", "INTEGER")

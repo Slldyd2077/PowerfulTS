@@ -2,13 +2,20 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
-import { getAdminSettings, putAdminSettings, checkNapcatStatus, type SettingItem, type NapcatStatus } from '@/api/admin'
+import {
+  getAdminSettings, putAdminSettings, checkNapcatStatus, getMemberNotifications, putMemberNotifications,
+  type SettingItem, type NapcatStatus, type MemberNotification,
+} from '@/api/admin'
 
 const auth = useAuthStore()
 const loading = ref(false)
 const saving = ref(false)
 const settings = ref<Record<string, SettingItem>>({})
 const form = reactive<Record<string, string>>({})
+const memberNotifications = ref<MemberNotification[]>([])
+const memberNotificationsLoading = ref(false)
+const savingMemberId = ref<number | null>(null)
+const napcatEnabled = ref(false)
 
 async function load() {
   loading.value = true
@@ -20,6 +27,36 @@ async function load() {
     ElMessage.error('加载设置失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function loadMemberNotifications() {
+  memberNotificationsLoading.value = true
+  try {
+    const res = await getMemberNotifications()
+    memberNotifications.value = res.members
+    napcatEnabled.value = res.napcat_enabled
+  } catch {
+    ElMessage.error('加载成员通知设置失败')
+  } finally {
+    memberNotificationsLoading.value = false
+  }
+}
+
+async function saveMemberNotifications(member: MemberNotification) {
+  savingMemberId.value = member.id
+  try {
+    await putMemberNotifications(member.id, {
+      notify_server_online: member.notify_server_online,
+      notify_server_first_join: member.notify_server_first_join,
+      notification_channel: member.notification_channel,
+    })
+    ElMessage.success(`已保存 ${member.ts_nickname} 的通知设置`)
+  } catch (e: unknown) {
+    ElMessage.error(e instanceof Error ? e.message : '保存成员通知设置失败')
+    await loadMemberNotifications()
+  } finally {
+    savingMemberId.value = null
   }
 }
 
@@ -65,7 +102,10 @@ async function checkNapcat() {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  loadMemberNotifications()
+})
 </script>
 
 <template>
@@ -108,6 +148,44 @@ onMounted(load)
           :placeholder="s.is_set ? '' : '未设置（用 .env 默认）'"
         />
       </div>
+
+      <section class="member-notifications">
+        <div class="member-notifications-header">
+          <div>
+            <h3>成员通知</h3>
+            <p>默认通过 TeamSpeak 私聊发送；NapCat 已启用时可改为 QQ。</p>
+          </div>
+          <span class="event-key"><i class="key-dot"></i>{{ napcatEnabled ? 'TS / QQ 可选' : 'TS 私聊' }}</span>
+        </div>
+        <div v-if="memberNotificationsLoading" class="member-loading">加载成员列表中…</div>
+        <div v-else-if="!memberNotifications.length" class="member-loading">暂无成员</div>
+        <div v-else class="member-notification-list">
+          <article v-for="member in memberNotifications" :key="member.id" class="member-notification-row">
+            <div class="member-identity">
+              <span class="member-avatar">{{ member.ts_nickname.slice(0, 1).toUpperCase() }}</span>
+              <div>
+                <strong>{{ member.ts_nickname }}</strong>
+                <small :class="{ muted: !member.qq_bound }">{{ member.qq_bound ? '已绑定 QQ，可选 QQ 通知' : '未绑定 QQ，使用 TS 私聊' }}</small>
+              </div>
+            </div>
+            <label class="notice-channel">
+              <span>通知渠道</span>
+              <el-select v-model="member.notification_channel" size="small" :disabled="savingMemberId === member.id" @change="saveMemberNotifications(member)">
+                <el-option label="TeamSpeak 私聊（默认）" value="ts" />
+                <el-option label="QQ 私聊" value="qq" :disabled="!napcatEnabled || !member.qq_bound" />
+              </el-select>
+            </label>
+            <label class="notice-toggle">
+              <span>成员上线</span>
+              <el-switch v-model="member.notify_server_online" :disabled="savingMemberId === member.id" @change="saveMemberNotifications(member)" />
+            </label>
+            <label class="notice-toggle">
+              <span>新成员首次加入</span>
+              <el-switch v-model="member.notify_server_first_join" :disabled="savingMemberId === member.id" @change="saveMemberNotifications(member)" />
+            </label>
+          </article>
+        </div>
+      </section>
       <div class="actions">
         <span class="hint">敏感项留空（****）= 不修改；其他项留空 = 清除覆盖回退 .env 默认</span>
         <button class="save-btn" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存设置' }}</button>
@@ -128,6 +206,23 @@ onMounted(load)
 .panel-sub { font-size: 0.66em; color: var(--text-muted); }
 .loading-row { padding: 30px; text-align: center; color: var(--text-muted); font-size: 0.85em; }
 .settings-form { display: flex; flex-direction: column; gap: 13px; }
+.member-notifications { margin-top: 16px; padding: 18px; border: 1px solid var(--border-default); border-radius: 10px; background: linear-gradient(135deg, rgba(36, 170, 210, 0.08), transparent 45%), var(--surface-3); }
+.member-notifications-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.member-notifications h3 { margin: 0 0 3px; font-size: .9em; color: var(--text-primary); }
+.member-notifications p { margin: 0; font-size: .72em; color: var(--text-muted); }
+.event-key { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; color: var(--text-secondary); font-size: .68em; }
+.key-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-success); box-shadow: 0 0 8px var(--color-success); }
+.member-notification-list { display: flex; flex-direction: column; }
+.member-notification-row { display: grid; grid-template-columns: minmax(160px, 1fr) 185px 130px 160px; align-items: center; gap: 16px; padding: 11px 0; border-top: 1px solid var(--border-subtle); }
+.member-identity { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.member-avatar { width: 28px; height: 28px; display: grid; place-items: center; flex-shrink: 0; border-radius: 50%; background: var(--gradient-brand); color: var(--text-inverse); font-size: .75em; font-weight: 700; }
+.member-identity strong, .member-identity small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-identity strong { color: var(--text-primary); font-size: .8em; }
+.member-identity small { margin-top: 2px; color: var(--color-success); font-size: .66em; }
+.member-identity small.muted { color: var(--text-muted); }
+.notice-toggle { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-secondary); font-size: .72em; cursor: pointer; }
+.notice-channel { display: flex; flex-direction: column; gap: 4px; color: var(--text-secondary); font-size: .72em; }
+.member-loading { padding: 18px 0 4px; color: var(--text-muted); font-size: .75em; text-align: center; }
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field label { display: flex; align-items: center; gap: 6px; }
 .field-label { font-size: 0.74em; color: var(--text-secondary); }
@@ -186,6 +281,10 @@ onMounted(load)
   .ns-text { white-space: normal; overflow: visible; line-height: 1.55; }
   .ns-btn { width: 100%; min-height: 44px; font-size: 0.84em; }
   .settings-form { gap: 16px; }
+  .member-notifications { padding: 14px 12px; }
+  .member-notifications-header { flex-direction: column; }
+  .member-notification-row { grid-template-columns: 1fr; gap: 10px; padding: 14px 0; }
+  .notice-toggle { padding-left: 37px; }
   .field label { flex-wrap: wrap; }
   .field-label { font-size: 0.82em; }
   .field input {

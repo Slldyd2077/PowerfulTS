@@ -63,6 +63,10 @@ function fmt(sec?: number): string {
   border-radius: var(--radius-sm);
   border-bottom: 1px solid var(--border-subtle);
   transition: background 0.15s;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 .song-item:hover { background: var(--surface-4); }
 .cover {
@@ -93,6 +97,8 @@ function fmt(sec?: number): string {
   min-width: 0;
 }
 .song-name {
+  flex: 1;
+  min-width: 0;
   font-weight: 600;
   font-size: 0.86em;
   color: var(--text-primary);
@@ -159,6 +165,9 @@ function fmt(sec?: number): string {
 /* 小屏：隐藏时长让位标题、放大操作按钮触摸区 */
 @media (max-width: 480px) {
   .song-dur { display: none; }
-  .act { width: 36px; height: 36px; }
+  .song-item { gap: 8px; padding: 9px 4px; }
+  .cover { width: 40px; height: 40px; }
+  .song-actions { gap: 4px; margin-left: auto; }
+  .act { width: 40px; height: 40px; }
 }
 </style>

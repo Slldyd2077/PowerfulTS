@@ -110,7 +110,7 @@ class TS3Monitor:
         with self._lock:
             self.channel_map = new_map
 
-    def _refresh_clients(self) -> tuple[list[str], list[str]]:
+    def _refresh_clients(self) -> tuple[list[tuple[str, str]], list[str]]:
         now = time.time()
         resp = self._conn.send("clientlist", uid=True)
         # 锁外完成解析（resp 已是纯数据）
@@ -129,7 +129,7 @@ class TS3Monitor:
             seen_uids.add(uid)
             updates[uid] = {"nickname": nickname, "cid": _safe_int(cl.get("cid"))}
         # 锁内一次性应用写 + 清理（短临界区，整个写原子）；同时收集上线/离线 nickname
-        new_online: list[str] = []
+        new_online: list[tuple[str, str]] = []
         went_offline: list[str] = []
         with self._lock:
             for uid, u in updates.items():
@@ -142,7 +142,7 @@ class TS3Monitor:
                         "last_seen": now,
                     }
                     self._total_users.add(uid)
-                    new_online.append(u["nickname"])
+                    new_online.append((u["nickname"], uid))
                 else:
                     entry.update(nickname=u["nickname"], cid=u["cid"], last_seen=now)
             for uid in list(self.client_data.keys()):
@@ -166,12 +166,12 @@ class TS3Monitor:
             logger.warning("TS3 轮询失败，将重连: %s", exc)
             self._disconnect()
 
-    def _dispatch_online(self, nicknames: list[str]) -> None:
+    def _dispatch_online(self, clients: list[tuple[str, str]]) -> None:
         """上线事件投递到主 loop（同步线程 → async 主循环），fire-and-forget。"""
         if self._loop is None or self._notifier is None or self._loop.is_closed():
             return
-        for nick in nicknames:
-            fut = asyncio.run_coroutine_threadsafe(self._notifier.on_online(nick), self._loop)
+        for nick, uid in clients:
+            fut = asyncio.run_coroutine_threadsafe(self._notifier.on_online(nick, uid), self._loop)
             fut.add_done_callback(self._on_dispatch_done)
 
     def _dispatch_offline(self, nicknames: list[str]) -> None:

@@ -154,9 +154,9 @@ function initVisualizer() {
 
       // 渐变色条
       const gradient = ctx.createLinearGradient(x, y, x, h)
-      gradient.addColorStop(0, 'rgba(0, 229, 255, 0.9)')
-      gradient.addColorStop(0.5, 'rgba(0, 229, 255, 0.4)')
-      gradient.addColorStop(1, 'rgba(179, 136, 255, 0.15)')
+      gradient.addColorStop(0, 'rgba(82, 147, 226, 0.95)')
+      gradient.addColorStop(0.5, 'rgba(17, 108, 224, 0.5)')
+      gradient.addColorStop(1, 'rgba(1, 30, 77, 0.16)')
 
       ctx.beginPath()
       ctx.roundRect(x, y, barWidth, barHeight, 2)
@@ -166,7 +166,7 @@ function initVisualizer() {
       // 顶部高亮点
       ctx.beginPath()
       ctx.roundRect(x, y, barWidth, Math.min(3, barHeight), 2)
-      ctx.fillStyle = 'rgba(0, 229, 255, 1)'
+      ctx.fillStyle = 'rgba(82, 147, 226, 1)'
       ctx.fill()
     }
 
@@ -682,7 +682,7 @@ async function handleRegister() {
 .panel-visual {
   position: relative;
   width: 55%;
-  background: linear-gradient(160deg, #060610 0%, #0a0a20 40%, #0d0d2b 100%);
+  background: linear-gradient(160deg, #030812 0%, #071329 46%, #0a2140 100%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -730,8 +730,8 @@ async function handleRegister() {
   width: 42px;
   height: 42px;
   border-radius: 50%;
-  border: 1px solid rgba(0, 229, 255, 0.25);
-  background: rgba(6, 6, 16, 0.5);
+  border: 1px solid rgba(82, 147, 226, 0.28);
+  background: rgba(3, 8, 18, 0.58);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   cursor: pointer;
@@ -742,8 +742,8 @@ async function handleRegister() {
 }
 
 .sound-toggle:hover {
-  border-color: rgba(0, 229, 255, 0.5);
-  box-shadow: 0 0 18px rgba(0, 229, 255, 0.2);
+  border-color: rgba(82, 147, 226, 0.55);
+  box-shadow: 0 0 18px rgba(17, 108, 224, 0.24);
   transform: translateY(-1px);
 }
 
@@ -762,10 +762,10 @@ async function handleRegister() {
   align-items: center;
   gap: 8px;
   padding: 8px 14px;
-  background: rgba(6, 6, 16, 0.6);
+  background: rgba(3, 8, 18, 0.68);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(0, 229, 255, 0.2);
+  border: 1px solid rgba(82, 147, 226, 0.22);
   border-radius: 100px;
   opacity: 0;
   transform: translateX(8px) scale(0.96);
@@ -786,7 +786,7 @@ async function handleRegister() {
   width: 96px;
   height: 4px;
   border-radius: 2px;
-  background: linear-gradient(90deg, rgba(0, 229, 255, 0.6), rgba(0, 229, 255, 0.15));
+  background: linear-gradient(90deg, rgba(82, 147, 226, 0.72), rgba(17, 108, 224, 0.14));
   outline: none;
   cursor: pointer;
 }
@@ -797,9 +797,9 @@ async function handleRegister() {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #00e5ff;
+  background: #5293e2;
   border: none;
-  box-shadow: 0 0 8px rgba(0, 229, 255, 0.6);
+  box-shadow: 0 0 8px rgba(82, 147, 226, 0.62);
   cursor: pointer;
 }
 
@@ -807,9 +807,9 @@ async function handleRegister() {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #00e5ff;
+  background: #5293e2;
   border: none;
-  box-shadow: 0 0 8px rgba(0, 229, 255, 0.6);
+  box-shadow: 0 0 8px rgba(82, 147, 226, 0.62);
   cursor: pointer;
 }
 
@@ -823,16 +823,16 @@ async function handleRegister() {
 
 /* autoplay 兜底态：按钮高亮脉动，提示用户点击开声 */
 .sound-control.hint .sound-toggle {
-  border-color: rgba(0, 229, 255, 0.55);
+  border-color: rgba(82, 147, 226, 0.58);
   animation: sound-hint-pulse 2s ease-in-out infinite;
 }
 
 @keyframes sound-hint-pulse {
   0%, 100% {
-    box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.35);
+    box-shadow: 0 0 0 0 rgba(82, 147, 226, 0.35);
   }
   50% {
-    box-shadow: 0 0 18px 4px rgba(0, 229, 255, 0.2);
+    box-shadow: 0 0 18px 4px rgba(82, 147, 226, 0.22);
   }
 }
 
@@ -846,17 +846,20 @@ async function handleRegister() {
 }
 
 .brand-logo {
-  width: 64px;
-  height: 64px;
-  margin-bottom: 28px;
-  border-radius: 18px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  width: 82px;
+  height: 82px;
+  margin-bottom: 24px;
+  border-radius: 20px;
+  padding: 5px;
+  background: linear-gradient(145deg, #f8fbff, #dbeafe);
+  border: 1px solid rgba(148, 190, 242, 0.42);
+  box-shadow: 0 14px 36px rgba(1, 30, 77, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.72);
   animation: badge-pulse 3s ease-in-out infinite;
 }
 
 @keyframes badge-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.2); }
-  50% { box-shadow: 0 0 20px 4px rgba(0, 229, 255, 0.1); }
+  0%, 100% { box-shadow: 0 10px 30px rgba(1, 30, 77, 0.42), 0 0 0 0 rgba(82, 147, 226, 0.18); }
+  50% { box-shadow: 0 12px 34px rgba(1, 30, 77, 0.5), 0 0 22px 4px rgba(82, 147, 226, 0.16); }
 }
 
 .brand-title {
@@ -873,7 +876,7 @@ async function handleRegister() {
 }
 
 .brand-title-accent {
-  background: linear-gradient(135deg, #00e5ff 0%, #b388ff 100%);
+  background: linear-gradient(135deg, #78aef0 0%, #116ce0 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -951,7 +954,7 @@ async function handleRegister() {
   top: 10%;
   bottom: 10%;
   width: 1px;
-  background: linear-gradient(180deg, transparent, rgba(0, 229, 255, 0.15), rgba(179, 136, 255, 0.15), transparent);
+  background: linear-gradient(180deg, transparent, rgba(82, 147, 226, 0.16), rgba(17, 108, 224, 0.12), transparent);
 }
 
 .form-wrapper {
@@ -984,9 +987,9 @@ async function handleRegister() {
   width: 100%;
   height: 100%;
   border-radius: 8px;
-  background: linear-gradient(135deg, rgba(0, 229, 255, 0.15), rgba(179, 136, 255, 0.15));
-  border: 1px solid rgba(0, 229, 255, 0.2);
-  box-shadow: 0 0 16px rgba(0, 229, 255, 0.08);
+  background: linear-gradient(135deg, rgba(17, 108, 224, 0.18), rgba(82, 147, 226, 0.1));
+  border: 1px solid rgba(82, 147, 226, 0.24);
+  box-shadow: 0 0 18px rgba(17, 108, 224, 0.12);
 }
 
 .mode-thumb.right {
@@ -1093,10 +1096,10 @@ async function handleRegister() {
 }
 
 .guest-btn:hover {
-  border-color: rgba(0, 229, 255, 0.35);
-  background: rgba(0, 229, 255, 0.05);
+  border-color: rgba(82, 147, 226, 0.4);
+  background: rgba(82, 147, 226, 0.07);
   color: var(--text-primary);
-  box-shadow: 0 0 18px rgba(0, 229, 255, 0.08);
+  box-shadow: 0 0 18px rgba(17, 108, 224, 0.12);
 }
 
 .guest-icon {
@@ -1147,7 +1150,7 @@ async function handleRegister() {
   margin-top: 12px;
   border: none;
   border-radius: 8px;
-  background: linear-gradient(135deg, #0097a7, #7c4dff);
+  background: linear-gradient(135deg, #0951ae, #5293e2);
   color: #fff;
   font-size: 0.95em;
   font-weight: 600;
@@ -1160,7 +1163,7 @@ async function handleRegister() {
 
 .submit-btn:not(:disabled):hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 24px rgba(0, 229, 255, 0.25);
+  box-shadow: 0 4px 26px rgba(17, 108, 224, 0.34);
 }
 
 .submit-btn:not(:disabled):active {
@@ -1212,9 +1215,9 @@ async function handleRegister() {
   white-space: nowrap;
   padding: 0 16px;
   height: 40px;
-  border: 1px solid rgba(0, 229, 255, 0.2);
+  border: 1px solid rgba(82, 147, 226, 0.24);
   border-radius: 6px;
-  background: rgba(0, 229, 255, 0.06);
+  background: rgba(82, 147, 226, 0.08);
   color: var(--color-primary);
   font-size: 0.85em;
   font-weight: 500;
@@ -1224,8 +1227,8 @@ async function handleRegister() {
 }
 
 .code-btn:hover:not(:disabled) {
-  background: rgba(0, 229, 255, 0.12);
-  border-color: rgba(0, 229, 255, 0.35);
+  background: rgba(82, 147, 226, 0.14);
+  border-color: rgba(82, 147, 226, 0.42);
 }
 
 .code-btn:disabled {
@@ -1348,10 +1351,11 @@ async function handleRegister() {
   }
 
   .brand-logo {
-    width: 48px;
-    height: 48px;
-    margin-bottom: 10px;
-    border-radius: 14px;
+    width: 66px;
+    height: 66px;
+    margin-bottom: 8px;
+    border-radius: 16px;
+    padding: 4px;
   }
 
   .panel-form {

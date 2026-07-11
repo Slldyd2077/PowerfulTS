@@ -318,6 +318,8 @@ async function handlePlay(song: Song, queued = false) {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   padding: 18px;
+  min-width: 0;
+  max-width: 100%;
 }
 .panel-header {
   display: flex;
@@ -428,6 +430,9 @@ async function handlePlay(song: Song, queued = false) {
   cursor: pointer;
   border-radius: var(--radius-sm);
   transition: background 0.15s;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 .playlist-row:hover { background: var(--surface-4); }
 .playlist-row.expanded { background: var(--surface-4); }

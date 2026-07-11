@@ -7,21 +7,69 @@ TS3 / CORS 改需重启 backend（标记 need_restart）。
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import get_settings
 from ..core.database import get_db
 from ..deps import AdminDep
 from ..services import app_setting
+from ..models import Account
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 SYS_PREFIX = "sys."
 MASK = "****"
+
+
+@router.get("/member-notifications")
+async def list_member_notifications(
+    request: Request, account: AdminDep, db: AsyncSession = Depends(get_db)
+):
+    """列出成员的服务器动态通知订阅；QQ 仅返回是否已绑定。"""
+    rows = (await db.execute(select(Account).order_by(Account.ts_nickname))).scalars().all()
+    napcat_enabled = bool((await request.app.state.napcat.check_status()).get("connected"))
+    return {"napcat_enabled": napcat_enabled, "members": [{
+        "id": row.id,
+        "ts_nickname": row.ts_nickname,
+        "qq_bound": bool(row.qq_number),
+        "notify_server_online": bool(row.notify_server_online),
+        "notify_server_first_join": bool(row.notify_server_first_join),
+        "notification_channel": row.notification_channel if row.notification_channel in {"ts", "qq"} else "ts",
+    } for row in rows]}
+
+
+class MemberNotificationUpdate(BaseModel):
+    notify_server_online: bool
+    notify_server_first_join: bool
+    notification_channel: Literal["ts", "qq"] = "ts"
+
+
+@router.put("/member-notifications/{account_id}")
+async def update_member_notifications(
+    account_id: int, body: MemberNotificationUpdate, request: Request, account: AdminDep,
+    db: AsyncSession = Depends(get_db),
+):
+    """管理员更新一位成员的服务器动态 QQ 通知开关。"""
+    member = await db.get(Account, account_id)
+    if member is None:
+        raise HTTPException(status_code=404, detail="成员不存在")
+    if body.notification_channel == "qq":
+        napcat_status = await request.app.state.napcat.check_status()
+        if not napcat_status.get("connected"):
+            raise HTTPException(status_code=400, detail="NapCat 未启用，无法选择 QQ 通知")
+        if not member.qq_number:
+            raise HTTPException(status_code=400, detail="该成员尚未绑定 QQ")
+    member.notify_server_online = body.notify_server_online
+    member.notify_server_first_join = body.notify_server_first_join
+    member.notification_channel = body.notification_channel
+    await db.commit()
+    return {"success": True}
 
 # 可配置项：env 字段名 / label / 是否敏感（GET 脱敏）/ reload=重建哪类 client / restart=需重启 backend
 SPEC: list[dict] = [

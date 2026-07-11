@@ -72,3 +72,28 @@ def send_verify_code(settings: Settings, nickname: str, code: str) -> str | None
         return None  # 不在线
     finally:
         conn.close()
+
+
+def send_private_message(settings: Settings, nickname: str, message: str) -> bool:
+    """使用与验证码相同的 ServerQuery 私聊通道向在线 TS 成员发送消息。"""
+    conn = TS3QueryClient(settings.ts3_host, settings.ts3_query_port)
+    try:
+        conn.connect()
+        conn.send(
+            "login",
+            client_login_name=settings.ts3_query_user,
+            client_login_password=settings.ts3_query_password,
+        )
+        conn.send("use", sid=settings.ts3_sid)
+        for client in conn.send("clientlist", uid=True):
+            if str(client.get("client_type", "0")) == "1":
+                continue
+            if str(client.get("client_nickname", "")) == nickname:
+                conn.send("sendtextmessage", targetmode=1, target=client.get("clid"), msg=message)
+                return True
+        return False
+    except Exception:
+        logger.warning("TS 私聊发送失败: %s", nickname, exc_info=True)
+        return False
+    finally:
+        conn.close()

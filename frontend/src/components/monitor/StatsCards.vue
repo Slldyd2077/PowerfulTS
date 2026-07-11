@@ -70,8 +70,8 @@ function formatTime(seconds: number): string {
         <svg :viewBox="`0 0 ${SPARK_W} ${SPARK_H}`" preserveAspectRatio="none">
           <defs>
             <linearGradient id="spark-fill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="rgba(45,212,191,0.28)" />
-              <stop offset="100%" stop-color="rgba(45,212,191,0)" />
+              <stop offset="0%" stop-color="var(--color-primary)" stop-opacity="0.28" />
+              <stop offset="100%" stop-color="var(--color-primary)" stop-opacity="0" />
             </linearGradient>
           </defs>
           <path v-if="spark.area" :d="spark.area" fill="url(#spark-fill)" />
@@ -201,7 +201,7 @@ function formatTime(seconds: number): string {
   inset: 0;
   background: radial-gradient(
     170px circle at var(--mx, 50%) var(--my, 50%),
-    rgba(45, 212, 191, 0.1),
+    rgba(var(--color-primary-rgb), 0.1),
     transparent 62%
   );
   opacity: 0;
@@ -217,7 +217,7 @@ function formatTime(seconds: number): string {
 .stat-hero {
   border-top: 1px solid var(--color-primary);
   background:
-    linear-gradient(180deg, rgba(45, 212, 191, 0.05), rgba(45, 212, 191, 0) 60%),
+    linear-gradient(180deg, rgba(var(--color-primary-rgb), 0.07), rgba(var(--color-primary-rgb), 0) 60%),
     var(--gradient-surface);
 }
 
