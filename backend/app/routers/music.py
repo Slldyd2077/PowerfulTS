@@ -15,7 +15,6 @@ import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import get_settings
@@ -76,6 +75,38 @@ OwnedBotId = Annotated[str | None, Depends(_owned_bot_id)]
 StrictOwnedBotId = Annotated[str | None, Depends(_strict_owned_bot_id)]
 
 
+async def _library_bot_id(
+    bot_id: BotIdQuery = None,
+    account: Account = Depends(get_current_account),
+    db: AsyncSession = Depends(get_db),
+) -> str:
+    """解析曲库身份：自己的 Bot，或明确附带歌单权限的共享 Bot。"""
+    owned = await _owned_bot_ids(db, account.id)
+    if bot_id:
+        if bot_id in owned:
+            return bot_id
+        playlist_share = (
+            await db.execute(
+                select(BotShare.id).where(
+                    BotShare.bot_id == bot_id,
+                    BotShare.shared_to_account_id == account.id,
+                    BotShare.share_playlists.is_(True),
+                )
+            )
+        ).first()
+        if playlist_share:
+            return bot_id
+        raise HTTPException(status_code=403, detail="该共享 Bot 未授予歌单访问权限")
+    if not owned:
+        raise HTTPException(status_code=409, detail="请先创建自己的 Bot 并登录音乐平台账号")
+    if settings.tsmusic_bot_id in owned:
+        return settings.tsmusic_bot_id
+    return sorted(owned)[0]
+
+
+LibraryBotId = Annotated[str, Depends(_library_bot_id)]
+
+
 # ───────────────────────── 请求模型 ─────────────────────────
 
 class SearchRequest(BaseModel):
@@ -101,6 +132,7 @@ class MoveRequest(BaseModel):
 
 class ShareRequest(BaseModel):
     friendTsNickname: str = Field(min_length=1, max_length=64, description="被共享好友的 TS 昵称")
+    includePlaylists: bool = Field(default=False, description="是否同时允许好友浏览该 Bot 账号的私人歌单")
 
 
 class VolumeRequest(BaseModel):
@@ -293,9 +325,9 @@ async def move_queue_item(
 
 
 @router.get("/quality")
-async def get_quality(tsmusic: TsmusicDep, _account: AccountDep):
-    """获取当前音质配置（各平台独立）。"""
-    return await tsmusic.get_quality()
+async def get_quality(tsmusic: TsmusicDep, _account: AccountDep, bot_id: OwnedBotId = None):
+    """获取当前 bot 的音质配置（各平台独立）。"""
+    return await tsmusic.get_quality(bot_id=bot_id)
 
 
 @router.post("/quality")
@@ -303,21 +335,22 @@ async def set_quality(
     body: Annotated[dict, Body(description="音质设置 {quality, platform?}")],
     tsmusic: TsmusicDep,
     _account: AccountDep,
+    bot_id: OwnedBotId = None,
 ):
     """设置音质（quality 必填，platform 可选）。"""
     quality = body.get("quality")
     if not quality:
         raise HTTPException(status_code=400, detail="quality is required")
     platform = body.get("platform")
-    return await tsmusic.set_quality(quality, platform)
+    return await tsmusic.set_quality(quality, platform, bot_id=bot_id)
 
 
 # ───────────────────────── 我的音乐 / 歌单 ─────────────────────────
 
 
 @router.get("/my/playlists")
-async def my_playlists(platform: str, tsmusic: TsmusicDep, _account: AccountDep, bot_id: OwnedBotId = None):
-    """用户歌单（自建+收藏，per-bot：用该 bot 的平台 cookie）。"""
+async def my_playlists(platform: str, tsmusic: TsmusicDep, _account: AccountDep, bot_id: LibraryBotId):
+    """当前用户的歌单；共享 Bot 不会暴露其主人的私人曲库。"""
     return await tsmusic.user_playlists(platform, bot_id=bot_id)
 
 
@@ -330,7 +363,7 @@ async def my_playlist_songs(
     platform: str,
     tsmusic: TsmusicDep,
     _account: AccountDep,
-    bot_id: OwnedBotId = None,
+    bot_id: LibraryBotId,
 ):
     """歌单内歌曲（per-bot；playlist_id 限定字母/数字/下划线/短横，防路径注入）。"""
     if not _PLAYLIST_ID_RE.fullmatch(playlist_id):
@@ -339,13 +372,13 @@ async def my_playlist_songs(
 
 
 @router.get("/my/recommend/songs")
-async def my_recommend_songs(platform: str, tsmusic: TsmusicDep, _account: AccountDep, bot_id: OwnedBotId = None):
+async def my_recommend_songs(platform: str, tsmusic: TsmusicDep, _account: AccountDep, bot_id: LibraryBotId):
     """每日推荐（per-bot）。"""
     return await tsmusic.recommend_songs(platform, bot_id=bot_id)
 
 
 @router.get("/my/personal-fm")
-async def my_personal_fm(platform: str, tsmusic: TsmusicDep, _account: AccountDep, bot_id: OwnedBotId = None):
+async def my_personal_fm(platform: str, tsmusic: TsmusicDep, _account: AccountDep, bot_id: LibraryBotId):
     """私人 FM（per-bot）。"""
     return await tsmusic.personal_fm(platform, bot_id=bot_id)
 
@@ -451,17 +484,17 @@ async def list_bots(tsmusic: TsmusicDep, account: AccountDep, db: AsyncSession =
     """bot 实例列表（自己拥有的 + 好友共享给我的；含连接 / 播放状态）。"""
     all_bots = await tsmusic.list_bots()
     owned = await _owned_bot_ids(db, account.id)
-    # 共享给我的：bot_id -> owner_account_id
+    # 共享给我的：bot_id -> (owner_account_id, 是否附带歌单权限)
     shared_rows = (
         await db.execute(
-            select(BotShare.bot_id, BotShare.owner_account_id).where(
+            select(BotShare.bot_id, BotShare.owner_account_id, BotShare.share_playlists).where(
                 BotShare.shared_to_account_id == account.id
             )
         )
     ).all()
-    shared_map = {r[0]: r[1] for r in shared_rows}
+    shared_map = {r[0]: (r[1], bool(r[2])) for r in shared_rows}
     # 共享 bot 的 owner 昵称
-    owner_ids = {oid for oid in shared_map.values() if oid is not None}
+    owner_ids = {value[0] for value in shared_map.values() if value[0] is not None}
     owner_nicks: dict[int, str] = {}
     if owner_ids:
         nick_rows = (
@@ -477,7 +510,13 @@ async def list_bots(tsmusic: TsmusicDep, account: AccountDep, db: AsyncSession =
         if bid in owned:
             out.append(b)
         elif bid in shared_map:
-            out.append({**b, "shared": True, "ownerNickname": owner_nicks.get(shared_map[bid], "好友")})
+            owner_id, share_playlists = shared_map[bid]
+            out.append({
+                **b,
+                "shared": True,
+                "ownerNickname": owner_nicks.get(owner_id, "好友"),
+                "sharePlaylists": share_playlists,
+            })
     return {"bots": out}
 
 
@@ -570,13 +609,26 @@ async def share_bot(
         ).first()
         if not is_friend:
             raise HTTPException(status_code=400, detail="对方不是你的好友")
-        db.add(BotShare(owner_account_id=account.id, bot_id=bot_id, shared_to_account_id=friend_id))
-        try:
-            await db.commit()
-        except IntegrityError:
-            await db.rollback()
-            raise HTTPException(status_code=400, detail="已经共享给该好友了")
-        return {"success": True}
+        existing = (
+            await db.execute(
+                select(BotShare).where(
+                    BotShare.owner_account_id == account.id,
+                    BotShare.bot_id == bot_id,
+                    BotShare.shared_to_account_id == friend_id,
+                )
+            )
+        ).scalars().first()
+        if existing:
+            existing.share_playlists = body.includePlaylists
+        else:
+            db.add(BotShare(
+                owner_account_id=account.id,
+                bot_id=bot_id,
+                shared_to_account_id=friend_id,
+                share_playlists=body.includePlaylists,
+            ))
+        await db.commit()
+        return {"success": True, "includePlaylists": body.includePlaylists}
     except HTTPException:
         raise
     except Exception:
@@ -615,14 +667,23 @@ async def my_shares(_tsmusic: TsmusicDep, account: AccountDep, db: AsyncSession 
     """我共享出去的 bot（按 bot 聚合，含共享给谁）。"""
     rows = (
         await db.execute(
-            select(BotShare.bot_id, BotShare.shared_to_account_id, Account.ts_nickname)
+            select(
+                BotShare.bot_id,
+                BotShare.shared_to_account_id,
+                Account.ts_nickname,
+                BotShare.share_playlists,
+            )
             .join(Account, Account.id == BotShare.shared_to_account_id)
             .where(BotShare.owner_account_id == account.id)
         )
     ).all()
     shares: dict[str, list[dict]] = {}
-    for bid, fid, nick in rows:
-        shares.setdefault(bid, []).append({"accountId": fid, "nickname": nick})
+    for bid, fid, nick, share_playlists in rows:
+        shares.setdefault(bid, []).append({
+            "accountId": fid,
+            "nickname": nick,
+            "includePlaylists": bool(share_playlists),
+        })
     return {"shares": [{"botId": bid, "sharedTo": lst} for bid, lst in shares.items()]}
 
 
@@ -763,8 +824,8 @@ async def delete_bot_avatar(bot_id: str, tsmusic: TsmusicDep, _account: AccountD
 
 
 @router.get("/auth/status")
-async def auth_status(platform: str, tsmusic: TsmusicDep, _account: AccountDep, bot_id: OwnedBotId = None):
-    """获取某平台登录状态（per-bot：该 bot 的平台登录态）。"""
+async def auth_status(platform: str, tsmusic: TsmusicDep, _account: AccountDep, bot_id: LibraryBotId):
+    """获取当前用户自己平台账号的登录状态，不披露共享 Bot 主人的账号信息。"""
     return await tsmusic.get_auth_status(platform, bot_id=bot_id)
 
 

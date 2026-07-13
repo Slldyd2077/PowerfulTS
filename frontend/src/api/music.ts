@@ -132,9 +132,21 @@ export async function moveQueueItem(from: number, to: number, botId?: string) {
   return data
 }
 
+/** 获取当前 bot 的各平台播放音质 */
+export async function getMusicQuality(botId: string): Promise<Record<string, string>> {
+  const { data } = await apiClient.get('/music/quality', { params: { botId } })
+  return data
+}
+
+/** 设置当前 bot 在指定平台的播放音质 */
+export async function setMusicQuality(quality: string, platform: string, botId: string) {
+  const { data } = await apiClient.post('/music/quality', { quality, platform }, { params: { botId } })
+  return data
+}
+
 /** 共享 bot 给好友（owner，按好友 TS 昵称） */
-export async function shareBot(botId: string, friendTsNickname: string) {
-  const { data } = await apiClient.post(`/music/bots/${botId}/share`, { friendTsNickname })
+export async function shareBot(botId: string, friendTsNickname: string, includePlaylists = false) {
+  const { data } = await apiClient.post(`/music/bots/${botId}/share`, { friendTsNickname, includePlaylists })
   return data
 }
 
@@ -147,7 +159,7 @@ export async function unshareBot(botId: string, friendAccountId: number) {
 /** 我共享出去的 bot（按 bot 聚合，含共享给谁） */
 export interface MyShare {
   botId: string
-  sharedTo: { accountId: number; nickname: string }[]
+  sharedTo: { accountId: number; nickname: string; includePlaylists: boolean }[]
 }
 export async function getMyShares() {
   const { data } = await apiClient.get('/music/bots/my-shares')
@@ -166,6 +178,7 @@ export interface BotInfo {
   default?: boolean
   shared?: boolean       // 好友共享给我的 bot（非自己拥有）
   ownerNickname?: string // 共享 bot 的主人昵称
+  sharePlaylists?: boolean // owner 是否同时共享私人歌单
 }
 
 /** 创建 bot 的请求体 */

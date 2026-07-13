@@ -82,6 +82,10 @@ class BotShare(Base):
     shared_to_account_id: Mapped[int] = mapped_column(
         ForeignKey("accounts.id", ondelete="CASCADE"), index=True
     )
+    # False: 仅借用 VIP 播放能力；True: 接受方还可浏览 owner 的私人歌单/推荐/FM。
+    share_playlists: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
     shared_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     __table_args__ = (

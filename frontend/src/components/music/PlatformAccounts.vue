@@ -21,7 +21,7 @@ const platforms: PlatformInfo[] = [
 
 const music = useMusicStore()
 // 登录态已提升到 store（供 MyMusic 置灰判断）；此处 status 为只读视图，模板沿用 status[p.value]
-const status = computed(() => music.platformStatus)
+const status = computed(() => music.ownPlatformStatus)
 const activePlatform = ref('')
 const qrImg = ref('')
 const currentQrKey = ref('') // 当前二维码 key（轮询 qrcode/status 用）
@@ -29,7 +29,7 @@ const loading = ref(false)
 let pollTimer: number | null = null
 
 async function startLogin(p: PlatformInfo) {
-  if (!music.activeBotId) {
+  if (!music.ownLibraryBotId) {
     ElMessage.warning('请先在「TS Bot」面板创建一个 Bot，再登录平台账号（平台账号绑定到 Bot 实例）')
     return
   }
@@ -38,7 +38,7 @@ async function startLogin(p: PlatformInfo) {
   qrImg.value = ''
   stopPolling()
   try {
-    const res = await getQrcode(p.value, music.activeBotId)
+    const res = await getQrcode(p.value, music.ownLibraryBotId)
     currentQrKey.value = res.key || ''
     // 优先用 API 返回的 qrImg；没有则用 qrUrl 本地生成二维码
     if (res.qrImg) {
@@ -66,10 +66,13 @@ function startPolling(platform: string) {
       const key = currentQrKey.value
       if (!key) return
       // 轮询扫码状态：fork 在 confirmed 时自动持久化平台 cookie
-      const r = await getQrcodeStatus(key, platform, music.activeBotId)
+      const r = await getQrcodeStatus(key, platform, music.ownLibraryBotId)
       if (r.status === 'confirmed') {
-        const auth = await getAuthStatus(platform, music.activeBotId)
-        music.platformStatus[platform] = { loggedIn: !!auth.loggedIn, nickname: auth.nickname }
+        const auth = await getAuthStatus(platform, music.ownLibraryBotId)
+        music.ownPlatformStatus[platform] = { loggedIn: !!auth.loggedIn, nickname: auth.nickname }
+        if (music.libraryBotId === music.ownLibraryBotId) {
+          music.platformStatus[platform] = { loggedIn: !!auth.loggedIn, nickname: auth.nickname }
+        }
         qrImg.value = ''
         currentQrKey.value = ''
         activePlatform.value = ''
@@ -122,7 +125,7 @@ const cookiePlaceholder = computed(() => {
 })
 
 function openCookie(p: PlatformInfo) {
-  if (!music.activeBotId) {
+  if (!music.ownLibraryBotId) {
     ElMessage.warning('请先在「TS Bot」面板创建一个 Bot，再登录平台账号')
     return
   }
@@ -142,11 +145,14 @@ async function submitCookie() {
   if (!text || !plat) return
   loading.value = true
   try {
-    await setCookie(plat, text, music.activeBotId)
+    await setCookie(plat, text, music.ownLibraryBotId)
     // 上游 /api/auth/cookie 总返回 success:true（仅表示已提交），真实登录态以 status.loggedIn 为准
-    const res = await getAuthStatus(plat, music.activeBotId)
+    const res = await getAuthStatus(plat, music.ownLibraryBotId)
     // 写回 store，解除 MyMusic 的置灰
-    music.platformStatus[plat] = { loggedIn: !!res.loggedIn, nickname: res.nickname }
+    music.ownPlatformStatus[plat] = { loggedIn: !!res.loggedIn, nickname: res.nickname }
+    if (music.libraryBotId === music.ownLibraryBotId) {
+      music.platformStatus[plat] = { loggedIn: !!res.loggedIn, nickname: res.nickname }
+    }
     if (res.loggedIn) {
       const label = platforms.find((x) => x.value === plat)?.label
       ElMessage.success(`${label} Cookie 登录成功`)
@@ -163,16 +169,17 @@ async function submitCookie() {
 
 async function onLogout(p: PlatformInfo) {
   try {
-    await logoutPlatform(p.value, music.activeBotId)
+    await logoutPlatform(p.value, music.ownLibraryBotId)
     // 写回 store，恢复 MyMusic 的置灰
-    music.platformStatus[p.value] = { loggedIn: false }
+    music.ownPlatformStatus[p.value] = { loggedIn: false }
+    if (music.libraryBotId === music.ownLibraryBotId) music.platformStatus[p.value] = { loggedIn: false }
     ElMessage.success(`${p.label} 已退出登录`)
   } catch {
     ElMessage.error(`${p.label} 退出失败`)
   }
 }
 
-onMounted(() => music.fetchPlatformStatus())
+onMounted(() => music.fetchOwnPlatformStatus())
 onUnmounted(stopPolling)
 </script>
 

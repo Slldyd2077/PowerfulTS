@@ -114,11 +114,13 @@ const showShare = ref(false)
 const shareTarget = ref<BotInfo | null>(null)
 const friends = ref<Friend[]>([])
 const selectedFriend = ref<string>('') // ts_nickname
+const shareMode = ref<'playback' | 'playlists'>('playback')
 const myShares = ref<MyShare[]>([])
 
 async function onShare(b: BotInfo) {
   shareTarget.value = b
   selectedFriend.value = ''
+  shareMode.value = 'playback'
   try {
     const res = await getFriends()
     friends.value = res.friends
@@ -130,7 +132,7 @@ async function onShare(b: BotInfo) {
 async function confirmShare() {
   if (!shareTarget.value || !selectedFriend.value) return
   try {
-    await shareBot(shareTarget.value.id, selectedFriend.value)
+    await shareBot(shareTarget.value.id, selectedFriend.value, shareMode.value === 'playlists')
     ElMessage.success(`已共享给 ${selectedFriend.value}`)
     showShare.value = false
     await fetchMyShares()
@@ -344,7 +346,7 @@ onMounted(() => {
       <div v-for="s in myShares" :key="s.botId" class="share-group">
         <span class="share-bot">{{ botNameById[s.botId] || s.botId.slice(0, 8) }}</span>
         <span v-for="t in s.sharedTo" :key="t.accountId" class="share-chip">
-          {{ t.nickname }}
+          {{ t.nickname }} · {{ t.includePlaylists ? '权限+歌单' : '仅权限' }}
           <button class="chip-x" title="撤销共享" @click="onUnshare(s.botId, t.accountId, t.nickname)">×</button>
         </span>
       </div>
@@ -363,6 +365,16 @@ onMounted(() => {
           <input type="radio" :value="f.ts_nickname" v-model="selectedFriend" />
           <span>{{ f.ts_nickname }}</span>
           <span class="friend-dot" :class="f.online_status === 'online' ? 'dot-on' : 'dot-off'"></span>
+        </label>
+      </div>
+      <div v-if="friends.length" class="share-mode-pick">
+        <label class="share-mode-opt" :class="{ on: shareMode === 'playback' }">
+          <input v-model="shareMode" type="radio" value="playback" />
+          <span><strong>仅共享播放权限</strong><small>对方使用 VIP 放歌，但只能浏览自己的歌单</small></span>
+        </label>
+        <label class="share-mode-opt" :class="{ on: shareMode === 'playlists' }">
+          <input v-model="shareMode" type="radio" value="playlists" />
+          <span><strong>播放权限 + 歌单</strong><small>对方可在自己的歌单和你的歌单之间切换</small></span>
         </label>
       </div>
       <template #footer>
@@ -584,6 +596,13 @@ onMounted(() => {
 .friend-opt.on { background: rgba(var(--color-primary-rgb), 0.14); color: var(--color-primary); }
 .friend-opt input { accent-color: var(--color-primary); }
 .friend-dot { width: 7px; height: 7px; border-radius: 50%; margin-left: auto; }
+.share-mode-pick { display: grid; gap: 6px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); }
+.share-mode-opt { display: flex; gap: 8px; padding: 9px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); cursor: pointer; }
+.share-mode-opt.on { border-color: var(--color-primary); background: rgba(var(--color-primary-rgb), 0.1); }
+.share-mode-opt input { accent-color: var(--color-primary); }
+.share-mode-opt span { display: flex; flex-direction: column; gap: 2px; }
+.share-mode-opt strong { color: var(--text-primary); font-size: 0.8em; }
+.share-mode-opt small { color: var(--text-muted); font-size: 0.68em; line-height: 1.4; }
 
 .create-form {
   margin-top: 8px;

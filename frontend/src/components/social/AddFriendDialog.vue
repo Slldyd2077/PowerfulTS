@@ -19,7 +19,7 @@ async function handleAdd() {
   try {
     const res = await addFriend(friendTsNickname.value.trim())
     if (res.success) {
-      let message = '好友添加成功'
+      let message = res.is_request ? '好友申请已发送，已加入列表' : '好友添加成功'
 
       // 如果好友在线，显示额外提示
       if (res.friend_online) {

@@ -10,7 +10,7 @@ from sqlalchemy.orm import aliased
 
 from ..core.config import Settings
 from ..models.account import Account, ServerMember
-from ..models.community import Friend
+from ..models.community import Friend, PendingNotification
 from ..services import app_setting
 from . import ts3_auth
 from .napcat_client import NapCatClient
@@ -43,11 +43,37 @@ class OnlineNotifier:
                 .join(Friend, Friend.account_id == adder.id)
                 .join(onlinee, Friend.friend_account_id == onlinee.id)
                 .where(onlinee.ts_nickname == nickname)
-                .where(adder.notify_friends_online.is_(True))
+                .where(Friend.notify_online.is_(True))
                 .where(adder.qq_number.isnot(None))
                 .where(adder.qq_number != "")
             )
             return unique_qq_numbers(result.scalars().all())
+
+    async def _flush_pending_notifications(self, nickname: str) -> int:
+        """收件人 TS 上线时补发之前无可用渠道而留存的消息。"""
+        async with self._sessions() as db:
+            account_id = await db.scalar(
+                select(Account.id).where(Account.ts_nickname == nickname)
+            )
+            if account_id is None:
+                return 0
+            rows = list((await db.execute(
+                select(PendingNotification)
+                .where(PendingNotification.recipient_account_id == account_id)
+                .order_by(PendingNotification.created_at, PendingNotification.id)
+            )).scalars().all())
+            sent = 0
+            for item in rows:
+                delivered = await asyncio.to_thread(
+                    ts3_auth.send_private_message, self._settings, nickname, item.message
+                )
+                if not delivered:
+                    break
+                await db.delete(item)
+                sent += 1
+            if sent:
+                await db.commit()
+            return sent
 
     async def _resolve_server_subscribers(self, field: str) -> list[tuple[str, str, str | None]]:
         """返回 (TS 昵称、渠道、QQ)，字段仅来自内部固定列表。"""
@@ -113,6 +139,8 @@ class OnlineNotifier:
 
         # 获取自定义消息模板
         friend_online_msg, server_online_msg, server_first_join_msg = await self._get_notice_templates()
+
+        await self._flush_pending_notifications(nickname)
 
         friend_subscribers = await self._resolve_friend_subscribers(nickname)
         if friend_subscribers:

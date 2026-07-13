@@ -17,6 +17,8 @@ import {
   removeQueueItem as apiRemoveQueueItem,
   playQueueAt as apiPlayQueueAt,
   moveQueueItem as apiMoveQueueItem,
+  getMusicQuality as apiGetMusicQuality,
+  setMusicQuality as apiSetMusicQuality,
   getAuthStatus as apiGetAuthStatus,
   getMyPlaylists as apiGetMyPlaylists,
   getPlaylistSongs as apiGetPlaylistSongs,
@@ -62,9 +64,14 @@ export const useMusicStore = defineStore('music', () => {
 
   // ── bot 实例：多 bot 选择，activeBotId 经 localStorage 持久化 ──
   const LS_ACTIVE_BOT = 'active_bot_id'
+  const LS_LIBRARY_BOT = 'library_bot_id'
   const bots = ref<BotInfo[]>([])
   const activeBotId = ref<string>('')
   const activeBot = computed(() => bots.value.find((b) => b.id === activeBotId.value) || null)
+  const ownLibraryBotId = computed(() => bots.value.find((b) => !b.shared)?.id || '')
+  const libraryBots = computed(() => bots.value.filter((b) => !b.shared || b.sharePlaylists))
+  // 曲库来源可在自己的账号与“附带歌单”的共享账号间切换；实际播放始终走 activeBotId。
+  const libraryBotId = ref<string>('')
   // bot 切换代数：拦截过期轮询响应（防切换后旧 bot 状态闪现）；start 重连定时器
   let botGen = 0
   let startPollTimer: ReturnType<typeof setTimeout> | null = null
@@ -84,6 +91,7 @@ export const useMusicStore = defineStore('music', () => {
 
   // ── 我的音乐：平台登录态（提升自 PlatformAccounts，供 MyMusic 置灰判断）──
   const platformStatus = ref<Record<string, { loggedIn: boolean; nickname?: string }>>({})
+  const ownPlatformStatus = ref<Record<string, { loggedIn: boolean; nickname?: string }>>({})
   const myActivePlatform = ref<'netease' | 'qq' | 'bilibili' | 'kugou'>('netease')
 
   // ── 音质设置 ──
@@ -92,33 +100,37 @@ export const useMusicStore = defineStore('music', () => {
   // 音质选项定义
   const QUALITY_OPTIONS = {
     netease: [
-      { value: 'standard', label: '标准 (128k)', vip: false },
-      { value: 'higher', label: '较高 (192k)', vip: false },
-      { value: 'exhigh', label: '极高 (320k)', vip: false },
+      { value: 'standard', label: '标准 (128kbps)', vip: false },
+      { value: 'higher', label: '较高 (192kbps)', vip: false },
+      { value: 'exhigh', label: '极高 (320kbps)', vip: false },
       { value: 'lossless', label: '无损 (FLAC)', vip: false },
       { value: 'hires', label: 'Hi-Res', vip: false },
-      { value: 'jyeffect', label: '鲸音效2.0', vip: true },
-      { value: 'jymaster', label: '臻品母带', vip: true },
+      { value: 'jymaster', label: '超清母带', vip: true },
     ],
     qq: [
-      { value: 'standard', label: '标准 (128k)', vip: false },
-      { value: 'higher', label: '较高 (192k)', vip: false },
-      { value: 'exhigh', label: '极高 (320k)', vip: false },
-      { value: 'lossless', label: '无损 (FLAC)', vip: true },
-      { value: 'hires', label: 'Hi-Res', vip: true },
+      { value: '128', label: '标准 (128kbps)', vip: false },
+      { value: '320', label: '高品质 (320kbps)', vip: false },
+      { value: 'flac', label: '无损 (FLAC)', vip: true },
     ],
     bilibili: [
-      { value: 'low', label: '低 (320k)', vip: false },
-      { value: 'high', label: '高 (806k)', vip: false },
+      { value: 'high', label: '最高可用（自动）', vip: false },
     ],
     kugou: [
-      { value: 'standard', label: '标准 (128k)', vip: false },
-      { value: 'higher', label: '较高 (320k)', vip: false },
-      { value: 'exhigh', label: '极高 (320k)', vip: false },
-      { value: 'lossless', label: '无损 (FLAC)', vip: true },
-      { value: 'hires', label: 'Hi-Res', vip: true },
+      { value: '128', label: '标准 (128kbps)', vip: false },
+      { value: '320', label: '高品质 (320kbps)', vip: false },
+      { value: 'flac', label: '无损 (FLAC)', vip: true },
+      { value: 'high', label: 'Hi-Res（高解析）', vip: true },
     ],
   } as const
+
+  const QUALITY_ALIASES: Record<string, Record<string, string>> = {
+    qq: { standard: '128', higher: '320', exhigh: '320', lossless: 'flac' },
+    kugou: { standard: '128', higher: '320', exhigh: '320', lossless: 'flac', hires: 'high' },
+  }
+
+  function normalizeQuality(platform: string, value: string): string {
+    return QUALITY_ALIASES[platform]?.[value] || value
+  }
   // 各平台歌单 / 推荐 / FM 缓存 + 展开的歌单歌曲
   const myPlaylists = ref<Record<string, Playlist[]>>({})
   const myRecommend = ref<Record<string, Song[]>>({})
@@ -128,6 +140,23 @@ export const useMusicStore = defineStore('music', () => {
   const playlistSongs = ref<Record<string, Song[]>>({})
   const myLoading = ref<Record<string, boolean>>({})
   const myUnsupported = ref<Record<string, boolean>>({})
+
+  function clearLibraryData() {
+    platformStatus.value = {}
+    myPlaylists.value = {}
+    myRecommend.value = {}
+    myFm.value = {}
+    playlistSongs.value = {}
+    myUnsupported.value = {}
+  }
+
+  async function setLibraryBot(id: string) {
+    if (!libraryBots.value.some((b) => b.id === id)) return
+    libraryBotId.value = id
+    localStorage.setItem(LS_LIBRARY_BOT, id)
+    clearLibraryData()
+    await fetchPlatformStatus()
+  }
 
   /** 搜索（按当前平台；all=四平台并行） */
   async function search(q: string) {
@@ -325,7 +354,7 @@ export const useMusicStore = defineStore('music', () => {
     const results = await Promise.all(
       platforms.map(async (p) => {
         try {
-          const res = await apiGetAuthStatus(p, activeBotId.value)
+          const res = await apiGetAuthStatus(p, libraryBotId.value)
           return { p, loggedIn: !!res.loggedIn, nickname: res.nickname as string | undefined }
         } catch {
           return { p, loggedIn: false, nickname: undefined }
@@ -337,12 +366,26 @@ export const useMusicStore = defineStore('music', () => {
     }
   }
 
+  /** 平台账号面板只展示/管理当前用户自己的账号，不受曲库来源切换影响。 */
+  async function fetchOwnPlatformStatus() {
+    const platforms = ['netease', 'qq', 'bilibili', 'kugou'] as const
+    const results = await Promise.all(platforms.map(async (p) => {
+      try {
+        const res = await apiGetAuthStatus(p, ownLibraryBotId.value)
+        return { p, loggedIn: !!res.loggedIn, nickname: res.nickname as string | undefined }
+      } catch {
+        return { p, loggedIn: false, nickname: undefined }
+      }
+    }))
+    for (const r of results) ownPlatformStatus.value[r.p] = { loggedIn: r.loggedIn, nickname: r.nickname }
+  }
+
   /** 用户歌单（自建+收藏） */
   async function fetchMyPlaylists(platform: string) {
     const key = `${platform}:playlists`
     myLoading.value = { ...myLoading.value, [key]: true }
     try {
-      const res = await apiGetMyPlaylists(platform, activeBotId.value)
+      const res = await apiGetMyPlaylists(platform, libraryBotId.value)
       if (res.unsupported) {
         myUnsupported.value = { ...myUnsupported.value, [key]: true }
         myPlaylists.value = { ...myPlaylists.value, [platform]: [] }
@@ -361,7 +404,7 @@ export const useMusicStore = defineStore('music', () => {
     const key = `song:${playlistId}`
     myLoading.value = { ...myLoading.value, [key]: true }
     try {
-      const res = await apiGetPlaylistSongs(playlistId, platform, activeBotId.value)
+      const res = await apiGetPlaylistSongs(playlistId, platform, libraryBotId.value)
       if (res.unsupported) {
         myUnsupported.value = { ...myUnsupported.value, [key]: true }
         playlistSongs.value = { ...playlistSongs.value, [playlistId]: [] }
@@ -380,7 +423,7 @@ export const useMusicStore = defineStore('music', () => {
     const key = `${platform}:recommend`
     myLoading.value = { ...myLoading.value, [key]: true }
     try {
-      const res = await apiGetRecommendSongs(platform, activeBotId.value)
+      const res = await apiGetRecommendSongs(platform, libraryBotId.value)
       if (res.unsupported) {
         myUnsupported.value = { ...myUnsupported.value, [key]: true }
         myRecommend.value = { ...myRecommend.value, [platform]: [] }
@@ -399,7 +442,7 @@ export const useMusicStore = defineStore('music', () => {
     const key = `${platform}:fm`
     myLoading.value = { ...myLoading.value, [key]: true }
     try {
-      const res = await apiGetPersonalFm(platform, activeBotId.value)
+      const res = await apiGetPersonalFm(platform, libraryBotId.value)
       if (res.unsupported) {
         myUnsupported.value = { ...myUnsupported.value, [key]: true }
         myFm.value = { ...myFm.value, [platform]: [] }
@@ -458,13 +501,22 @@ export const useMusicStore = defineStore('music', () => {
     } else {
       activeBotId.value = ''
     }
+    const storedLibrary = localStorage.getItem(LS_LIBRARY_BOT)
+    if (storedLibrary && libraryBots.value.some((b) => b.id === storedLibrary)) {
+      libraryBotId.value = storedLibrary
+    } else {
+      libraryBotId.value = ownLibraryBotId.value || libraryBots.value[0]?.id || ''
+      if (libraryBotId.value) localStorage.setItem(LS_LIBRARY_BOT, libraryBotId.value)
+    }
     // activeBot 就绪后拉取其 profile / 头像（fetchBots 不经 setActiveBot，需在此补）
     if (activeBotId.value) {
       void fetchBotProfile()
       void refreshAvatar()
+      void fetchQuality()
     }
     // 平台登录态随当前 bot 自动拉取（不等用户点开平台账号面板）
     void fetchPlatformStatus()
+    void fetchOwnPlatformStatus()
   }
 
   /** 切换 active bot：持久化 + 清旧 bot 播放态 + 拉新 bot */
@@ -476,7 +528,7 @@ export const useMusicStore = defineStore('music', () => {
     queue.value = []
     localPosition.value = 0
     activeBotProfile.value = null
-    await Promise.all([fetchNowplaying(), fetchQueue(), fetchBotProfile(), refreshAvatar(), fetchPlatformStatus()])
+    await Promise.all([fetchNowplaying(), fetchQueue(), fetchBotProfile(), refreshAvatar(), fetchPlatformStatus(), fetchQuality()])
   }
 
   async function createBot(payload: BotCreate) {
@@ -529,34 +581,36 @@ export const useMusicStore = defineStore('music', () => {
 
   /** 拉取当前各平台音质配置 */
   async function fetchQuality() {
+    const botId = activeBotId.value
+    if (!botId) {
+      quality.value = {}
+      return
+    }
     try {
-      const token = localStorage.getItem('session_token')
-      const res = await fetch('/api/music/quality', {
-        headers: {
-          'X-Session-Token': token || '',
-        },
-      }).then((r) => r.json())
-      quality.value = res
+      const res = await apiGetMusicQuality(botId)
+      if (activeBotId.value !== botId) return
+      quality.value = Object.fromEntries(
+        Object.entries(res)
+          .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+          .map(([platform, value]) => [platform, normalizeQuality(platform, value)]),
+      )
     } catch {
       // 静默失败
     }
   }
 
-  /** 设置音质（platform 未传则全局设置） */
-  async function setQuality(q: string, platform?: string) {
+  /** 设置当前 bot 在指定平台的音质 */
+  async function setQuality(q: string, platform: keyof typeof QUALITY_OPTIONS) {
+    if (!activeBotId.value) {
+      ElMessage.error('请先选择机器人')
+      return
+    }
     try {
-      const token = localStorage.getItem('session_token')
-      const res = await fetch('/api/music/quality', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Session-Token': token || '',
-        },
-        body: JSON.stringify({ quality: q, platform }),
-      }).then((r) => r.json())
+      const res = await apiSetMusicQuality(q, platform, activeBotId.value)
       if (res.success) {
         await fetchQuality()
-        ElMessage.success(`音质已切换为：${q}`)
+        const label = QUALITY_OPTIONS[platform].find((option) => option.value === q)?.label || q
+        ElMessage.success(`${platform === 'netease' ? '网易云' : platform === 'qq' ? 'QQ音乐' : platform === 'bilibili' ? 'B站' : '酷狗'}音质已切换为：${label}`)
       } else {
         ElMessage.error(res.error || '音质切换失败')
       }
@@ -670,7 +724,12 @@ export const useMusicStore = defineStore('music', () => {
     bots,
     activeBotId,
     activeBot,
+    libraryBotId,
+    ownLibraryBotId,
+    libraryBots,
+    setLibraryBot,
     platformStatus,
+    ownPlatformStatus,
     myActivePlatform,
     myPlaylists,
     myRecommend,
@@ -696,6 +755,7 @@ export const useMusicStore = defineStore('music', () => {
     fetchNowplaying,
     fetchQueue,
     fetchPlatformStatus,
+    fetchOwnPlatformStatus,
     fetchMyPlaylists,
     fetchPlaylistSongs,
     fetchRecommend,

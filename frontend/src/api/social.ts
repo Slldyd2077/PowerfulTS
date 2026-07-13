@@ -1,10 +1,13 @@
 import apiClient from './client'
 
 export interface Friend {
+  account_id: number
   ts_nickname: string
   online_status: string
   game?: string
   mutual?: boolean
+  relation_status: 'friend' | 'pending'
+  notify_online: boolean
 }
 
 export interface FriendsResponse {
@@ -27,6 +30,12 @@ export async function addFriend(friendTsNickname: string) {
 /** 删除好友（按 TS 昵称） */
 export async function deleteFriend(friendTsNickname: string) {
   const { data } = await apiClient.post('/friends/delete', { friend_ts_nickname: friendTsNickname })
+  return data
+}
+
+/** 单独设置某位好友的上线提醒。 */
+export async function updateFriendNotify(friendAccountId: number, enabled: boolean) {
+  const { data } = await apiClient.put(`/friends/${friendAccountId}/notify`, { enabled })
   return data
 }
 

@@ -30,6 +30,10 @@ const playlists = computed(() => music.myPlaylists[active.value] || [])
 const recommend = computed(() => music.myRecommend[active.value] || [])
 const fm = computed(() => music.myFm[active.value] || [])
 
+function libraryLabel(bot: { shared?: boolean; ownerNickname?: string; name: string }) {
+  return bot.shared ? `${bot.ownerNickname || '好友'}的歌单` : '我的歌单'
+}
+
 function selectPlatform(value: 'netease' | 'qq' | 'bilibili' | 'kugou') {
   // 网易云/QQ/酷狗 未登录禁止切换；B站热门无需登录
   if (value !== 'bilibili' && !music.platformStatus[value]?.loggedIn) {
@@ -122,6 +126,14 @@ async function handlePlay(song: Song, queued = false) {
       <div class="panel-title-group">
         <h2 class="panel-title">我的音乐</h2>
         <span class="panel-sub label-mono">MY MUSIC</span>
+      </div>
+      <div v-if="music.libraryBots.length > 1" class="library-source" aria-label="歌单来源">
+        <button
+          v-for="bot in music.libraryBots"
+          :key="bot.id"
+          :class="{ active: music.libraryBotId === bot.id }"
+          @click="music.setLibraryBot(bot.id)"
+        >{{ libraryLabel(bot) }}</button>
       </div>
     </div>
 
@@ -332,6 +344,12 @@ async function handlePlay(song: Song, queued = false) {
 .panel-title-group { display: flex; align-items: baseline; gap: 8px; }
 .panel-title { font-size: 1em; font-weight: 600; color: var(--text-primary); margin: 0; }
 .panel-sub { font-size: 0.66em; color: var(--text-muted); }
+.library-source { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.library-source button {
+  border: 1px solid var(--border-default); border-radius: 999px; padding: 4px 9px;
+  background: var(--surface-3); color: var(--text-muted); font-size: 0.7em; cursor: pointer;
+}
+.library-source button.active { color: var(--color-primary); border-color: var(--color-primary); background: rgba(var(--color-primary-rgb), 0.1); }
 
 .platform-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
 .platform-tab {
