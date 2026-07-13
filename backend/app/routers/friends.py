@@ -39,7 +39,7 @@ async def get_friend_add_messages(db: AsyncSession) -> tuple[str, str, str]:
 router = APIRouter(tags=["friends"])
 
 
-class FriendRequest(BaseModel):
+class FriendAddRequest(BaseModel):
     friend_ts_nickname: str = Field(min_length=1, max_length=64)
 
 
@@ -79,7 +79,7 @@ async def list_friends(
 
 @router.post("/friends/add")
 async def add_friend(
-    body: FriendRequest,
+    body: FriendAddRequest,
     request: Request,
     account: Account = Depends(get_current_account),
     db: AsyncSession = Depends(get_db),
@@ -199,7 +199,7 @@ async def add_friend(
 
 @router.post("/friends/delete")
 async def delete_friend(
-    body: FriendRequest,
+    body: FriendAddRequest,
     account: Account = Depends(get_current_account),
     db: AsyncSession = Depends(get_db),
 ):
