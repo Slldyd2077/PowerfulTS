@@ -185,7 +185,17 @@ async def _ensure_follow(
         if not bot_nick:
             logger.warning("跟随跳过: 未能解析 bot 昵称 (bot_id=%s)", bot_id)
             return {"moved": False, "reason": "bot_nickname_unknown"}
-        result = await asyncio.to_thread(bot_mover.move_bot_to_user, settings, bot_nick, account)
+        # 自动空闲断开后，播放命令会触发 Bot 重连；上游返回时 TS client 可能尚未
+        # 出现在 clientlist。短暂重试，并在首次找不到时强制刷新昵称，兼容外部改名。
+        result: dict = {"moved": False, "reason": "bot_not_found"}
+        for attempt in range(5):
+            result = await asyncio.to_thread(bot_mover.move_bot_to_user, settings, bot_nick, account)
+            if result.get("reason") != "bot_not_found":
+                break
+            if attempt == 0:
+                bot_nick = await tsmusic.get_bot_nickname(bot_id, refresh=True) or bot_nick
+            if attempt < 4:
+                await asyncio.sleep(min(0.25 * (2**attempt), 1.0))
         reason = result.get("reason")
         if result.get("moved"):
             logger.info("跟随完成: bot→cid=%s (用户=%s)", result.get("user_cid"), account.ts_nickname)
@@ -213,11 +223,12 @@ async def search(
 @router.post("/play")
 async def play(body: PlayRequest, request: Request, tsmusic: TsmusicDep, account: AccountDep, bot_id: OwnedBotId = None):
     """播放（query 可以是歌名或 'id:xxx'，platform 指定音源）。"""
-    follow = await _ensure_follow(request, tsmusic, account, bot_id)
     if body.queue:
         result = await tsmusic.add(body.query, platform=body.platform, meta=body.meta, bot_id=bot_id)
     else:
         result = await tsmusic.play(body.query, platform=body.platform, meta=body.meta, bot_id=bot_id)
+    # 先让播放动作唤醒可能被空闲管理器断开的 Bot，再执行频道跟随。
+    follow = await _ensure_follow(request, tsmusic, account, bot_id)
     if isinstance(result, dict):
         # 仅回传 moved/reason 给前端，剥离内部 cid/clid（最小信息原则）
         result["follow"] = {"moved": follow.get("moved", False), "reason": follow.get("reason")}
@@ -231,14 +242,16 @@ async def pause(tsmusic: TsmusicDep, _account: AccountDep, bot_id: OwnedBotId = 
 
 @router.post("/resume")
 async def resume(request: Request, tsmusic: TsmusicDep, account: AccountDep, bot_id: OwnedBotId = None):
+    result = await tsmusic.resume(bot_id=bot_id)
     await _ensure_follow(request, tsmusic, account, bot_id)
-    return await tsmusic.resume(bot_id=bot_id)
+    return result
 
 
 @router.post("/next")
 async def next_track(request: Request, tsmusic: TsmusicDep, account: AccountDep, bot_id: OwnedBotId = None):
+    result = await tsmusic.next(bot_id=bot_id)
     await _ensure_follow(request, tsmusic, account, bot_id)
-    return await tsmusic.next(bot_id=bot_id)
+    return result
 
 
 @router.post("/stop")
@@ -299,10 +312,10 @@ async def play_at(
     bot_id: OwnedBotId = None,
 ):
     """跳转到队列中指定位置播放（点击队列项切歌；index 越界或不可播时 400）。"""
-    await _ensure_follow(request, tsmusic, account, bot_id)
     result = await tsmusic.play_at(index, bot_id=bot_id)
     if isinstance(result, dict) and result.get("error"):
         raise HTTPException(status_code=400, detail=str(result["error"]))
+    await _ensure_follow(request, tsmusic, account, bot_id)
     return result
 
 
@@ -402,8 +415,9 @@ class EnqueueRequest(BaseModel):
 @router.post("/my/enqueue")
 async def my_enqueue(body: EnqueueRequest, request: Request, tsmusic: TsmusicDep, account: AccountDep, bot_id: OwnedBotId = None):
     """批量入队（整单播放）：后端循环 add，并发上限 4，上限 50 首，单首失败容忍。整批只跟随一次。"""
+    result = await tsmusic.enqueue_songs(body.songs, platform=body.platform, bot_id=bot_id)
     await _ensure_follow(request, tsmusic, account, bot_id)
-    return await tsmusic.enqueue_songs(body.songs, platform=body.platform, bot_id=bot_id)
+    return result
 
 
 # ───────────────────────── 播放跟随开关 ─────────────────────────

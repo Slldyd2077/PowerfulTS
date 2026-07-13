@@ -701,14 +701,14 @@ class TSMusicClient:
         resp = await self._http.get(f"/api/bot/{bot_id}/config")
         return self._json(resp)
 
-    async def get_bot_nickname(self, bot_id: str | None = None) -> str | None:
+    async def get_bot_nickname(self, bot_id: str | None = None, *, refresh: bool = False) -> str | None:
         """获取 bot 的 TS 昵称（供 bot_mover 在 clientlist 中定位 bot client）。
 
         GET /api/bot/{id}/config 返回移除 identity/apiKey 后的 bot 配置，含 nickname。
-        bot 改昵称需重连（低频），故永久缓存。
+        默认使用缓存；refresh=True 时强制重新读取，供跟随失败后的自愈重试。
         """
         bid = self._bid(bot_id)
-        cached = self._bot_nickname_cache.get(bid)
+        cached = None if refresh else self._bot_nickname_cache.get(bid)
         if cached:
             return cached
         await self._ensure_login()
