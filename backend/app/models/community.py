@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..core.database import Base
@@ -35,6 +35,9 @@ class Friend(Base):
     friend_account_id: Mapped[int] = mapped_column(
         ForeignKey("accounts.id", ondelete="CASCADE"), index=True
     )
+    notify_online: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
     added_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     __table_args__ = (
@@ -60,3 +63,17 @@ class FriendRequest(Base):
     __table_args__ = (
         UniqueConstraint("requester_id", "recipient_id", name="uq_friend_request"),
     )
+
+
+class PendingNotification(Base):
+    """当前无可用通知渠道时留存，收件人下次 TS 上线后补发。"""
+
+    __tablename__ = "pending_notifications"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    recipient_account_id: Mapped[int] = mapped_column(
+        ForeignKey("accounts.id", ondelete="CASCADE"), index=True
+    )
+    kind: Mapped[str] = mapped_column(String(32), default="friend_request", server_default="friend_request")
+    message: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

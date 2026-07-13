@@ -5,6 +5,10 @@ import AddFriendDialog from '@/components/social/AddFriendDialog.vue'
 import FriendNotifySettings from '@/components/social/FriendNotifySettings.vue'
 
 const showAddFriend = ref(false)
+const friendsListKey = ref(0)
+function refreshFriends() {
+  friendsListKey.value += 1
+}
 </script>
 
 <template>
@@ -17,7 +21,7 @@ const showAddFriend = ref(false)
     </div>
 
     <div class="friends-content">
-      <FriendsList />
+      <FriendsList :key="friendsListKey" />
       <div class="add-friend-wrapper">
         <el-button type="primary" plain @click="showAddFriend = true" class="add-friend-btn">
           添加好友
@@ -26,7 +30,7 @@ const showAddFriend = ref(false)
       <FriendNotifySettings />
     </div>
 
-    <AddFriendDialog v-model:visible="showAddFriend" />
+    <AddFriendDialog v-model:visible="showAddFriend" @added="refreshFriends" />
   </div>
 </template>
 

@@ -727,26 +727,53 @@ class TSMusicClient:
 
     # ───────────────────────── 音质设置 ─────────────────────────
 
-    async def get_quality(self) -> dict:
-        """获取当前音质配置（netease/qq/bilibili）。"""
+    async def get_quality(self, bot_id: str | None = None) -> dict:
+        """获取指定 bot 的当前音质配置。"""
         await self._ensure_login()
         try:
-            resp = await self._http.get("/api/music/quality")
+            resp = await self._http.get(
+                "/api/music/quality",
+                params={"botId": self._bid(bot_id)},
+            )
             return self._json(resp)
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("获取音质失败: %s", exc)
             return {}
 
-    async def set_quality(self, quality: str, platform: str | None = None) -> dict:
-        """设置音质（platform 指定平台，未传则所有平台）。
+    async def set_quality(
+        self,
+        quality: str,
+        platform: str | None = None,
+        bot_id: str | None = None,
+    ) -> dict:
+        """设置指定 bot 的音质（platform 指定平台，未传则所有平台）。
 
         Args:
             quality: 音质级别，如 standard/higher/exhigh/lossless/hires 等
-            platform: 平台标识（netease/qq/bilibili），None 表示全局设置
+            platform: 平台标识（netease/qq/bilibili/kugou），None 表示全局设置
+            bot_id: bot 实例 ID
         """
         await self._ensure_login()
         try:
-            payload = {"quality": quality}
+            # 各平台使用自己的原生音质值。保留旧版 UI 曾发送的通用别名，
+            # 但转发给上游时必须归一化，否则 QQ 会静默回退 128k。
+            aliases = {
+                "qq": {
+                    "standard": "128",
+                    "higher": "320",
+                    "exhigh": "320",
+                    "lossless": "flac",
+                },
+                "kugou": {
+                    "standard": "128",
+                    "higher": "320",
+                    "exhigh": "320",
+                    "lossless": "flac",
+                    "hires": "high",
+                },
+            }
+            normalized = aliases.get(platform or "", {}).get(quality, quality)
+            payload = {"quality": normalized, "botId": self._bid(bot_id)}
             if platform:
                 payload["platform"] = platform
             resp = await self._http.post("/api/music/quality", json=payload)

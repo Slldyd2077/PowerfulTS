@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onBeforeUnmount } from 'vue'
-import { getFriends, deleteFriend, type Friend } from '@/api/social'
+import { getFriends, deleteFriend, updateFriendNotify, type Friend } from '@/api/social'
 import { usePolling } from '@/composables/usePolling'
 import { useBreakpoint } from '@/composables/useBreakpoint'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -24,8 +24,10 @@ usePolling(fetchFriends, 30000)
 async function handleDelete(friend: Friend) {
   try {
     await ElMessageBox.confirm(
-      `确定删除好友 ${friend.ts_nickname}？`,
-      '删除好友',
+      friend.relation_status === 'pending'
+        ? `确定撤回发送给 ${friend.ts_nickname} 的好友申请？`
+        : `确定删除好友 ${friend.ts_nickname}？`,
+      friend.relation_status === 'pending' ? '撤回申请' : '删除好友',
       { type: 'warning' },
     )
   } catch {
@@ -33,10 +35,24 @@ async function handleDelete(friend: Friend) {
   }
   try {
     await deleteFriend(friend.ts_nickname)
-    ElMessage.success('已删除好友')
+    ElMessage.success(friend.relation_status === 'pending' ? '已撤回申请' : '已删除好友')
     await fetchFriends()
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '删除好友失败')
+  }
+}
+
+async function toggleNotify(friend: Friend, enabled: boolean | string | number) {
+  const next = !!enabled
+  const previous = friend.notify_online
+  friend.notify_online = next
+  try {
+    const res = await updateFriendNotify(friend.account_id, next)
+    if (!res.success) throw new Error(res.error || '设置失败')
+    ElMessage.success(next ? `已开启 ${friend.ts_nickname} 的上线提醒` : `已关闭 ${friend.ts_nickname} 的上线提醒`)
+  } catch (e) {
+    friend.notify_online = previous
+    ElMessage.error(e instanceof Error ? e.message : '设置失败')
   }
 }
 
@@ -99,11 +115,21 @@ onBeforeUnmount(() => {
         <div class="friend-info">
           <span class="friend-name">
             {{ friend.ts_nickname }}
-            <span v-if="friend.mutual" class="relation-tag relation-mutual" title="对方也加了你为好友">互关</span>
+            <span v-if="friend.relation_status === 'pending'" class="relation-tag relation-pending">已申请</span>
+            <span v-else-if="friend.mutual" class="relation-tag relation-mutual" title="对方也加了你为好友">互关</span>
             <span v-else class="relation-tag relation-single" title="对方还没加你">单向</span>
           </span>
           <span v-if="friend.game" class="friend-game mono">{{ friend.game }}</span>
         </div>
+        <el-switch
+          v-if="friend.relation_status === 'friend'"
+          :model-value="friend.notify_online"
+          size="small"
+          class="notify-switch"
+          :title="`${friend.ts_nickname} 上线提醒`"
+          @change="(value: boolean | string | number) => toggleNotify(friend, value)"
+          @click.stop
+        />
         <span
           class="friend-status"
           :class="{
@@ -239,6 +265,8 @@ onBeforeUnmount(() => {
 }
 .relation-mutual { color: var(--color-success); border: 1px solid var(--color-success); }
 .relation-single { color: var(--text-muted); border: 1px solid var(--border-emphasis); }
+.relation-pending { color: var(--color-warning); border: 1px solid var(--color-warning); }
+.notify-switch { flex-shrink: 0; }
 
 .friend-game {
   font-size: 0.62em;

@@ -4,7 +4,6 @@ import { ElMessage } from 'element-plus'
 import { getFriendSettings, updateFriendSettings } from '@/api/social'
 
 const qq = ref('')
-const notify = ref(false)
 const loading = ref(false)
 const savingQQ = ref(false)
 const editingQQ = ref(false)
@@ -16,7 +15,6 @@ async function load() {
   try {
     const s = await getFriendSettings()
     qq.value = s.qq_number || ''
-    notify.value = !!s.notify_friends_online
   } catch {
     // 静默
   } finally {
@@ -48,16 +46,6 @@ function cancelEdit() {
   void load() // 还原显示值
 }
 
-async function toggleNotify(val: boolean | string | number) {
-  const on = !!val
-  try {
-    await updateFriendSettings({ notify_friends_online: on })
-    ElMessage.success(on ? '已开启好友上线提醒' : '已关闭好友上线提醒')
-  } catch {
-    notify.value = !on // 回滚
-    ElMessage.error('切换失败')
-  }
-}
 </script>
 
 <template>
@@ -67,7 +55,7 @@ async function toggleNotify(val: boolean | string | number) {
       <span class="nc-sub label-mono">QQ NOTIFY</span>
     </div>
     <p class="nc-hint">
-      绑定 QQ 并开启后，当你的好友上线 TeamSpeak，会通过 NapCat 给你的 QQ 发私聊提醒。
+      绑定 QQ 后，可在上方好友列表中为每位好友单独开启上线提醒。
     </p>
 
     <div class="nc-row">
@@ -89,17 +77,7 @@ async function toggleNotify(val: boolean | string | number) {
       </template>
     </div>
 
-    <div class="nc-row">
-      <div class="nc-label">上线提醒</div>
-      <span class="nc-desc">{{ notify ? '已开启' : '未开启' }}</span>
-      <el-switch
-        v-model="notify"
-        :disabled="!qq"
-        class="nc-switch"
-        @change="toggleNotify"
-      />
-    </div>
-    <p v-if="!qq" class="nc-tip">先绑定 QQ 号才能开启提醒。</p>
+    <p v-if="!qq" class="nc-tip">先绑定 QQ 号，再到好友列表逐个开启提醒。</p>
   </div>
 </template>
 

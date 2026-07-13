@@ -70,13 +70,15 @@ async def get_db() -> AsyncIterator[AsyncSession]:
             raise
 
 
-async def _ensure_column(conn, table: str, column: str, ddl_type: str) -> None:
+async def _ensure_column(conn, table: str, column: str, ddl_type: str) -> bool:
     """幂等加列：内省现有列名，缺则 ALTER TABLE（SQLite 无 ADD COLUMN IF NOT EXISTS）。"""
     rows = (await conn.execute(text(f"PRAGMA table_info({table})"))).fetchall()
     existing = {str(r[1]) for r in rows}
     if column not in existing:
         await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))
         logger.info("迁移: %s.%s 已加列", table, column)
+        return True
+    return False
 
 
 async def init_db() -> None:
@@ -97,6 +99,17 @@ async def init_db() -> None:
         await _ensure_column(conn, "accounts", "tsmusic_user", "VARCHAR(64)")
         await _ensure_column(conn, "accounts", "tsmusic_password", "VARCHAR(128)")
         await _ensure_column(conn, "accounts", "container_status", "VARCHAR(16) DEFAULT 'none'")
+        # Bot 共享模式：历史共享默认只授予播放权限，避免升级后意外暴露歌单。
+        await _ensure_column(conn, "bot_shares", "share_playlists", "BOOLEAN DEFAULT 0 NOT NULL")
+        # 好友上线提醒改为逐好友设置；首次升级时继承原账号级总开关。
+        friend_notify_added = await _ensure_column(
+            conn, "friends", "notify_online", "BOOLEAN DEFAULT 0 NOT NULL"
+        )
+        if friend_notify_added:
+            await conn.execute(text(
+                "UPDATE friends SET notify_online = 1 "
+                "WHERE account_id IN (SELECT id FROM accounts WHERE notify_friends_online = 1)"
+            ))
     # 日志只输出驱动名，避免切换 PG/MySQL 后连接串(含密码)落盘
     driver = settings.database_url.split("://")[0]
     logger.info("数据库初始化完成 (driver=%s)", driver)
