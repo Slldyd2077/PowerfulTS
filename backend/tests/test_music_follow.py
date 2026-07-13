@@ -37,9 +37,13 @@ class MusicFollowTests(IsolatedAsyncioTestCase):
         )
         missing = {"moved": False, "reason": "bot_not_found"}
         moved = {"moved": True, "reason": "moved", "user_cid": 7}
+        stable = {"moved": False, "reason": "already_together", "user_cid": 7}
 
         with (
-            patch("app.routers.music.asyncio.to_thread", new=AsyncMock(side_effect=[missing, moved])) as mover,
+            patch(
+                "app.routers.music.asyncio.to_thread",
+                new=AsyncMock(side_effect=[missing, moved, stable, stable]),
+            ) as mover,
             patch("app.routers.music.asyncio.sleep", new=AsyncMock()) as sleep,
         ):
             result = await music._ensure_follow(
@@ -51,5 +55,32 @@ class MusicFollowTests(IsolatedAsyncioTestCase):
 
         self.assertTrue(result["moved"])
         client.get_bot_nickname.assert_any_await("bot-id", refresh=True)
-        self.assertEqual(mover.await_count, 2)
-        sleep.assert_awaited_once()
+        self.assertEqual(mover.await_count, 4)
+        self.assertEqual(sleep.await_count, 3)
+
+    async def test_follow_rechecks_after_move_to_prevent_default_channel_race(self) -> None:
+        client = SimpleNamespace(
+            follow_enabled=True,
+            get_bot_nickname=AsyncMock(return_value="BotNick"),
+        )
+        moved = {"moved": True, "reason": "moved", "user_cid": 9}
+        moved_back = {"moved": True, "reason": "moved", "user_cid": 9}
+        stable = {"moved": False, "reason": "already_together", "user_cid": 9}
+
+        with (
+            patch(
+                "app.routers.music.asyncio.to_thread",
+                new=AsyncMock(side_effect=[moved, stable, moved_back, stable, stable]),
+            ) as mover,
+            patch("app.routers.music.asyncio.sleep", new=AsyncMock()),
+        ):
+            result = await music._ensure_follow(
+                SimpleNamespace(),
+                client,
+                SimpleNamespace(ts_nickname="listener"),
+                "bot-id",
+            )
+
+        self.assertEqual(mover.await_count, 5)
+        self.assertEqual(result["reason"], "moved")
+        self.assertTrue(result["moved"])

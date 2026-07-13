@@ -188,14 +188,33 @@ async def _ensure_follow(
         # 自动空闲断开后，播放命令会触发 Bot 重连；上游返回时 TS client 可能尚未
         # 出现在 clientlist。短暂重试，并在首次找不到时强制刷新昵称，兼容外部改名。
         result: dict = {"moved": False, "reason": "bot_not_found"}
-        for attempt in range(5):
+        moved_once = False
+        stable_checks = 0
+        for attempt in range(10):
             result = await asyncio.to_thread(bot_mover.move_bot_to_user, settings, bot_nick, account)
-            if result.get("reason") != "bot_not_found":
+            reason = result.get("reason")
+            if reason == "already_together":
+                if not moved_once:
+                    break
+                stable_checks += 1
+                if stable_checks >= 2:
+                    result = {**result, "moved": True, "reason": "moved"}
+                    break
+            elif reason == "moved":
+                moved_once = True
+                stable_checks = 0
+                # TSMusicBot 重连初始化可能随后进入 defaultChannel，覆盖本次移动；
+                # 连续复查两次，确认初始化完成后仍与点歌者处于同一频道。
+            elif reason == "bot_not_found":
+                if attempt == 0:
+                    bot_nick = await tsmusic.get_bot_nickname(bot_id, refresh=True) or bot_nick
+            else:
                 break
-            if attempt == 0:
-                bot_nick = await tsmusic.get_bot_nickname(bot_id, refresh=True) or bot_nick
-            if attempt < 4:
-                await asyncio.sleep(min(0.25 * (2**attempt), 1.0))
+            if attempt < 9:
+                delay = 1.0 if moved_once else min(0.25 * (2**attempt), 1.0)
+                await asyncio.sleep(delay)
+        if moved_once and result.get("reason") == "already_together":
+            result = {**result, "moved": True, "reason": "moved"}
         reason = result.get("reason")
         if result.get("moved"):
             logger.info("跟随完成: bot→cid=%s (用户=%s)", result.get("user_cid"), account.ts_nickname)

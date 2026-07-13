@@ -236,6 +236,19 @@ export const useMusicStore = defineStore('music', () => {
     if (typeof msg === 'string' && /cannot play/i.test(msg)) {
       throw new Error('无法播放该曲目（可能需登录对应平台，或版权/VIP 限制）')
     }
+    const follow = res?.follow as { moved?: boolean; reason?: string } | undefined
+    if (followEnabled.value && follow && !follow.moved && follow.reason !== 'already_together') {
+      const followErrors: Record<string, string> = {
+        bot_not_found: '机器人尚未连接到 TS，无法自动移动频道',
+        bot_nickname_unknown: '无法读取机器人 TS 昵称，请检查 Bot 配置',
+        user_offline: 'TS 查询未找到你的在线身份，请确认网页账号与当前 TS 身份一致',
+        user_no_channel: '无法确定你当前所在的 TS 频道',
+        move_failed: 'TS ServerQuery 拒绝移动机器人，请检查 clientmove 权限',
+        connect_failed: '无法连接 TS ServerQuery，机器人频道跟随失败',
+        exception: '机器人频道跟随发生异常，请查看后端日志',
+      }
+      ElMessage.warning(followErrors[follow.reason || ''] || `机器人频道跟随失败：${follow.reason || 'unknown'}`)
+    }
     await fetchNowplaying()
     await fetchQueue()
     return res
