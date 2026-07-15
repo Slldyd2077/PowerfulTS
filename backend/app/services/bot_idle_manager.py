@@ -101,6 +101,7 @@ class BotIdleManager:
         self._idle_since: dict[str, float] = {}
         self._unknown_since: dict[str, float] = {}
         self._auto_paused: set[str] = set()
+        self._connected_bot_ids: set[str] = set()
         self._bot_status: dict[str, dict] = {}
         self._idle_timeout_minutes = 0
         self._auto_pause_enabled = False
@@ -165,11 +166,33 @@ class BotIdleManager:
 
     async def poll_once(self) -> None:
         self._last_poll_at = time.time()
+        tsmusic = self._tsmusic()
+
+        # 播放状态持久化不依赖 TS ServerQuery：先识别 Bot 上下线，再恢复/快照。
+        bots = [
+            bot for bot in await tsmusic.list_bots_checked()
+            if bot.get("id") and bot.get("status") == "connected"
+        ]
+        active_bot_ids = {str(bot["id"]) for bot in bots}
+        for disconnected_id in self._connected_bot_ids - active_bot_ids:
+            tsmusic.mark_player_disconnected(disconnected_id)
+        newly_connected = active_bot_ids - self._connected_bot_ids
+        if newly_connected:
+            await asyncio.gather(
+                *(tsmusic.restore_player_state(bot_id) for bot_id in newly_connected),
+                return_exceptions=True,
+            )
+        if active_bot_ids:
+            await asyncio.gather(
+                *(tsmusic.persist_player_state(bot_id) for bot_id in active_bot_ids),
+                return_exceptions=True,
+            )
+        self._connected_bot_ids = active_bot_ids
+
         if not self._settings.ts3_query_user or not self._settings.ts3_query_password:
             self._last_error = "TS3 ServerQuery credentials are not configured"
             return
 
-        tsmusic = self._tsmusic()
         bot_settings = await tsmusic.get_bot_settings_checked()
         idle_timeout_minutes = _int_or_none(bot_settings.get("idleTimeoutMinutes")) or 0
         auto_pause = bool(bot_settings.get("autoPauseOnEmpty", False))
@@ -184,10 +207,6 @@ class BotIdleManager:
             self._bot_status.clear()
             return
 
-        bots = [
-            bot for bot in await tsmusic.list_bots_checked()
-            if bot.get("id") and bot.get("status") == "connected"
-        ]
         if not bots:
             self._idle_since.clear()
             self._unknown_since.clear()
@@ -215,8 +234,6 @@ class BotIdleManager:
         bot_nicks = set(bot_nick_by_id.values())
         channels_by_nick = bot_channel_map(clients, bot_nicks)
         now = self._clock()
-        active_bot_ids = {str(bot["id"]) for bot in bots}
-
         for stale_bot_id in set(self._idle_since) - active_bot_ids:
             self._idle_since.pop(stale_bot_id, None)
             self._unknown_since.pop(stale_bot_id, None)

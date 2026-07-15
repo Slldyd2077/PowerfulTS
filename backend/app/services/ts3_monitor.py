@@ -42,6 +42,92 @@ def _safe_int(value: object, default: int = 0) -> int:
         return default
 
 
+def _build_channel_tree(raw_channels: list[dict]) -> list[dict]:
+    """Build TS display order from ``pid`` and ``channel_order``.
+
+    ``channel_order`` is not a numeric rank. It contains the cid of the
+    previous sibling (0 means first), so sorting by cid or by channel_order
+    does not reproduce the TeamSpeak channel tree.
+    """
+    parsed: list[dict] = []
+    seen_cids: set[int] = set()
+    for raw in raw_channels:
+        cid = _safe_int(raw.get("cid"))
+        if cid <= 0 or cid in seen_cids:
+            continue
+        seen_cids.add(cid)
+        parsed.append({
+            "cid": cid,
+            "pid": _safe_int(raw.get("pid")),
+            "channel_order": _safe_int(raw.get("channel_order")),
+            "name": str(raw.get("channel_name", "")),
+        })
+
+    children_by_parent: dict[int, list[dict]] = {}
+    for channel in parsed:
+        children_by_parent.setdefault(channel["pid"], []).append(channel)
+
+    def ordered_siblings(parent_id: int) -> list[dict]:
+        siblings = children_by_parent.get(parent_id, [])
+        followers: dict[int, list[dict]] = {}
+        for channel in siblings:
+            followers.setdefault(channel["channel_order"], []).append(channel)
+
+        ordered: list[dict] = []
+        used: set[int] = set()
+        previous_cid = 0
+        while True:
+            next_channel = next(
+                (item for item in followers.get(previous_cid, []) if item["cid"] not in used),
+                None,
+            )
+            if next_channel is None:
+                break
+            ordered.append(next_channel)
+            used.add(next_channel["cid"])
+            previous_cid = next_channel["cid"]
+
+        # Broken or incomplete order links should not make a channel vanish.
+        ordered.extend(channel for channel in siblings if channel["cid"] not in used)
+        return ordered
+
+    result: list[dict] = []
+    visited: set[int] = set()
+
+    def append_branch(parent_id: int, depth: int) -> None:
+        for channel in ordered_siblings(parent_id):
+            cid = channel["cid"]
+            if cid in visited:
+                continue
+            visited.add(cid)
+            result.append({
+                "cid": cid,
+                "pid": channel["pid"],
+                "channel_order": channel["channel_order"],
+                "name": channel["name"],
+                "depth": depth,
+            })
+            append_branch(cid, depth + 1)
+
+    append_branch(0, 0)
+
+    # Keep orphaned/cyclic records visible, using query order as a safe fallback.
+    for channel in parsed:
+        if channel["cid"] in visited:
+            continue
+        visited.add(channel["cid"])
+        result.append({
+            "cid": channel["cid"],
+            "pid": channel["pid"],
+            "channel_order": channel["channel_order"],
+            "name": channel["name"],
+            "depth": 0,
+        })
+        append_branch(channel["cid"], 1)
+
+    return result
+
+
 class TS3Monitor:
     """TS3 ServerQuery 监控器（单例，由 app.state 持有）。"""
 
@@ -55,6 +141,8 @@ class TS3Monitor:
         self.client_data: dict[str, dict] = {}
         # cid -> channel_name
         self.channel_map: dict[int, str] = {}
+        # TS display order, including parent/child depth for the Web UI.
+        self.channel_tree: list[dict] = []
         # 累计 unique_identifier（本次运行；跨重启持久化留待后续）
         self._total_users: set[str] = set()
         self.start_time = datetime.now()
@@ -107,8 +195,10 @@ class TS3Monitor:
         for ch in resp:
             cid = _safe_int(ch.get("cid"))
             new_map[cid] = str(ch.get("channel_name", ""))
+        new_tree = _build_channel_tree(resp)
         with self._lock:
             self.channel_map = new_map
+            self.channel_tree = new_tree
 
     def _refresh_clients(self) -> tuple[list[tuple[str, str]], list[str]]:
         now = time.time()
@@ -280,7 +370,7 @@ class TS3Monitor:
     def get_channels(self) -> dict:
         """返回兼容前端 ChannelData 契约的频道快照。"""
         with self._lock:
-            channels = {str(cid): name for cid, name in self.channel_map.items()}
+            channels = [dict(channel) for channel in self.channel_tree]
         return {"channels": channels, "count": len(channels)}
 
     def get_status(self, nickname: str) -> tuple[str, str | None]:

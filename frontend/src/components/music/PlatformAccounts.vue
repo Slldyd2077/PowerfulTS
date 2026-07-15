@@ -69,9 +69,9 @@ function startPolling(platform: string) {
       const r = await getQrcodeStatus(key, platform, music.ownLibraryBotId)
       if (r.status === 'confirmed') {
         const auth = await getAuthStatus(platform, music.ownLibraryBotId)
-        music.ownPlatformStatus[platform] = { loggedIn: !!auth.loggedIn, nickname: auth.nickname }
+        music.ownPlatformStatus[platform] = { loggedIn: !!auth.loggedIn, nickname: auth.nickname, vip: auth.vip, vipExpiresAt: auth.vipExpiresAt }
         if (music.libraryBotId === music.ownLibraryBotId) {
-          music.platformStatus[platform] = { loggedIn: !!auth.loggedIn, nickname: auth.nickname }
+          music.platformStatus[platform] = { loggedIn: !!auth.loggedIn, nickname: auth.nickname, vip: auth.vip, vipExpiresAt: auth.vipExpiresAt }
         }
         qrImg.value = ''
         currentQrKey.value = ''
@@ -149,9 +149,9 @@ async function submitCookie() {
     // 上游 /api/auth/cookie 总返回 success:true（仅表示已提交），真实登录态以 status.loggedIn 为准
     const res = await getAuthStatus(plat, music.ownLibraryBotId)
     // 写回 store，解除 MyMusic 的置灰
-    music.ownPlatformStatus[plat] = { loggedIn: !!res.loggedIn, nickname: res.nickname }
+    music.ownPlatformStatus[plat] = { loggedIn: !!res.loggedIn, nickname: res.nickname, vip: res.vip, vipExpiresAt: res.vipExpiresAt }
     if (music.libraryBotId === music.ownLibraryBotId) {
-      music.platformStatus[plat] = { loggedIn: !!res.loggedIn, nickname: res.nickname }
+      music.platformStatus[plat] = { loggedIn: !!res.loggedIn, nickname: res.nickname, vip: res.vip, vipExpiresAt: res.vipExpiresAt }
     }
     if (res.loggedIn) {
       const label = platforms.find((x) => x.value === plat)?.label

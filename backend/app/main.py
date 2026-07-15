@@ -24,6 +24,7 @@ from .routers import admin, auth, bilibili, friends, intro_music, monitor, music
 from .services.netease import NeteaseClient
 from .services.napcat_client import NapCatClient
 from .services.bot_idle_manager import BotIdleManager
+from .services.bot_player_state import BotPlayerStateStore
 from .services.online_notifier import OnlineNotifier
 from .services.tsmusic_client import TSMusicClient
 from .services.ts3_monitor import TS3Monitor
@@ -87,6 +88,7 @@ async def lifespan(app: FastAPI):
     app.state.tsmusic = TSMusicClient(
         settings.tsmusic_url, settings.tsmusic_user, settings.tsmusic_password,
         bot_id=settings.tsmusic_bot_id,
+        state_store=BotPlayerStateStore(AsyncSessionLocal),
     )
     # Resolve the client lazily: admin hot reload replaces app.state.tsmusic.
     # Capturing the object here would leave the idle manager using a closed client.

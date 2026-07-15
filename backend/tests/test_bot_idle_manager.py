@@ -20,6 +20,9 @@ class FakeTSMusic:
         self.stop_calls: list[str] = []
         self.pause_calls: list[str] = []
         self.resume_calls: list[str] = []
+        self.persist_calls: list[str] = []
+        self.restore_calls: list[str] = []
+        self.disconnected_calls: list[str] = []
         self.bots = [
             {
                 "id": "bot-1",
@@ -51,6 +54,17 @@ class FakeTSMusic:
     async def resume(self, bot_id: str) -> dict:
         self.resume_calls.append(bot_id)
         return {"success": True}
+
+    async def persist_player_state(self, bot_id: str) -> bool:
+        self.persist_calls.append(bot_id)
+        return True
+
+    async def restore_player_state(self, bot_id: str) -> dict:
+        self.restore_calls.append(bot_id)
+        return {"restored": True}
+
+    def mark_player_disconnected(self, bot_id: str) -> None:
+        self.disconnected_calls.append(bot_id)
 
 
 def test_settings() -> SimpleNamespace:

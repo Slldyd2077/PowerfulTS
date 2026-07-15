@@ -17,6 +17,15 @@ export interface MusicSearchResult {
   results: Song[]
 }
 
+export interface PlatformAuthStatus {
+  platform?: string
+  loggedIn: boolean
+  nickname?: string
+  avatarUrl?: string
+  vip?: boolean
+  vipExpiresAt?: number
+}
+
 export interface NowPlaying {
   playing: boolean
   paused: boolean
@@ -387,7 +396,7 @@ export async function enqueueSongs(platform: string | undefined, songs: Song[], 
 // ───────────────────────── 平台账号登录 ─────────────────────────
 
 /** 获取某平台登录状态（per-bot：该 bot 的平台登录态） */
-export async function getAuthStatus(platform: string, botId?: string) {
+export async function getAuthStatus(platform: string, botId?: string): Promise<PlatformAuthStatus> {
   const params: Record<string, string> = { platform }
   if (botId) params.botId = botId
   const { data } = await apiClient.get('/music/auth/status', { params })

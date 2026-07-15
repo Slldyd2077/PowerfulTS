@@ -9,9 +9,12 @@ from app.services.tsmusic_client import TSMusicClient
 class MusicQualityClientTests(IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.requests: list[httpx.Request] = []
+        self.auth_status = {"loggedIn": False, "vip": False}
 
         async def handler(request: httpx.Request) -> httpx.Response:
             self.requests.append(request)
+            if request.url.path == "/api/auth/status":
+                return httpx.Response(200, json=self.auth_status)
             if request.method == "GET":
                 return httpx.Response(200, json={"qq": "320"})
             return httpx.Response(200, json={"success": True})
@@ -43,9 +46,23 @@ class MusicQualityClientTests(IsolatedAsyncioTestCase):
             {"quality": "320", "platform": "qq", "botId": "abc-123"},
         )
 
-    async def test_kugou_uses_its_own_hires_value(self) -> None:
+    async def test_kugou_uses_its_own_hires_value_for_verified_vip(self) -> None:
+        self.auth_status = {"loggedIn": True, "vip": True}
         await self.client.set_quality("hires", "kugou", bot_id="abc-123")
 
-        payload = json.loads(self.requests[0].content)
+        payload = json.loads(self.requests[1].content)
         self.assertEqual(payload["quality"], "high")
+
+    async def test_vip_quality_is_rejected_when_membership_is_not_verified(self) -> None:
+        result = await self.client.set_quality("lossless", "netease", bot_id="abc-123")
+
+        self.assertEqual(result["_status"], 403)
+        self.assertIn("VIP", result["error"])
+        self.assertEqual([request.url.path for request in self.requests], ["/api/auth/status"])
+
+    async def test_unknown_quality_is_rejected_before_upstream_request(self) -> None:
+        result = await self.client.set_quality("made-up", "qq", bot_id="abc-123")
+
+        self.assertEqual(result["_status"], 400)
+        self.assertEqual(self.requests, [])
 
