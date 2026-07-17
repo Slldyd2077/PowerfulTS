@@ -19,6 +19,19 @@ const platforms: PlatformInfo[] = [
   { value: 'kugou', label: '酷狗', color: '#009afb', icon: 'K' },
 ]
 
+// 各平台扫码指引：QQ 返回的是「QQ 账号授权登录」二维码（txz.qq.com 授权协议），
+// 必须用「手机QQ」的扫一扫；用 QQ音乐 App/微信/系统相机扫会跳到下载引导页。
+const scanTips: Record<string, string> = {
+  qq: '请用「手机QQ」扫一扫登录（勿用 QQ音乐 App / 微信 / 系统相机，否则会跳到下载页）',
+  netease: '请用「网易云音乐」App 扫码登录',
+  bilibili: '请用「哔哩哔哩」App 扫码登录',
+  kugou: '请用「酷狗音乐」App 扫码登录',
+}
+function scanTip(platform: string): string {
+  const label = platforms.find((p) => p.value === platform)?.label ?? ''
+  return scanTips[platform] ?? `用 ${label} App 扫码登录`
+}
+
 const music = useMusicStore()
 // 登录态已提升到 store（供 MyMusic 置灰判断）；此处 status 为只读视图，模板沿用 status[p.value]
 const status = computed(() => music.ownPlatformStatus)
@@ -215,7 +228,7 @@ onUnmounted(stopPolling)
     <div v-if="activePlatform && qrImg" class="qr-overlay" @click.self="closeQr">
       <div class="qr-box">
         <img :src="qrImg" class="qr-img" alt="二维码" />
-        <p class="qr-tip">用 {{ platforms.find((p) => p.value === activePlatform)?.label }} APP 扫码登录</p>
+        <p class="qr-tip">{{ scanTip(activePlatform) }}</p>
         <button class="qr-close" @click="closeQr">取消</button>
       </div>
     </div>
