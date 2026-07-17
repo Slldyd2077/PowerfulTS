@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { getChannels, type ChannelData } from '@/api/monitor'
+import { getChannels, type ChannelData, type ChannelInfo } from '@/api/monitor'
 import { usePolling } from '@/composables/usePolling'
 
-const channels = ref<Record<string, string>>({})
+const channels = ref<ChannelInfo[]>([])
 const channelCount = ref(0)
 const loaded = ref(false)
 
 async function fetchChannels() {
   try {
     const data: ChannelData = await getChannels()
-    channels.value = data.channels || {}
+    channels.value = data.channels || []
     channelCount.value = data.count || 0
     loaded.value = true
   } catch (e) {
@@ -19,6 +19,10 @@ async function fetchChannels() {
 }
 
 usePolling(fetchChannels, 30000)
+
+function channelIndent(depth: number) {
+  return `${8 + Math.max(0, depth) * 16}px`
+}
 </script>
 
 <template>
@@ -38,13 +42,15 @@ usePolling(fetchChannels, 30000)
 
     <div v-else class="channel-list">
       <div
-        v-for="(name, cid) in channels"
-        :key="cid"
+        v-for="channel in channels"
+        :key="channel.cid"
         class="channel-item row-scan"
+        :class="{ 'channel-item--root': channel.depth === 0 }"
+        :style="{ paddingInlineStart: channelIndent(channel.depth) }"
       >
-        <span class="channel-hash mono">#</span>
-        <span class="channel-name">{{ name }}</span>
-        <span class="channel-id mono">{{ cid }}</span>
+        <span class="channel-hash mono" aria-hidden="true">{{ channel.depth === 0 ? '#' : '└' }}</span>
+        <span class="channel-name">{{ channel.name }}</span>
+        <span class="channel-id mono">{{ channel.cid }}</span>
       </div>
     </div>
   </div>
@@ -118,11 +124,15 @@ usePolling(fetchChannels, 30000)
 .channel-item:hover {
   background: var(--surface-4);
 }
+.channel-item--root:not(:first-child) {
+  border-top: 1px solid var(--border-default);
+}
 
 .channel-hash {
   color: var(--text-muted);
   font-weight: 600;
   font-size: 0.82em;
+  text-align: center;
 }
 
 .channel-name {

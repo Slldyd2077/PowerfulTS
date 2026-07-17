@@ -374,7 +374,13 @@ async def set_quality(
     if not quality:
         raise HTTPException(status_code=400, detail="quality is required")
     platform = body.get("platform")
-    return await tsmusic.set_quality(quality, platform, bot_id=bot_id)
+    result = await tsmusic.set_quality(quality, platform, bot_id=bot_id)
+    if isinstance(result, dict) and result.get("error"):
+        raise HTTPException(
+            status_code=int(result.get("_status") or 400),
+            detail=str(result["error"]),
+        )
+    return result
 
 
 # ───────────────────────── 我的音乐 / 歌单 ─────────────────────────

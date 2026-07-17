@@ -90,8 +90,9 @@ export const useMusicStore = defineStore('music', () => {
   let avatarObjUrl: string | null = null
 
   // ── 我的音乐：平台登录态（提升自 PlatformAccounts，供 MyMusic 置灰判断）──
-  const platformStatus = ref<Record<string, { loggedIn: boolean; nickname?: string }>>({})
-  const ownPlatformStatus = ref<Record<string, { loggedIn: boolean; nickname?: string }>>({})
+  type PlatformStatus = { loggedIn: boolean; nickname?: string; vip?: boolean; vipExpiresAt?: number }
+  const platformStatus = ref<Record<string, PlatformStatus>>({})
+  const ownPlatformStatus = ref<Record<string, PlatformStatus>>({})
   const myActivePlatform = ref<'netease' | 'qq' | 'bilibili' | 'kugou'>('netease')
 
   // ── 音质设置 ──
@@ -103,8 +104,8 @@ export const useMusicStore = defineStore('music', () => {
       { value: 'standard', label: '标准 (128kbps)', vip: false },
       { value: 'higher', label: '较高 (192kbps)', vip: false },
       { value: 'exhigh', label: '极高 (320kbps)', vip: false },
-      { value: 'lossless', label: '无损 (FLAC)', vip: false },
-      { value: 'hires', label: 'Hi-Res', vip: false },
+      { value: 'lossless', label: '无损 (FLAC)', vip: true },
+      { value: 'hires', label: 'Hi-Res', vip: true },
       { value: 'jymaster', label: '超清母带', vip: true },
     ],
     qq: [
@@ -368,14 +369,14 @@ export const useMusicStore = defineStore('music', () => {
       platforms.map(async (p) => {
         try {
           const res = await apiGetAuthStatus(p, libraryBotId.value)
-          return { p, loggedIn: !!res.loggedIn, nickname: res.nickname as string | undefined }
+          return { p, loggedIn: !!res.loggedIn, nickname: res.nickname, vip: res.vip, vipExpiresAt: res.vipExpiresAt }
         } catch {
-          return { p, loggedIn: false, nickname: undefined }
+          return { p, loggedIn: false, nickname: undefined, vip: false, vipExpiresAt: undefined }
         }
       }),
     )
     for (const r of results) {
-      platformStatus.value[r.p] = { loggedIn: r.loggedIn, nickname: r.nickname }
+      platformStatus.value[r.p] = { loggedIn: r.loggedIn, nickname: r.nickname, vip: r.vip, vipExpiresAt: r.vipExpiresAt }
     }
   }
 
@@ -385,12 +386,17 @@ export const useMusicStore = defineStore('music', () => {
     const results = await Promise.all(platforms.map(async (p) => {
       try {
         const res = await apiGetAuthStatus(p, ownLibraryBotId.value)
-        return { p, loggedIn: !!res.loggedIn, nickname: res.nickname as string | undefined }
+        return { p, loggedIn: !!res.loggedIn, nickname: res.nickname, vip: res.vip, vipExpiresAt: res.vipExpiresAt }
       } catch {
-        return { p, loggedIn: false, nickname: undefined }
+        return { p, loggedIn: false, nickname: undefined, vip: false, vipExpiresAt: undefined }
       }
     }))
-    for (const r of results) ownPlatformStatus.value[r.p] = { loggedIn: r.loggedIn, nickname: r.nickname }
+    for (const r of results) ownPlatformStatus.value[r.p] = {
+      loggedIn: r.loggedIn,
+      nickname: r.nickname,
+      vip: r.vip,
+      vipExpiresAt: r.vipExpiresAt,
+    }
   }
 
   /** 用户歌单（自建+收藏） */

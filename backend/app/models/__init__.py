@@ -4,6 +4,7 @@ from __future__ import annotations
 from ..core.database import Base
 from .account import Account, BotOwnership, BotShare, ServerMember, Session, VerifyCode
 from .app_setting import AppSetting
+from .bot_player_state import BotPlayerState
 from .community import ChannelRental, Friend, FriendRequest, PendingNotification
 from .stats import VisitStat
 
@@ -16,6 +17,7 @@ __all__ = [
     "Session",
     "VerifyCode",
     "AppSetting",
+    "BotPlayerState",
     "ChannelRental",
     "Friend",
     "FriendRequest",

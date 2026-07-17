@@ -191,6 +191,7 @@ async def _reload_clients(request: Request, db: AsyncSession, kinds: list[str]) 
             await _resolve(db, "tsmusic_user"),
             await _resolve(db, "tsmusic_password"),
             bot_id=await _resolve(db, "tsmusic_bot_id"),
+            state_store=st.tsmusic.state_store,
         )
         logger.info("热重载 TSMusicClient")
     if "netease" in kinds:

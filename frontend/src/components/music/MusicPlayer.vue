@@ -204,7 +204,7 @@ const currentPlatform = computed<'netease' | 'qq' | 'bilibili' | 'kugou' | null>
 const qualityOptions = computed(() => {
   if (!currentPlatform.value) return []
   const platformStatus = music.platformStatus[currentPlatform.value]
-  const isVip = !!platformStatus?.nickname?.toLowerCase().includes('vip') || false
+  const isVip = platformStatus?.vip === true
   return music.getAvailableQualities(currentPlatform.value, isVip)
 })
 

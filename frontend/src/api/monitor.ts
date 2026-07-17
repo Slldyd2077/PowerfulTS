@@ -23,8 +23,16 @@ export interface StatsData {
 }
 
 export interface ChannelData {
-  channels: Record<string, string>
+  channels: ChannelInfo[]
   count: number
+}
+
+export interface ChannelInfo {
+  cid: number
+  pid: number
+  channel_order: number
+  name: string
+  depth: number
 }
 
 /** 获取 TS3 服务器统计 */
