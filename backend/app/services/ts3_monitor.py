@@ -152,6 +152,8 @@ class TS3Monitor:
         # 上线提醒：主 event loop + notifier 由 app 启动时注入（同步线程 → async 主循环）
         self._loop = None
         self._notifier = None
+        # Steam 当前游戏查询回调（由 app 注入；TS 在线时优先显示 Steam 游戏）
+        self._steam_lookup = None
 
     # ─────────────────────── 上线提醒注入 ───────────────────────
 
@@ -162,6 +164,23 @@ class TS3Monitor:
     def set_notifier(self, notifier) -> None:
         """注入上线提醒编排器（OnlineNotifier）。"""
         self._notifier = notifier
+
+    def set_steam_lookup(self, lookup) -> None:
+        """注入 Steam 当前游戏查询回调：lookup(nickname) -> game_name | None。
+
+        get_status/get_stats 在 TS 在线时优先展示 Steam 当前游戏（无则回退频道名）。
+        回调由后台 task 维护的内存快照支撑，本线程只读，任何异常降级为 None。
+        """
+        self._steam_lookup = lookup
+
+    def _steam_game(self, nickname: str) -> str | None:
+        """安全调用 Steam 查询回调；未注入/异常一律返回 None（优雅降级）。"""
+        if not self._steam_lookup:
+            return None
+        try:
+            return self._steam_lookup(nickname)
+        except Exception:
+            return None
 
     # ─────────────────────── 连接 ───────────────────────
 
@@ -345,13 +364,16 @@ class TS3Monitor:
                 if now - entry["last_seen"] > ONLINE_WINDOW:
                     continue
                 channel_name = self.channel_map.get(entry["cid"], "未知频道")
+                nickname = entry["nickname"]
+                # game 优先显示 Steam 当前游戏（后台 task 维护），无则回退 TS 频道名
+                display_game = self._steam_game(nickname) or channel_name
                 online_list.append({
-                    "nickname": entry["nickname"],
-                    "game": channel_name,  # P0: 频道名即游戏（后续可加 game_mapping 精炼）
+                    "nickname": nickname,
+                    "game": display_game,
                     "online_time": int(now - entry["first_seen"]),
                     "channel": channel_name,
                 })
-                games[channel_name] = games.get(channel_name, 0) + 1
+                games[display_game] = games.get(display_game, 0) + 1
         return {
             "running_time": int((datetime.now() - self.start_time).total_seconds()),
             "total_users": len(self._total_users),
@@ -383,6 +405,10 @@ class TS3Monitor:
         with self._lock:
             for entry in self.client_data.values():
                 if entry["nickname"] == nickname and now - entry["last_seen"] <= ONLINE_WINDOW:
+                    # 优先显示 Steam 当前游戏（后台 task 维护），无则回退 TS 频道名
+                    steam_game = self._steam_game(nickname)
+                    if steam_game:
+                        return ("游戏中", steam_game)
                     game = self.channel_map.get(entry["cid"])
                     return ("游戏中" if game else "在线", game)
         return ("离线", None)

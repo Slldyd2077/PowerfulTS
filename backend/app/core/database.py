@@ -99,6 +99,15 @@ async def init_db() -> None:
         await _ensure_column(conn, "accounts", "tsmusic_user", "VARCHAR(64)")
         await _ensure_column(conn, "accounts", "tsmusic_password", "VARCHAR(128)")
         await _ensure_column(conn, "accounts", "container_status", "VARCHAR(16) DEFAULT 'none'")
+        # Steam 绑定字段：steamid64 加 UNIQUE INDEX（既是唯一约束又建索引；SQLite 允许多个 NULL 共存）
+        if await _ensure_column(conn, "accounts", "steamid64", "VARCHAR(17)"):
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_accounts_steamid64 ON accounts (steamid64)"
+            ))
+        await _ensure_column(conn, "accounts", "steam_persona", "VARCHAR(128)")
+        await _ensure_column(conn, "accounts", "steam_avatar_url", "VARCHAR(255)")
+        await _ensure_column(conn, "accounts", "steam_profile_url", "VARCHAR(255)")
+        await _ensure_column(conn, "accounts", "steam_bound_at", "DATETIME")
         # Bot 共享模式：历史共享默认只授予播放权限，避免升级后意外暴露歌单。
         await _ensure_column(conn, "bot_shares", "share_playlists", "BOOLEAN DEFAULT 0 NOT NULL")
         # 好友上线提醒改为逐好友设置；首次升级时继承原账号级总开关。
