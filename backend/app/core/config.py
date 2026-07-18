@@ -52,6 +52,14 @@ class Settings:
     napcat_url: str
     napcat_token: str
 
+    # ── Steam 集成 (Web API + OpenID 2.0 登录; 未配置 API Key 则 Steam 功能降级) ──
+    steam_api_key: str
+    # OpenID 回调绝对 URL；留空则在 /auth/url 时从请求推断（dev 友好，生产建议显式配置）
+    steam_openid_return_url: str
+    steam_openid_realm: str
+    # 签发 OpenID state 的 HMAC 密钥；留空则用内置默认值（开发够用，生产应显式设置）
+    steam_openid_state_secret: str
+
     # ── CORS 允许的前端来源 (逗号分隔; 生产改为实际域名) ──
     cors_origins: list[str]
 
@@ -74,6 +82,10 @@ def get_settings() -> Settings:
         tsmusic_bot_id=os.environ.get("TSMUSIC_BOT_ID", ""),
         napcat_url=os.environ.get("NAPCAT_URL", "http://127.0.0.1:3000"),
         napcat_token=os.environ.get("NAPCAT_TOKEN", ""),
+        steam_api_key=os.environ.get("STEAM_API_KEY", ""),
+        steam_openid_return_url=os.environ.get("STEAM_OPENID_RETURN_URL", ""),
+        steam_openid_realm=os.environ.get("STEAM_OPENID_REALM", ""),
+        steam_openid_state_secret=os.environ.get("STEAM_OPENID_STATE_SECRET", ""),
         cors_origins=_parse_origins(
             os.environ.get("CORS_ORIGINS", "http://localhost:5173")
         ),

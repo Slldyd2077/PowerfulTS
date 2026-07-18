@@ -20,9 +20,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from ._version import __version__
 from .core.config import get_settings
 from .core.database import AsyncSessionLocal, dispose_db, init_db
-from .routers import admin, auth, bilibili, friends, intro_music, monitor, music
+from .routers import admin, auth, bilibili, friends, intro_music, monitor, music, steam
 from .services.netease import NeteaseClient
 from .services.napcat_client import NapCatClient
+from .services.steam_client import SteamClient
 from .services.bot_idle_manager import BotIdleManager
 from .services.bot_player_state import BotPlayerStateStore
 from .services.online_notifier import OnlineNotifier
@@ -62,6 +63,42 @@ async def _migrate_bot_ownership() -> None:
         )
 
 
+async def _refresh_steam_games_loop(app: FastAPI) -> None:
+    """后台定期拉取所有绑定 Steam 用户的当前游戏，刷新 SteamClient 快照供 TS 监控联动。
+
+    未配置 Steam 或查询失败时优雅降级（warning 不抛），不影响主循环与监控线程。
+    """
+    from sqlalchemy import select
+
+    from .models import Account
+
+    while True:
+        try:
+            steam = app.state.steam
+            if steam.configured:
+                async with AsyncSessionLocal() as session:
+                    rows = (
+                        await session.execute(
+                            select(Account.ts_nickname, Account.steamid64).where(
+                                Account.steamid64.is_not(None)
+                            )
+                        )
+                    ).all()
+                if rows:
+                    nick_to_sid = {r.ts_nickname: r.steamid64 for r in rows}
+                    summaries = await steam.get_player_summaries(list(nick_to_sid.values()))
+                    sid_to_game = {
+                        sid: summary.get("gameextrainfo")
+                        for sid, summary in summaries.items()
+                        if summary and summary.get("gameextrainfo")
+                    }
+                    game_by_nick = {nick: sid_to_game.get(sid) for nick, sid in nick_to_sid.items()}
+                    steam.update_status_snapshot(game_by_nick)
+        except Exception:
+            logger.warning("Steam 当前游戏快照刷新失败", exc_info=True)
+        await asyncio.sleep(120)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期：原生数据层 + TS3 监控 + 多媒体代理客户端 + NapCat 推送。"""
@@ -82,6 +119,19 @@ async def lifespan(app: FastAPI):
     app.state.ts3_monitor.set_loop(asyncio.get_running_loop())
     app.state.ts3_monitor.set_notifier(app.state.online_notifier)
     app.state.ts3_monitor.start()
+    # Steam 集成（OpenID 绑定 + 游戏查询；未配置 API Key 则功能降级）
+    app.state.steam = SteamClient(
+        settings.steam_api_key,
+        settings.steam_openid_return_url,
+        settings.steam_openid_realm,
+        settings.steam_openid_state_secret,
+    )
+    # TS 监控线程通过此回调读取 Steam 当前游戏（延迟求值 app.state.steam，兼容 admin 热重载）
+    app.state.ts3_monitor.set_steam_lookup(
+        lambda nick: app.state.steam.get_current_game_sync(nick)
+    )
+    # 后台定期刷新所有绑定用户的 Steam 当前游戏到内存快照（供 TS 联动）
+    steam_refresh_task = asyncio.create_task(_refresh_steam_games_loop(app))
     # 网易云音乐 API 客户端 (本地 NeteaseCloudMusicApi 服务, 账号/歌单)
     app.state.netease = NeteaseClient(settings.netease_api_url)
     # TSMusicBot 音乐引擎代理客户端（单例：连接单一共享 TSMusicBot 容器）
@@ -108,6 +158,12 @@ async def lifespan(app: FastAPI):
         await app.state.netease.close()
         await app.state.tsmusic.close()
         await app.state.napcat.close()
+        steam_refresh_task.cancel()
+        try:
+            await steam_refresh_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        await app.state.steam.close()
         await dispose_db()
 
 
@@ -137,6 +193,8 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(friends.router, prefix="/api")
 # 开屏背景音乐：/api/intro-music/* (本地音乐目录扫描 + 流式, 登录页随机播放 + 真实频谱)
 app.include_router(intro_music.router, prefix="/api")
+# Steam 集成：/api/steam/*（OpenID 绑定 + 好友在线状态 + 共同游戏 + 时长排行）
+app.include_router(steam.router, prefix="/api")
 # 管理后台：/api/admin/*（RBAC：仅 admin）
 app.include_router(admin.router, prefix="/api")
 

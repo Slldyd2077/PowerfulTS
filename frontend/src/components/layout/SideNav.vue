@@ -5,6 +5,7 @@ import {
   Monitor,
   Headset,
   User,
+  Aim,
   Setting,
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
@@ -21,19 +22,21 @@ const activeIndex = computed(() => {
   if (route.path === '/') return 'dashboard'
   if (route.path === '/music') return 'music'
   if (route.path === '/friends') return 'friends'
+  if (route.path === '/steam') return 'steam'
   if (route.path === '/admin') return 'admin'
   return ''
 })
 
 function navigate(key: string) {
   // 游客受限功能 → 跳登录页（保留游客态；登录成功后由 setToken 升级为真实用户）
-  if (auth.isGuest && (key === 'music' || key === 'friends')) {
+  if (auth.isGuest && (key === 'music' || key === 'friends' || key === 'steam')) {
     router.push('/login')
     return
   }
   if (key === 'dashboard') router.push('/')
   else if (key === 'music') router.push('/music')
   else if (key === 'friends') router.push('/friends')
+  else if (key === 'steam') router.push('/steam')
   else if (key === 'admin') router.push('/admin')
 }
 </script>
@@ -69,6 +72,12 @@ function navigate(key: string) {
       <el-menu-item index="friends" :class="{ 'guest-locked': auth.isGuest }">
         <el-icon><User /></el-icon>
         <span>好友列表</span>
+        <span v-if="auth.isGuest" class="lock-hint label-mono">登录后查看</span>
+      </el-menu-item>
+
+      <el-menu-item index="steam" :class="{ 'guest-locked': auth.isGuest }">
+        <el-icon><Aim /></el-icon>
+        <span>Steam</span>
         <span v-if="auth.isGuest" class="lock-hint label-mono">登录后查看</span>
       </el-menu-item>
 

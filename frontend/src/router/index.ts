@@ -29,6 +29,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/FriendsView.vue'),
       },
       {
+        path: 'steam',
+        name: 'Steam',
+        component: () => import('@/views/SteamView.vue'),
+      },
+      {
         path: 'admin',
         name: 'Admin',
         component: () => import('@/views/AdminView.vue'),

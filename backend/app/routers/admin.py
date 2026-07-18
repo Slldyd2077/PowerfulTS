@@ -80,6 +80,10 @@ SPEC: list[dict] = [
     {"key": "tsmusic_password", "label": "TSMusicBot 密码", "sensitive": True, "reload": "tsmusic"},
     {"key": "tsmusic_bot_id", "label": "TSMusicBot 默认 bot id", "sensitive": False, "reload": "tsmusic"},
     {"key": "netease_api_url", "label": "网易云 API 地址", "sensitive": False, "reload": "netease"},
+    {"key": "steam_api_key", "label": "Steam Web API Key", "sensitive": True, "reload": "steam"},
+    {"key": "steam_openid_return_url", "label": "Steam OpenID 回调地址", "sensitive": False, "reload": "steam"},
+    {"key": "steam_openid_realm", "label": "Steam OpenID Realm", "sensitive": False, "reload": "steam"},
+    {"key": "steam_openid_state_secret", "label": "Steam state 签名密钥", "sensitive": True, "reload": "steam"},
     {"key": "ts3_host", "label": "TS3 ServerQuery 主机", "sensitive": False, "restart": True},
     {"key": "ts3_query_port", "label": "TS3 ServerQuery 端口", "sensitive": False, "restart": True},
     {"key": "ts3_query_user", "label": "TS3 ServerQuery 用户", "sensitive": False, "restart": True},
@@ -199,6 +203,16 @@ async def _reload_clients(request: Request, db: AsyncSession, kinds: list[str]) 
         await st.netease.close()
         st.netease = NeteaseClient(await _resolve(db, "netease_api_url"))
         logger.info("热重载 NeteaseClient")
+    if "steam" in kinds:
+        from ..services.steam_client import SteamClient
+        await st.steam.close()
+        st.steam = SteamClient(
+            await _resolve(db, "steam_api_key"),
+            await _resolve(db, "steam_openid_return_url"),
+            await _resolve(db, "steam_openid_realm"),
+            await _resolve(db, "steam_openid_state_secret"),
+        )
+        logger.info("热重载 SteamClient")
 
 
 @router.get("/napcat/status")
