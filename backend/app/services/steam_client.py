@@ -65,6 +65,7 @@ class SteamClient:
         openid_return_url: str = "",
         openid_realm: str = "",
         state_secret: str = "",
+        verify_endpoint: str = "",
         timeout: float = 10.0,
     ) -> None:
         self._key = (api_key or "").strip()
@@ -72,6 +73,8 @@ class SteamClient:
         self._realm = (openid_realm or "").strip()
         # state 签名密钥：无默认值，未配置则拒绝签发 state（防伪造绑定劫持）
         self._state_secret = (state_secret or "").strip()
+        # OpenID 验签端点：默认直连 steamcommunity.com；国内服务器可配 CF Worker 反代地址绕过 GFW
+        self._verify_endpoint = (verify_endpoint or "").strip()
         self._http = httpx.AsyncClient(base_url="https://api.steampowered.com", timeout=timeout)
         # 内存缓存：steamid -> (timestamp, value)，LRU + TTL（OrderedDict 按访问顺序淘汰）
         self._summary_cache: OrderedDict[str, tuple[float, dict]] = OrderedDict()
@@ -154,8 +157,9 @@ class SteamClient:
         响应含 is_valid:true 即通过；从 claimed_id 提取 steamid64 返回。失败返回 None。"""
         params = {k: v for k, v in openid_params.items() if k.startswith("openid.")}
         params["openid.mode"] = "check_authentication"
+        endpoint = self._verify_endpoint or STEAM_OPENID_ENDPOINT
         try:
-            resp = await self._http.post(STEAM_OPENID_ENDPOINT, data=params)
+            resp = await self._http.post(endpoint, data=params)
             if resp.status_code != 200:
                 logger.warning("Steam OpenID 验签 HTTP %s", resp.status_code)
                 return None

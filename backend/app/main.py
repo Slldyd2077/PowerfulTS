@@ -125,6 +125,7 @@ async def lifespan(app: FastAPI):
         settings.steam_openid_return_url,
         settings.steam_openid_realm,
         settings.steam_openid_state_secret,
+        settings.steam_openid_verify_endpoint,
     )
     # TS 监控线程通过此回调读取 Steam 当前游戏（延迟求值 app.state.steam，兼容 admin 热重载）
     app.state.ts3_monitor.set_steam_lookup(

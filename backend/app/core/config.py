@@ -59,6 +59,8 @@ class Settings:
     steam_openid_realm: str
     # 签发 OpenID state 的 HMAC 密钥；留空则用内置默认值（开发够用，生产应显式设置）
     steam_openid_state_secret: str
+    # OpenID 验签端点：国内 ECS 访问 steamcommunity.com 受限时配 CF Worker 反代地址；留空则直连
+    steam_openid_verify_endpoint: str
 
     # ── CORS 允许的前端来源 (逗号分隔; 生产改为实际域名) ──
     cors_origins: list[str]
@@ -86,6 +88,7 @@ def get_settings() -> Settings:
         steam_openid_return_url=os.environ.get("STEAM_OPENID_RETURN_URL", ""),
         steam_openid_realm=os.environ.get("STEAM_OPENID_REALM", ""),
         steam_openid_state_secret=os.environ.get("STEAM_OPENID_STATE_SECRET", ""),
+        steam_openid_verify_endpoint=os.environ.get("STEAM_OPENID_VERIFY_ENDPOINT", ""),
         cors_origins=_parse_origins(
             os.environ.get("CORS_ORIGINS", "http://localhost:5173")
         ),
