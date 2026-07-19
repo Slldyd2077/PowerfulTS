@@ -84,6 +84,7 @@ SPEC: list[dict] = [
     {"key": "steam_openid_return_url", "label": "Steam OpenID 回调地址", "sensitive": False, "reload": "steam"},
     {"key": "steam_openid_realm", "label": "Steam OpenID Realm", "sensitive": False, "reload": "steam"},
     {"key": "steam_openid_state_secret", "label": "Steam state 签名密钥", "sensitive": True, "reload": "steam"},
+    {"key": "steam_openid_verify_endpoint", "label": "Steam OpenID 验签端点(CF Worker)", "sensitive": False, "reload": "steam"},
     {"key": "ts3_host", "label": "TS3 ServerQuery 主机", "sensitive": False, "restart": True},
     {"key": "ts3_query_port", "label": "TS3 ServerQuery 端口", "sensitive": False, "restart": True},
     {"key": "ts3_query_user", "label": "TS3 ServerQuery 用户", "sensitive": False, "restart": True},
@@ -211,6 +212,7 @@ async def _reload_clients(request: Request, db: AsyncSession, kinds: list[str]) 
             await _resolve(db, "steam_openid_return_url"),
             await _resolve(db, "steam_openid_realm"),
             await _resolve(db, "steam_openid_state_secret"),
+            await _resolve(db, "steam_openid_verify_endpoint"),
         )
         logger.info("热重载 SteamClient")
 
