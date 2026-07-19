@@ -1,0 +1,9 @@
+# Netlify 配置：仅部署 Steam 验签反代 Edge Function（不构建/托管前端；前端仍在阿里云 nginx）
+[build]
+  command = ""
+  publish = ""
+
+# Edge Function 路由：/steam-verify -> netlify/edge-functions/steam-verify.ts
+[[edge_functions]]
+  function = "steam-verify"
+  path = "/steam-verify"
