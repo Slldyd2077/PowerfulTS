@@ -26,6 +26,7 @@ from .services.napcat_client import NapCatClient
 from .services.steam_client import SteamClient
 from .services.bot_idle_manager import BotIdleManager
 from .services.bot_player_state import BotPlayerStateStore
+from .services.live_audio import LiveAudioRelay
 from .services.online_notifier import OnlineNotifier
 from .services.tsmusic_client import TSMusicClient
 from .services.ts3_monitor import TS3Monitor
@@ -141,6 +142,7 @@ async def lifespan(app: FastAPI):
         bot_id=settings.tsmusic_bot_id,
         state_store=BotPlayerStateStore(AsyncSessionLocal),
     )
+    app.state.live_audio = LiveAudioRelay()
     # Resolve the client lazily: admin hot reload replaces app.state.tsmusic.
     # Capturing the object here would leave the idle manager using a closed client.
     app.state.bot_idle_manager = BotIdleManager(settings, lambda: app.state.tsmusic)

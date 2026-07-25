@@ -12,7 +12,8 @@ import logging
 import re
 
 import httpx
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -122,6 +123,10 @@ class PlayRequest(BaseModel):
     meta: dict | None = Field(default=None, description="歌曲元数据 {id,name,artist,album,duration,coverUrl,platform}")
 
 
+class LiveAudioStartRequest(BaseModel):
+    mime_type: str = Field(alias="mimeType", min_length=1, max_length=128)
+
+
 class SeekRequest(BaseModel):
     position: int = Field(ge=0, description="跳转到的播放位置（秒）")
 
@@ -222,6 +227,117 @@ async def play(body: PlayRequest, request: Request, tsmusic: TsmusicDep, account
         # 仅回传 moved/reason 给前端，剥离内部 cid/clid（最小信息原则）
         result["follow"] = {"moved": follow.get("moved", False), "reason": follow.get("reason")}
     return result
+
+
+@router.post("/live/start")
+async def start_live_audio(
+    body: LiveAudioStartRequest,
+    request: Request,
+    tsmusic: TsmusicDep,
+    account: AccountDep,
+    bot_id: OwnedBotId = None,
+):
+    """Create a one-use live relay after the browser has granted capture access."""
+    bid = bot_id or tsmusic.bot_id
+    if not bid:
+        raise HTTPException(status_code=400, detail="请先选择音乐机器人")
+    if not body.mime_type.lower().startswith(("audio/", "video/webm")):
+        raise HTTPException(status_code=400, detail="不支持的实时音频格式")
+
+    relay = request.app.state.live_audio
+    session = await relay.create(account.id, bid, body.mime_type)
+    configured_base = settings.live_audio_public_url.strip().rstrip("/")
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
+    proto = forwarded_proto if forwarded_proto in {"http", "https"} else request.url.scheme
+    request_host = request.headers.get("host", request.url.netloc)
+    base = configured_base or f"{proto}://{request_host}".rstrip("/")
+    stream_url = f"{base}/api/music/live/stream/{session.id}"
+    follow = await _ensure_follow(request, tsmusic, account, bid)
+    try:
+        result = await tsmusic.start_live_audio(
+            stream_url,
+            body.mime_type,
+            bot_id=bid,
+            title=f"{account.ts_nickname} 的电脑音频",
+        )
+    except httpx.HTTPStatusError as exc:
+        await relay.close(session.id)
+        if exc.response.status_code == 404:
+            raise HTTPException(
+                status_code=501,
+                detail="当前 TSMusicBot 不支持实时输入，请更新到带 /api/player/:botId/live 接口的版本",
+            ) from exc
+        raise HTTPException(status_code=502, detail="音乐机器人未能启动实时播放") from exc
+    except httpx.HTTPError as exc:
+        await relay.close(session.id)
+        raise HTTPException(status_code=502, detail="无法连接音乐机器人") from exc
+    return {
+        "ok": True,
+        "sessionId": session.id,
+        "uploadPath": f"/api/music/live/{session.id}/upload",
+        "follow": {"moved": follow.get("moved", False), "reason": follow.get("reason")},
+        "upstream": result,
+    }
+
+
+@router.websocket("/live/{session_id}/upload")
+async def upload_live_audio(websocket: WebSocket, session_id: str):
+    """Receive MediaRecorder chunks; the random short-lived id is the capability."""
+    relay = websocket.app.state.live_audio
+    session = await relay.attach_upload(session_id)
+    if session is None:
+        await websocket.close(code=4404, reason="直播会话不存在或已连接")
+        return
+    await websocket.accept()
+    try:
+        while True:
+            chunk = await websocket.receive_bytes()
+            if len(chunk) > 2 * 1024 * 1024:
+                await websocket.close(code=4400, reason="音频分片过大")
+                break
+            if not await relay.push(session_id, chunk):
+                await websocket.close(code=4410, reason="实时音频消费者已断开")
+                break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        closed = await relay.close(session_id)
+        if closed is not None:
+            try:
+                await websocket.app.state.tsmusic.stop(bot_id=closed.bot_id)
+            except Exception:
+                logger.warning("停止实时音频 bot 失败: %s", closed.bot_id, exc_info=True)
+
+
+@router.get("/live/stream/{session_id}")
+async def consume_live_audio(request: Request, session_id: str):
+    """Private, single-consumer capability URL used by TSMusicBot/FFmpeg."""
+    session = await request.app.state.live_audio.get(session_id)
+    if session is None or session.closed:
+        raise HTTPException(status_code=404, detail="直播会话不存在")
+    return StreamingResponse(
+        request.app.state.live_audio.stream(session_id),
+        media_type=session.mime_type,
+        headers={"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/live/{session_id}/stop")
+async def stop_live_audio(
+    session_id: str,
+    request: Request,
+    tsmusic: TsmusicDep,
+    account: AccountDep,
+):
+    session = await request.app.state.live_audio.get(session_id)
+    if session is None:
+        return {"ok": True, "stopped": False}
+    if session.account_id != account.id:
+        raise HTTPException(status_code=403, detail="无权停止此直播")
+    closed = await request.app.state.live_audio.close(session_id)
+    if closed is not None:
+        await tsmusic.stop(bot_id=closed.bot_id)
+    return {"ok": True, "stopped": closed is not None}
 
 
 @router.post("/pause")

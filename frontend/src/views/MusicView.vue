@@ -4,6 +4,7 @@ import MusicPlayer from '@/components/music/MusicPlayer.vue'
 import BotManager from '@/components/music/BotManager.vue'
 import PlatformAccounts from '@/components/music/PlatformAccounts.vue'
 import MyMusic from '@/components/music/MyMusic.vue'
+import LiveAudioShare from '@/components/music/LiveAudioShare.vue'
 </script>
 
 <template>
@@ -17,6 +18,7 @@ import MyMusic from '@/components/music/MyMusic.vue'
 
     <div class="music-grid">
       <div class="music-main">
+        <LiveAudioShare />
         <MusicSearch />
         <MyMusic />
       </div>

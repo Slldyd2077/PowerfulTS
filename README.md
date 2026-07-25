@@ -42,6 +42,7 @@
 | 🎮 游戏统计 | ✅ | 各游戏实时人数分布 |
 | 📡 频道列表 | ✅ | 频道树浏览 |
 | 🎵 音乐中心 | ✅ | 搜索 · 点歌 · 队列 · 音量 · 播放模式（网易云 / QQ / 酷狗） |
+| 📡 电脑音频直播 | ✅ | 用户主动选择应用/屏幕并授权后，通过音乐机器人实时共享音频 |
 | 🎬 Bilibili | ✅ | 番剧 / 视频浏览与点播（TSMusicBot 多平台） |
 | 🔐 平台账号 | ✅ | 网易云 / QQ / 酷狗 扫码登录（解锁 VIP / 个人歌单） |
 | 📱 QQ通知 | ✅ | 通过 NapCat/OneBot 实现QQ好友上线通知（需配置 NapCat） |
@@ -237,6 +238,7 @@ pnpm build                    # 输出到 dist/，可用任意静态服务器（
 | `TSMUSIC_USER` | ✅ | TSMusicBot WebUI 登录账号 | — |
 | `TSMUSIC_PASSWORD` | ✅ | TSMusicBot WebUI 登录密码 | — |
 | `TSMUSIC_BOT_ID` | ✅ | 默认操作的 bot 实例 id | — |
+| `LIVE_AUDIO_PUBLIC_URL` | — | TSMusicBot 可访问的 PowerfulTS 后端地址；跨 Docker 网络时配置 | 从当前请求推断 |
 | `TS3_HOST` | ✅ | TS3 服务端地址（容器内用 `host.docker.internal`） | `127.0.0.1` |
 | `TS3_QUERY_PORT` | ✅ | ServerQuery 端口 | `10011` |
 | `TS3_QUERY_USER` | ✅ | ServerQuery 账号 | — |
@@ -315,6 +317,15 @@ PowerfulTS 本身不含 TS3 服务端与音乐引擎，需接入两个上游：
 - 开屏先尝试有声播放；若被浏览器拦截，则**静音播放**（频谱随之贴底静止）并在左下角显示 🔇 按钮，点击即可开声。
 - 左下角按钮支持**悬停展开音量滑块**：频谱高度随音量**等比例**变化——默认 40% 为基准，往上拖更高、往下更矮，**静音或拖到 0 时频谱贴底不动**；音量自动记忆，下次进入恢复。
 - 频谱在**首次与页面交互**（动鼠标 / 点击 / 按键）后才会切换为真实音频律动——这是 `AudioContext` 的浏览器限制。
+
+### 电脑音频实时共享
+
+音乐中心的「共享电脑音频」只会在用户点击按钮后调用浏览器的屏幕共享选择器。选择网易云等应用窗口并勾选「共享音频」后，浏览器才会将音频实时发送给当前音乐机器人；停止系统共享、切换机器人或离开页面都会自动断开。
+
+- 生产环境需要 HTTPS（localhost 开发环境除外），建议使用最新版 Chrome / Edge。
+- 优先选择单个应用窗口。共享整个屏幕可能把 TeamSpeak 的声音再次录入，造成回声。
+- TSMusicBot 需要包含 `POST /api/player/:botId/live` 实时流入口。
+- 如果 TSMusicBot 无法通过浏览器访问的域名反向连接 PowerfulTS，可将 `LIVE_AUDIO_PUBLIC_URL` 设置为它能访问的后端地址，例如 `http://host.docker.internal:8001`。
 - 目录为空时，频谱回退为模拟律动，不影响正常使用。
 
 ### Docker 部署挂载音乐
