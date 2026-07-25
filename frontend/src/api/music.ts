@@ -63,6 +63,23 @@ export async function playMusic(query: string, queue = false, platform?: string,
   return data
 }
 
+export interface LiveAudioSession {
+  ok: boolean
+  sessionId: string
+  uploadPath: string
+}
+
+/** Start the server-side half of a user-authorized live capture session. */
+export async function startLiveAudio(mimeType: string, botId: string): Promise<LiveAudioSession> {
+  const { data } = await apiClient.post('/music/live/start', { mimeType }, { params: { botId } })
+  return data
+}
+
+export async function stopLiveAudio(sessionId: string) {
+  const { data } = await apiClient.post(`/music/live/${sessionId}/stop`)
+  return data
+}
+
 /** 暂停 */
 export async function pauseMusic(botId?: string) {
   const { data } = await apiClient.post('/music/pause', undefined, botId ? { params: { botId } } : undefined)

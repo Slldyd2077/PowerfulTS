@@ -47,6 +47,9 @@ class Settings:
     tsmusic_user: str
     tsmusic_password: str
     tsmusic_bot_id: str
+    # Optional URL that TSMusicBot can use to pull the browser live stream.
+    # Empty = infer it from the incoming PowerfulTS request (works for most installs).
+    live_audio_public_url: str
 
     # ── NapCat QQ 机器人 (HTTP API, 好友上线提醒推送; 未配置则不推送) ──
     napcat_url: str
@@ -82,6 +85,7 @@ def get_settings() -> Settings:
         tsmusic_user=os.environ.get("TSMUSIC_USER", ""),
         tsmusic_password=os.environ.get("TSMUSIC_PASSWORD", ""),
         tsmusic_bot_id=os.environ.get("TSMUSIC_BOT_ID", ""),
+        live_audio_public_url=os.environ.get("LIVE_AUDIO_PUBLIC_URL", ""),
         napcat_url=os.environ.get("NAPCAT_URL", "http://127.0.0.1:3000"),
         napcat_token=os.environ.get("NAPCAT_TOKEN", ""),
         steam_api_key=os.environ.get("STEAM_API_KEY", ""),

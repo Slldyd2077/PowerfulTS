@@ -427,6 +427,25 @@ class TSMusicClient:
             self._cache_meta(meta, platform)
         return await self._persist_after(self._json(resp), bid)
 
+    async def start_live_audio(
+        self,
+        stream_url: str,
+        mime_type: str,
+        bot_id: str | None = None,
+        title: str = "电脑音频直播",
+    ) -> dict:
+        """Ask a compatible TSMusicBot to pull and play a live HTTP audio stream."""
+        await self._ensure_login()
+        bid = self._bid(bot_id)
+        await self.ensure_player_ready(bid)
+        resp = await self._http.post(
+            f"/api/player/{bid}/live",
+            json={"url": stream_url, "mimeType": mime_type, "title": title},
+        )
+        # A 404 means the deployed TSMusicBot predates live-input support.
+        resp.raise_for_status()
+        return self._json(resp)
+
     async def pause(self, bot_id: str | None = None) -> dict:
         await self._ensure_login()
         resp = await self._http.post(f"/api/player/{self._bid(bot_id)}/pause")
