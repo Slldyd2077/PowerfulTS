@@ -500,7 +500,7 @@ async function handleRegister() {
 
       <!-- 品牌层 -->
       <div class="brand-layer">
-        <img class="brand-logo" src="/logo-mark.jpg" alt="PowerfulTS" />
+        <img class="brand-logo" :src="'/logo-mark.jpg'" alt="PowerfulTS" />
         <h1 class="brand-title">
           <span class="brand-title-line">Powerful</span>
           <span class="brand-title-line brand-title-accent">TS</span>
