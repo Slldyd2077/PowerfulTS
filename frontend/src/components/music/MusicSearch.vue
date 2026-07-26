@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { useMusicStore } from '@/stores/music'
+import { useTsPlaylistStore } from '@/stores/ts_playlist'
 import { ElMessage } from 'element-plus'
 import EqualizerBars from '@/components/music/EqualizerBars.vue'
 import type { Song } from '@/api/music'
 
 const music = useMusicStore()
+const ts = useTsPlaylistStore()
 const keyword = ref('')
 // 封面加载失败回退（B 站等封面偶尔因防盗链 / 域名失效而 404，避免破损图标）
 const brokenCovers = reactive(new Set<string>())
@@ -190,6 +192,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
         </div>
 
         <div class="song-actions">
+          <button class="act" title="收藏到 TS 歌单" @click="ts.openFavorite(song)">
+            <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A4.5 4.5 0 0 0 17.5 4c-1.42 0-2.6.62-3.5 1.67C13.1 4.62 11.92 4 10.5 4A4.5 4.5 0 0 0 6 8.5c0 2.29 1.51 4.04 3 5.5l5 5z"/></svg>
+          </button>
           <button class="act act--play" title="播放" @click="handlePlay(song, false)">
             <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>
           </button>

@@ -5,6 +5,11 @@ import BotManager from '@/components/music/BotManager.vue'
 import PlatformAccounts from '@/components/music/PlatformAccounts.vue'
 import MyMusic from '@/components/music/MyMusic.vue'
 import LiveAudioShare from '@/components/music/LiveAudioShare.vue'
+import TsPlaylists from '@/components/music/TsPlaylists.vue'
+import AddToTsPlaylistDialog from '@/components/music/AddToTsPlaylistDialog.vue'
+import { useTsPlaylistStore } from '@/stores/ts_playlist'
+
+const ts = useTsPlaylistStore()
 </script>
 
 <template>
@@ -20,6 +25,7 @@ import LiveAudioShare from '@/components/music/LiveAudioShare.vue'
       <div class="music-main">
         <LiveAudioShare />
         <MusicSearch />
+        <TsPlaylists />
         <MyMusic />
       </div>
 
@@ -29,6 +35,8 @@ import LiveAudioShare from '@/components/music/LiveAudioShare.vue'
         <PlatformAccounts />
       </div>
     </div>
+
+    <AddToTsPlaylistDialog :visible="ts.favoriteVisible" :song="ts.favoriteSong" @update:visible="ts.favoriteVisible = $event" />
   </div>
 </template>
 
