@@ -1,3 +1,14 @@
+## v0.10.0 (2026-07-27)
+
+### Feat
+
+- **Steam 集成**：OpenID 跳转绑定 Steam 账号，查看自己与好友的 Steam 在线状态、共同游戏、游戏时长排行榜；TS3 监控联动显示好友当前在玩的 Steam 游戏。
+- Steam OpenID 验签支持配置 Cloudflare Worker / Netlify Edge Function 反代端点，绕过国内 steamcommunity.com 封锁。
+
+### Fix
+
+- **共享 Bot 状态自动同步**：BotManager 定时轮询刷新 bot 列表状态（轻量 refreshBotsStatus 原地合并），其他用户启停/播放 bot 后无需手动刷新即可看到变化。
+
 ## v0.9.0 (2026-07-26)
 
 ### Feat
