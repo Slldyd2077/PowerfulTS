@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
 import { useMusicStore } from '@/stores/music'
+import { useTsPlaylistStore } from '@/stores/ts_playlist'
 import { ElMessage } from 'element-plus'
 import EqualizerBars from '@/components/music/EqualizerBars.vue'
 import SongRow from '@/components/music/SongRow.vue'
 import type { Song, Playlist } from '@/api/music'
 
 const music = useMusicStore()
+const ts = useTsPlaylistStore()
 
 const myPlatforms = [
   { value: 'netease', label: '网易云', color: '#e60026' },
@@ -199,7 +201,7 @@ async function handlePlay(song: Song, queued = false) {
                     v-for="s in (music.playlistSongs[pl.id] || [])"
                     :key="s.id"
                     :song="s"
-                    @play="handlePlay"
+                    @play="handlePlay" @favorite="ts.openFavorite"
                   />
                 </div>
               </div>
@@ -219,7 +221,7 @@ async function handlePlay(song: Song, queued = false) {
               <EqualizerBars class="loading-eq" :active="true" /><span>加载中…</span>
             </div>
             <div v-else-if="music.bilibiliPopular.length === 0" class="no-data">暂无热门视频</div>
-            <SongRow v-for="s in music.bilibiliPopular" :key="s.id" :song="s" @play="handlePlay" />
+            <SongRow v-for="s in music.bilibiliPopular" :key="s.id" :song="s" @play="handlePlay" @favorite="ts.openFavorite" />
           </div>
         </section>
       </template>
@@ -276,7 +278,7 @@ async function handlePlay(song: Song, queued = false) {
                     v-for="s in (music.playlistSongs[pl.id] || [])"
                     :key="s.id"
                     :song="s"
-                    @play="handlePlay"
+                    @play="handlePlay" @favorite="ts.openFavorite"
                   />
                 </div>
               </div>
@@ -296,7 +298,7 @@ async function handlePlay(song: Song, queued = false) {
               <EqualizerBars class="loading-eq" :active="true" /><span>加载中…</span>
             </div>
             <div v-else-if="recommend.length === 0" class="no-data">暂无推荐</div>
-            <SongRow v-for="s in recommend" :key="s.id" :song="s" @play="handlePlay" />
+            <SongRow v-for="s in recommend" :key="s.id" :song="s" @play="handlePlay" @favorite="ts.openFavorite" />
           </div>
         </section>
 
@@ -316,7 +318,7 @@ async function handlePlay(song: Song, queued = false) {
               <EqualizerBars class="loading-eq" :active="true" /><span>加载中…</span>
             </div>
             <div v-else-if="fm.length === 0" class="no-data">暂无歌曲</div>
-            <SongRow v-for="s in fm" :key="s.id" :song="s" @play="handlePlay" />
+            <SongRow v-for="s in fm" :key="s.id" :song="s" @play="handlePlay" @favorite="ts.openFavorite" />
           </div>
         </section>
       </template>

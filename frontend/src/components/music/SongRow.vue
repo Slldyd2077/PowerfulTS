@@ -5,6 +5,7 @@ import type { Song } from '@/api/music'
 defineProps<{ song: Song }>()
 const emit = defineEmits<{
   (e: 'play', song: Song, queued: boolean): void
+  (e: 'favorite', song: Song): void
 }>()
 
 // 单行封面失败回退（歌曲 URL 固定，失败一次回退即可；组件随 v-for key 重建时自动重置）
@@ -43,6 +44,9 @@ function fmt(sec?: number): string {
     <span v-if="song.duration" class="song-dur mono">{{ fmt(song.duration) }}</span>
 
     <div class="song-actions">
+      <button class="act" title="收藏到 TS 歌单" @click="emit('favorite', song)">
+        <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A4.5 4.5 0 0 0 17.5 4c-1.42 0-2.6.62-3.5 1.67C13.1 4.62 11.92 4 10.5 4A4.5 4.5 0 0 0 6 8.5c0 2.29 1.51 4.04 3 5.5l5 5z"/></svg>
+      </button>
       <button class="act act--play" title="播放" @click="emit('play', song, false)">
         <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>
       </button>

@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from ._version import __version__
 from .core.config import get_settings
 from .core.database import AsyncSessionLocal, dispose_db, init_db
-from .routers import admin, auth, bilibili, friends, intro_music, monitor, music, steam
+from .routers import admin, auth, bilibili, friends, intro_music, monitor, music, steam, ts_playlist
 from .services.netease import NeteaseClient
 from .services.napcat_client import NapCatClient
 from .services.steam_client import SteamClient
@@ -198,6 +198,8 @@ app.include_router(friends.router, prefix="/api")
 app.include_router(intro_music.router, prefix="/api")
 # Steam 集成：/api/steam/*（OpenID 绑定 + 好友在线状态 + 共同游戏 + 时长排行）
 app.include_router(steam.router, prefix="/api")
+# TS 专属歌单：/api/ts-playlists/*（跨平台混合收藏）
+app.include_router(ts_playlist.router, prefix="/api")
 # 管理后台：/api/admin/*（RBAC：仅 admin）
 app.include_router(admin.router, prefix="/api")
 
