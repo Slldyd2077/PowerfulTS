@@ -538,6 +538,34 @@ export const useMusicStore = defineStore('music', () => {
     void fetchOwnPlatformStatus()
   }
 
+  /** 轻量刷新 bot 列表的在线/播放/共享状态（原地按 id 合并）。
+   *  不清空数组、不动 activeBotId、不级联 profile/avatar/quality/平台状态——
+   *  专供轮询使用，避免 fetchBots 的级联副作用（列表与选中态闪烁、头像重建、~10 个旁路请求）。
+   *  这样其他用户对 bot 的启停/播放操作能在一次轮询周期内同步到本端。 */
+  async function refreshBotsStatus() {
+    try {
+      const res = await apiGetBots()
+      const incoming = res.bots || []
+      const byId = new Map(bots.value.map((b) => [b.id, b]))
+      for (const nb of incoming) {
+        const cur = byId.get(nb.id)
+        if (cur) {
+          // 原地更新可变字段（在线/播放/共享关系）
+          cur.status = nb.status
+          cur.playing = nb.playing
+          cur.paused = nb.paused
+          cur.shared = nb.shared
+          cur.ownerNickname = nb.ownerNickname
+          cur.sharePlaylists = nb.sharePlaylists
+        } else {
+          bots.value.push(nb) // 新出现的 bot（新建/被共享）追加
+        }
+      }
+    } catch {
+      /* 静默：轮询失败不影响现有展示 */
+    }
+  }
+
   /** 切换 active bot：持久化 + 清旧 bot 播放态 + 拉新 bot */
   async function setActiveBot(id: string) {
     botGen++ // 作废所有 in-flight 轮询，防旧 bot 状态闪现
@@ -782,6 +810,7 @@ export const useMusicStore = defineStore('music', () => {
     fetchBilibiliPopular,
     enqueueAll,
     fetchBots,
+    refreshBotsStatus,
     setActiveBot,
     createBot,
     startBot,
