@@ -6,6 +6,7 @@ import type { BotInfo, BotCreate } from '@/api/music'
 import { shareBot, unshareBot, getMyShares, updateBot, getBotConfig, type MyShare } from '@/api/music'
 import { getFriends, type Friend } from '@/api/social'
 import BotBehaviorPanel from './BotBehaviorPanel.vue'
+import { usePolling } from '@/composables/usePolling'
 
 const music = useMusicStore()
 
@@ -208,8 +209,11 @@ const botNameById = computed(() => {
   return m
 })
 
+// 轮询轻量刷新 bot 列表状态（在线/播放/共享），使其他用户对 bot 的启停/播放操作能自动同步到本端。
+// 用 refreshBotsStatus 而非 fetchBots：后者每轮会清空列表/重建头像/级联 ~10 个旁路请求，导致闪烁与上游压力。
+usePolling(music.refreshBotsStatus, 10000)
+
 onMounted(() => {
-  music.fetchBots()
   music.fetchFollowSetting()
   fetchMyShares()
 })
