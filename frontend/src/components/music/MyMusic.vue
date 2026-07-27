@@ -5,6 +5,7 @@ import { useTsPlaylistStore } from '@/stores/ts_playlist'
 import { ElMessage } from 'element-plus'
 import EqualizerBars from '@/components/music/EqualizerBars.vue'
 import SongRow from '@/components/music/SongRow.vue'
+import TsPlaylists from '@/components/music/TsPlaylists.vue'
 import type { Song, Playlist } from '@/api/music'
 
 const music = useMusicStore()
@@ -24,6 +25,7 @@ function onCoverError(url?: string) {
 }
 
 const expandedPlaylist = ref<string | null>(null)
+const showTsTab = ref(false)
 const openSections = reactive<Record<string, boolean>>({ playlists: true, recommend: false, fm: false, biliPopular: true })
 
 const active = computed(() => music.myActivePlatform)
@@ -42,11 +44,17 @@ function selectPlatform(value: 'netease' | 'qq' | 'bilibili' | 'kugou') {
     ElMessage.info('请先在右侧「平台账号」登录该平台')
     return
   }
+  showTsTab.value = false
   if (value !== music.myActivePlatform) {
     music.myActivePlatform = value
     brokenCovers.clear()
     expandedPlaylist.value = null
   }
+}
+
+/** TS 歌单 tab（与 4 平台并列，无需登录） */
+function selectTsTab() {
+  showTsTab.value = true
 }
 
 /** 加载当前平台内容（歌单懒加载；网易云/QQ 需登录） */
@@ -139,23 +147,28 @@ async function handlePlay(song: Song, queued = false) {
       </div>
     </div>
 
-    <!-- 平台 tab -->
+    <!-- 平台 tab（含 TS 歌单） -->
     <div class="platform-tabs">
       <button
         v-for="p in myPlatforms"
         :key="p.value"
         class="platform-tab"
-        :class="{ active: active === p.value, disabled: p.value !== 'bilibili' && !music.platformStatus[p.value]?.loggedIn }"
+        :class="{ active: !showTsTab && active === p.value, disabled: p.value !== 'bilibili' && !music.platformStatus[p.value]?.loggedIn }"
         @click="selectPlatform(p.value)"
       >
         <span class="pt-label">{{ p.label }}</span>
         <span v-if="p.value !== 'bilibili' && !music.platformStatus[p.value]?.loggedIn" class="pt-lock">未登录</span>
       </button>
+      <button class="platform-tab" :class="{ active: showTsTab }" @click="selectTsTab">
+        <span class="pt-label">TS 歌单</span>
+      </button>
     </div>
 
     <div class="my-content">
+      <!-- TS 歌单（独立于 4 平台，无需登录） -->
+      <TsPlaylists v-if="showTsTab" />
       <!-- B站：收藏夹（登录后）+ 热门视频 -->
-      <template v-if="active === 'bilibili'">
+      <template v-else-if="active === 'bilibili'">
         <!-- 我的收藏夹 -->
         <section v-if="isLoggedIn" class="section">
           <div class="section-head" @click="openSections.playlists = !openSections.playlists">
