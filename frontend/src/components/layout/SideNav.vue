@@ -46,7 +46,7 @@ function navigate(key: string) {
     <!-- 品牌 -->
     <div class="nav-brand">
       <div class="brand-logo">
-        <img :src="'/logo-mark.jpg'" alt="PowerfulTS" width="26" height="26" />
+        <img :src="'/logo-mark.png'" alt="PowerfulTS" width="26" height="26" />
       </div>
       <div class="brand-text">
         <span class="brand-kicker label-mono">PowerfulTS</span>
