@@ -44,3 +44,7 @@ backend/data/intro-music/*
 
 # Claude Code 本地配置
 .claude/
+
+# 本地素材与草稿：宣传视频（数百 MB）与文案脚本，不入仓库
+video/
+script/
