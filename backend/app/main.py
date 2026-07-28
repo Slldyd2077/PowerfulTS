@@ -27,6 +27,8 @@ from .services.steam_client import SteamClient
 from .services.bot_idle_manager import BotIdleManager
 from .services.bot_player_state import BotPlayerStateStore
 from .services.live_audio import LiveAudioRelay
+from .services.voice_bot import VoiceBotManager
+from .services.voice_downlink import VoiceDownlinkTickets
 from .services.online_notifier import OnlineNotifier
 from .services.tsmusic_client import TSMusicClient
 from .services.ts3_monitor import TS3Monitor
@@ -143,6 +145,9 @@ async def lifespan(app: FastAPI):
         state_store=BotPlayerStateStore(AsyncSessionLocal),
     )
     app.state.live_audio = LiveAudioRelay()
+    app.state.voice_downlink = VoiceDownlinkTickets()
+    # 同样解析 tsmusic：admin 热重载会换掉 app.state.tsmusic。
+    app.state.voice_bots = VoiceBotManager(lambda: app.state.tsmusic)
     # Resolve the client lazily: admin hot reload replaces app.state.tsmusic.
     # Capturing the object here would leave the idle manager using a closed client.
     app.state.bot_idle_manager = BotIdleManager(settings, lambda: app.state.tsmusic)
@@ -173,7 +178,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="PowerfulTS Backend",
     version=__version__,
-    description="TS3 监控面板后端 — 原生 TS3 直连 + TSMusicBot 多媒体代理",
+    description="TS3 管理面板后端 — 原生 TS3 直连 + TSMusicBot 多媒体代理",
     lifespan=lifespan,
 )
 

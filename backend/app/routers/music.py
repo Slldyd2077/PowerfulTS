@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 import asyncio
 import logging
@@ -13,6 +13,7 @@ import re
 
 import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, Response, WebSocket, WebSocketDisconnect
+from websockets.exceptions import InvalidHandshake
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -23,7 +24,8 @@ from ..core.database import get_db
 from ..deps import AccountDep, AdminDep, TsmusicDep, get_current_account
 from ..models import Account, BotOwnership, BotShare, Friend
 from ..services import bot_mover
-from ..services.tsmusic_client import TSMusicClient
+from ..services.tsmusic_client import TSMusicClient, TSMusicUnavailable
+from ..services.voice_bot import VoiceBotError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/music", tags=["music"])
@@ -125,6 +127,7 @@ class PlayRequest(BaseModel):
 
 class LiveAudioStartRequest(BaseModel):
     mime_type: str = Field(alias="mimeType", min_length=1, max_length=128)
+    source: Literal["computer", "microphone"] = "computer"
 
 
 class SeekRequest(BaseModel):
@@ -229,36 +232,30 @@ async def play(body: PlayRequest, request: Request, tsmusic: TsmusicDep, account
     return result
 
 
-@router.post("/live/start")
-async def start_live_audio(
-    body: LiveAudioStartRequest,
+async def _open_live_relay(
     request: Request,
-    tsmusic: TsmusicDep,
-    account: AccountDep,
-    bot_id: OwnedBotId = None,
-):
-    """Create a one-use live relay after the browser has granted capture access."""
-    bid = bot_id or tsmusic.bot_id
-    if not bid:
-        raise HTTPException(status_code=400, detail="请先选择音乐机器人")
-    if not body.mime_type.lower().startswith(("audio/", "video/webm")):
+    tsmusic: TSMusicClient,
+    account: Account,
+    bid: str,
+    mime_type: str,
+    title: str,
+    follow: dict,
+) -> dict:
+    """Wire a browser capture session to a bot's live input. Shared by 电脑音频 and 网页通话。"""
+    if not mime_type.lower().startswith(("audio/", "video/webm")):
         raise HTTPException(status_code=400, detail="不支持的实时音频格式")
 
     relay = request.app.state.live_audio
-    session = await relay.create(account.id, bid, body.mime_type)
+    session = await relay.create(account.id, bid, mime_type)
     configured_base = settings.live_audio_public_url.strip().rstrip("/")
     forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
     proto = forwarded_proto if forwarded_proto in {"http", "https"} else request.url.scheme
     request_host = request.headers.get("host", request.url.netloc)
     base = configured_base or f"{proto}://{request_host}".rstrip("/")
     stream_url = f"{base}/api/music/live/stream/{session.id}"
-    follow = await _ensure_follow(request, tsmusic, account, bid)
     try:
         result = await tsmusic.start_live_audio(
-            stream_url,
-            body.mime_type,
-            bot_id=bid,
-            title=f"{account.ts_nickname} 的电脑音频",
+            stream_url, mime_type, bot_id=bid, title=title,
         )
     except httpx.HTTPStatusError as exc:
         await relay.close(session.id)
@@ -278,6 +275,61 @@ async def start_live_audio(
         "follow": {"moved": follow.get("moved", False), "reason": follow.get("reason")},
         "upstream": result,
     }
+
+
+@router.post("/live/start")
+async def start_live_audio(
+    body: LiveAudioStartRequest,
+    request: Request,
+    tsmusic: TsmusicDep,
+    account: AccountDep,
+    bot_id: OwnedBotId = None,
+):
+    """Create a one-use live relay after the browser has granted capture access."""
+    bid = bot_id or tsmusic.bot_id
+    if not bid:
+        raise HTTPException(status_code=400, detail="请先选择音乐机器人")
+    title = (
+        f"{account.ts_nickname} 的麦克风"
+        if body.source == "microphone"
+        else f"{account.ts_nickname} 的电脑音频"
+    )
+    follow = await _ensure_follow(request, tsmusic, account, bid)
+    return await _open_live_relay(
+        request, tsmusic, account, bid, body.mime_type, title, follow,
+    )
+
+
+class VoiceMicRequest(BaseModel):
+    mime_type: str = Field(alias="mimeType", min_length=1, max_length=128)
+
+
+@router.post("/voice/mic/start")
+async def start_voice_microphone(
+    body: VoiceMicRequest,
+    request: Request,
+    tsmusic: TsmusicDep,
+    account: AccountDep,
+    db: AsyncSession = Depends(get_db),
+):
+    """网页通话的麦克风上行。
+
+    没有复用 /live/start：那条路要 OwnedBotId，而通话 bot 刻意不写 bot_ownerships
+    （否则会混进音乐实例列表），会被自己的权限检查判 403。这里直接按账号解析通话 bot。
+
+    也刻意不做「跟随」：跟随会把 bot 拽到用户 TS 客户端所在频道，把网页上刚选好的
+    频道覆盖掉——网页通话里用户的选择才是准的。
+    """
+    bid = await _voice_bot_id(request, account, db)
+    return await _open_live_relay(
+        request,
+        tsmusic,
+        account,
+        bid,
+        body.mime_type,
+        f"{account.ts_nickname} 的网页麦克风",
+        {"moved": False, "reason": "voice_call"},
+    )
 
 
 @router.websocket("/live/{session_id}/upload")
@@ -338,6 +390,173 @@ async def stop_live_audio(
     if closed is not None:
         await tsmusic.stop(bot_id=closed.bot_id)
     return {"ok": True, "stopped": closed is not None}
+
+
+async def _voice_bot_id(request: Request, account: Account, db: AsyncSession) -> str:
+    """当前账号已开通的通话 bot；没有则 409（提示先加入通话）。"""
+    bid = await request.app.state.voice_bots.current_bot_id(db, account.id)
+    if not bid:
+        raise HTTPException(status_code=409, detail="请先加入通话")
+    return bid
+
+
+@router.post("/voice/session")
+async def open_voice_session(
+    request: Request,
+    account: AccountDep,
+    db: AsyncSession = Depends(get_db),
+):
+    """按需开通本账号的通话 bot（以自己的昵称进入服务器）并等它连上。"""
+    try:
+        return {"ok": True, **await request.app.state.voice_bots.acquire(db, account)}
+    except VoiceBotError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/voice/session/stop")
+async def close_voice_session(
+    request: Request,
+    account: AccountDep,
+    db: AsyncSession = Depends(get_db),
+):
+    """挂断：让通话 bot 立刻离开服务器。"""
+    bid = await request.app.state.voice_bots.current_bot_id(db, account.id)
+    if bid:
+        await request.app.state.voice_bots.release_now(account.id, bid)
+    return {"ok": True, "stopped": bool(bid)}
+
+
+@router.post("/voice/start")
+async def start_voice_downlink(
+    request: Request,
+    account: AccountDep,
+    db: AsyncSession = Depends(get_db),
+):
+    """Issue a one-use capability for an authenticated browser listener."""
+    bid = await _voice_bot_id(request, account, db)
+    ticket = await request.app.state.voice_downlink.create(account.id, bid)
+    return {
+        "ok": True,
+        "sessionId": ticket.id,
+        "streamPath": f"/api/music/voice/{ticket.id}/stream",
+        "expiresIn": 30,
+    }
+
+
+class VoiceChannelRequest(BaseModel):
+    cid: int = Field(ge=1)
+    password: str = Field(default="", max_length=128)
+
+
+@router.get("/voice/channels")
+async def voice_channels(
+    request: Request,
+    tsmusic: TsmusicDep,
+    account: AccountDep,
+    db: AsyncSession = Depends(get_db),
+):
+    """频道树 + 各频道在场成员 + 自己的通话 bot 当前所在频道。
+
+    还没加入通话时不该报错——频道列表本身是可以先看的，只是没有「当前频道」。
+    """
+    bid = await request.app.state.voice_bots.current_bot_id(db, account.id)
+    bot_clid = await tsmusic.get_bot_client_id(bid) if bid else None
+    overview = request.app.state.ts3_monitor.get_voice_overview(bot_clid)
+    overview["botOnline"] = bot_clid is not None
+    return overview
+
+
+@router.post("/voice/channel")
+async def move_voice_channel(
+    body: VoiceChannelRequest,
+    request: Request,
+    tsmusic: TsmusicDep,
+    account: AccountDep,
+    db: AsyncSession = Depends(get_db),
+):
+    """把自己的通话 bot 移到目标频道；频道有密码时由 body.password 提供。"""
+    bid = await _voice_bot_id(request, account, db)
+    if await tsmusic.get_bot_client_id(bid) is None:
+        raise HTTPException(status_code=409, detail="通话机器人不在线，请重新加入通话")
+    result = await tsmusic.join_channel(body.cid, body.password, bot_id=bid)
+    if not result["ok"]:
+        # 密码错误是用户能自己纠正的输入问题，其余归为上游/权限问题。
+        status = 403 if result.get("invalid_password") else 502
+        raise HTTPException(status_code=status, detail=result["detail"])
+    return {"ok": True, "cid": body.cid}
+
+
+# 4000-4999 是 WebSocket 应用自定义关闭码，code 与 reason 都会原样送达浏览器。
+VOICE_CLOSE_TICKET_INVALID = 4404
+VOICE_CLOSE_UPSTREAM_UNSUPPORTED = 4502
+VOICE_CLOSE_UPSTREAM_UNREACHABLE = 4503
+VOICE_CLOSE_UPSTREAM_ERROR = 1011
+
+
+def voice_close_for(error: BaseException) -> tuple[int, str]:
+    """把上游异常翻译成浏览器可直接展示的关闭码 + 原因。
+
+    分三档是因为前端的应对方式不同：
+    - 4502 升级被拒 = TSMusicBot 没有 /api/voice/downlink，重连多少次都一样，直接收手；
+    - 4503 连不上（登录就失败/连接被拒）= 通常是没起来或在重启，值得有限次重连；
+    - 1011 其它 = 流中途出错，退避重连。
+    """
+    if isinstance(error, InvalidHandshake):
+        return VOICE_CLOSE_UPSTREAM_UNSUPPORTED, "音乐机器人未提供频道语音下行（版本过旧）"
+    if isinstance(error, (TSMusicUnavailable, httpx.HTTPError, OSError)):
+        return VOICE_CLOSE_UPSTREAM_UNREACHABLE, "连不上音乐机器人（未运行或地址不通）"
+    return VOICE_CLOSE_UPSTREAM_ERROR, "上游语音连接中断"
+
+
+async def _pump_voice_downlink(websocket: WebSocket, bot_id: str) -> None:
+    async for packet in websocket.app.state.tsmusic.voice_packets(bot_id):
+        if len(packet) <= 64 * 1024:
+            await websocket.send_bytes(packet)
+
+
+async def _await_client_gone(websocket: WebSocket) -> None:
+    """纯粹为了观察浏览器断开。
+
+    下行是单向的，一个字节都不用收；但只要不 receive()，Starlette 就永远看不到
+    websocket.disconnect，上游那条 TSMusicBot WS 会随着每个关掉的标签页越积越多。
+    """
+    while True:
+        message = await websocket.receive()
+        if message["type"] == "websocket.disconnect":
+            return
+
+
+@router.websocket("/voice/{ticket_id}/stream")
+async def stream_voice_downlink(websocket: WebSocket, ticket_id: str):
+    """Proxy authenticated TSMusicBot Opus packets to one browser socket."""
+    ticket = await websocket.app.state.voice_downlink.claim(ticket_id)
+    if ticket is None:
+        await websocket.close(code=VOICE_CLOSE_TICKET_INVALID, reason="语音订阅不存在或已过期")
+        return
+    await websocket.accept()
+
+    pump = asyncio.create_task(_pump_voice_downlink(websocket, ticket.bot_id))
+    watchdog = asyncio.create_task(_await_client_gone(websocket))
+    done, pending = await asyncio.wait({pump, watchdog}, return_when=asyncio.FIRST_COMPLETED)
+    for task in pending:
+        task.cancel()
+    # 取消 pump 会把 CancelledError 抛回 voice_packets 的 async with，上游 WS 随之关闭。
+    await asyncio.gather(*pending, return_exceptions=True)
+
+    # 浏览器没了就把通话 bot 收回去（带宽限期：刷新页面会立刻重新接上）。
+    websocket.app.state.voice_bots.schedule_release(ticket.account_id, ticket.bot_id)
+
+    if watchdog in done:
+        return
+    error = pump.exception()
+    if error is None or isinstance(error, WebSocketDisconnect):
+        return
+    code, reason = voice_close_for(error)
+    logger.warning("Bot %s 语音下行中断：%s", ticket.bot_id, reason, exc_info=error)
+    try:
+        await websocket.close(code=code, reason=reason)
+    except RuntimeError:
+        pass
 
 
 @router.post("/pause")

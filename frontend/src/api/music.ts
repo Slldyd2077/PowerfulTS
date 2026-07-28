@@ -70,8 +70,12 @@ export interface LiveAudioSession {
 }
 
 /** Start the server-side half of a user-authorized live capture session. */
-export async function startLiveAudio(mimeType: string, botId: string): Promise<LiveAudioSession> {
-  const { data } = await apiClient.post('/music/live/start', { mimeType }, { params: { botId } })
+export async function startLiveAudio(
+  mimeType: string,
+  botId: string,
+  source: 'computer' | 'microphone' = 'computer',
+): Promise<LiveAudioSession> {
+  const { data } = await apiClient.post('/music/live/start', { mimeType, source }, { params: { botId } })
   return data
 }
 

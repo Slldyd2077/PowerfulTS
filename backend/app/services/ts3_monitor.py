@@ -137,12 +137,14 @@ class TS3Monitor:
         self.port = settings.ts3_query_port
         self._conn: TS3QueryClient | None = None
         self._lock = threading.Lock()
-        # unique_identifier -> {nickname, cid, first_seen, last_seen}
+        # unique_identifier -> {nickname, clid, cid, first_seen, last_seen}
         self.client_data: dict[str, dict] = {}
         # cid -> channel_name
         self.channel_map: dict[int, str] = {}
         # TS display order, including parent/child depth for the Web UI.
         self.channel_tree: list[dict] = []
+        # cid -> 是否设了频道密码（网页通话切频道时决定要不要弹密码框）
+        self.channel_password: dict[int, bool] = {}
         # 累计 unique_identifier（本次运行；跨重启持久化留待后续）
         self._total_users: set[str] = set()
         self.start_time = datetime.now()
@@ -209,15 +211,19 @@ class TS3Monitor:
     # ─────────────────────── 轮询 ───────────────────────
 
     def _refresh_channels(self) -> None:
-        resp = self._conn.send("channellist")
+        # -flags 额外带回 channel_flag_password，网页通话据此决定是否要密码。
+        resp = self._conn.send("channellist", flags=True)
         new_map: dict[int, str] = {}
+        new_password: dict[int, bool] = {}
         for ch in resp:
             cid = _safe_int(ch.get("cid"))
             new_map[cid] = str(ch.get("channel_name", ""))
+            new_password[cid] = _safe_int(ch.get("channel_flag_password")) == 1
         new_tree = _build_channel_tree(resp)
         with self._lock:
             self.channel_map = new_map
             self.channel_tree = new_tree
+            self.channel_password = new_password
 
     def _refresh_clients(self) -> tuple[list[tuple[str, str]], list[str]]:
         now = time.time()
@@ -236,7 +242,11 @@ class TS3Monitor:
             if not uid:
                 continue  # 无 uid 无法去重，跳过
             seen_uids.add(uid)
-            updates[uid] = {"nickname": nickname, "cid": _safe_int(cl.get("cid"))}
+            updates[uid] = {
+                "nickname": nickname,
+                "clid": _safe_int(cl.get("clid")),
+                "cid": _safe_int(cl.get("cid")),
+            }
         # 锁内一次性应用写 + 清理（短临界区，整个写原子）；同时收集上线/离线 nickname
         new_online: list[tuple[str, str]] = []
         went_offline: list[str] = []
@@ -246,6 +256,7 @@ class TS3Monitor:
                 if entry is None:
                     self.client_data[uid] = {
                         "nickname": u["nickname"],
+                        "clid": u["clid"],
                         "cid": u["cid"],
                         "first_seen": now,
                         "last_seen": now,
@@ -253,7 +264,7 @@ class TS3Monitor:
                     self._total_users.add(uid)
                     new_online.append((u["nickname"], uid))
                 else:
-                    entry.update(nickname=u["nickname"], cid=u["cid"], last_seen=now)
+                    entry.update(nickname=u["nickname"], clid=u["clid"], cid=u["cid"], last_seen=now)
             for uid in list(self.client_data.keys()):
                 if uid not in seen_uids and now - self.client_data[uid]["last_seen"] > ONLINE_WINDOW:
                     went_offline.append(self.client_data[uid]["nickname"])
@@ -394,6 +405,44 @@ class TS3Monitor:
         with self._lock:
             channels = [dict(channel) for channel in self.channel_tree]
         return {"channels": channels, "count": len(channels)}
+
+    def get_voice_overview(self, bot_clid: int | None) -> dict:
+        """网页通话用：频道树 + 每个频道的在场成员 + bot 当前所在频道。
+
+        bot 用 clid 定位而不是昵称：昵称会随「正在播放的歌」和 <WEB通讯> 标记变化，
+        按昵称找会在这两种情况下失效。
+        """
+        now = time.time()
+        with self._lock:
+            tree = [dict(channel) for channel in self.channel_tree]
+            needs_password = dict(self.channel_password)
+            members: dict[int, list[dict]] = {}
+            bot_cid: int | None = None
+            for entry in self.client_data.values():
+                if now - entry["last_seen"] > ONLINE_WINDOW:
+                    continue
+                is_bot = bot_clid is not None and entry.get("clid") == bot_clid
+                if is_bot:
+                    bot_cid = entry["cid"]
+                # clid 要透出去：下行语音包按 clid 标记说话人，前端靠它把
+                # 「谁在说话」和「这条音频流」对上，才能给每个人单独调音量。
+                members.setdefault(entry["cid"], []).append(
+                    {"clid": entry.get("clid", 0), "nickname": entry["nickname"], "isBot": is_bot}
+                )
+        channels = [
+            {
+                "cid": channel["cid"],
+                "pid": channel["pid"],
+                "depth": channel["depth"],
+                "name": channel["name"],
+                "hasPassword": needs_password.get(channel["cid"], False),
+                "clients": sorted(
+                    members.get(channel["cid"], []), key=lambda c: c["nickname"].lower()
+                ),
+            }
+            for channel in tree
+        ]
+        return {"channels": channels, "botCid": bot_cid, "monitorRunning": self.running}
 
     def get_status(self, nickname: str) -> tuple[str, str | None]:
         """返回该昵称的 (online_status, game)。
