@@ -266,7 +266,8 @@ class BotIdleManager:
                     await self._resume_auto_paused(tsmusic, bot_id)
                 continue
 
-            if auto_pause and bot.get("playing") and not bot.get("paused") and bot_id not in self._auto_paused:
+            # auto_pause 判定需真实播放态：列表端点 playing 不实时（常驻 False），改用详情端点 get_bot_status
+            if auto_pause and bot_id not in self._auto_paused and await self._is_playing(tsmusic, bot_id):
                 await self._pause_empty_bot(tsmusic, bot_id, nick or bot_id)
 
             if idle_timeout_minutes <= 0:
@@ -319,7 +320,21 @@ class BotIdleManager:
                 idle_timeout_minutes,
             )
             self._bot_status[bot_id]["state"] = "disconnecting"
-            await tsmusic.stop_bot_checked(bot_id)
+            try:
+                result = await tsmusic.stop_bot_checked(bot_id)
+            except Exception:
+                # 上游抖动/网络异常：不传播到 _run 顶层（避免 _mark_all_unknown 误伤其他 bot）；
+                # 保留 _idle_since 计时器，下轮重试。
+                logger.warning("bot %s 自动下线请求失败，下轮重试", nick or bot_id, exc_info=True)
+                self._bot_status[bot_id]["state"] = "unknown"
+                self._bot_status[bot_id]["reason"] = "stop_request_failed"
+                continue
+            if isinstance(result, dict) and result.get("error"):
+                # 上游 200 但业务失败：不清计时器，下轮重试，避免误判已下线
+                logger.warning("bot %s 自动下线返回错误: %s", nick or bot_id, result.get("error"))
+                self._bot_status[bot_id]["state"] = "unknown"
+                self._bot_status[bot_id]["reason"] = "stop_returned_error"
+                continue
             self._idle_since.pop(bot_id, None)
             self._unknown_since.pop(bot_id, None)
             self._auto_paused.discard(bot_id)
@@ -340,6 +355,18 @@ class BotIdleManager:
     def _mark_all_unknown(self, reason: str) -> None:
         for bot_id, status in list(self._bot_status.items()):
             self._set_unknown(bot_id, str(status.get("label") or bot_id), reason)
+
+    async def _is_playing(self, tsmusic: TSMusicClient, bot_id: str) -> bool:
+        """详情端点查 bot 是否正在播放（列表端点 playing 不实时，常驻 False）。
+
+        失败按未播放处理（保守，避免误暂停），并记 warning。
+        """
+        try:
+            status = await tsmusic.get_bot_status(bot_id)
+            return bool(status.get("playing")) and not status.get("paused")
+        except Exception:
+            logger.warning("bot %s 查询播放状态失败，跳过自动暂停判定", bot_id, exc_info=True)
+            return False
 
     async def _pause_empty_bot(self, tsmusic: TSMusicClient, bot_id: str, label: str) -> None:
         try:
