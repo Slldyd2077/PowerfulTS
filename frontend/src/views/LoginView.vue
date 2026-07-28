@@ -363,7 +363,7 @@ onUnmounted(() => {
   audioCtx?.close().catch(() => {})
 })
 
-/** 以游客身份进入（仅可访问监控面板） */
+/** 以游客身份进入（仅可访问管理面板） */
 function handleGuest() {
   auth.enterAsGuest()
   router.push('/')
@@ -505,7 +505,7 @@ async function handleRegister() {
           <span class="brand-title-line">Powerful</span>
           <span class="brand-title-line brand-title-accent">TS</span>
         </h1>
-        <p class="brand-tagline">TeamSpeak 监控面板</p>
+        <p class="brand-tagline">TeamSpeak 管理面板</p>
         <div class="brand-meta">
           <span class="meta-dot"></span>
           实时语音
@@ -583,7 +583,7 @@ async function handleRegister() {
                 <el-icon class="guest-icon"><View /></el-icon>
                 <span>以游客身份浏览</span>
               </button>
-              <p class="guest-hint">仅可查看服务器监控面板</p>
+              <p class="guest-hint">仅可查看服务器管理面板</p>
             </div>
           </div>
 
