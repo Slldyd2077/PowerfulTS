@@ -39,13 +39,21 @@ def _is_regular_client(client: dict) -> bool:
     return str(client.get("client_type", "0")) != "1"
 
 
-def channel_human_count(clients: Iterable[dict], cid: int, bot_nicknames: set[str]) -> int:
+def channel_human_count(
+    clients: Iterable[dict],
+    cid: int,
+    bot_nicknames: set[str],
+    bot_client_ids: set[int] | None = None,
+) -> int:
     """Count non-bot regular TS clients in a channel."""
+    known_bot_client_ids = bot_client_ids or set()
     count = 0
     for client in clients:
         if not _is_regular_client(client):
             continue
         if _int_or_none(client.get("cid")) != cid:
+            continue
+        if _int_or_none(client.get("clid")) in known_bot_client_ids:
             continue
         nick = _norm_nickname(client.get("client_nickname"))
         if any(bot_nickname_matches(nick, configured) for configured in bot_nicknames):
@@ -68,6 +76,23 @@ def bot_channel_map(clients: Iterable[dict], bot_nicknames: set[str]) -> dict[st
             if bot_nickname_matches(nick, configured):
                 channels[configured] = cid
                 break
+    return channels
+
+
+def bot_channel_map_by_client_id(
+    clients: Iterable[dict], bot_client_ids: set[int]
+) -> dict[int, int]:
+    """Return stable bot clid -> cid mappings from ServerQuery clientlist."""
+    channels: dict[int, int] = {}
+    for client in clients:
+        if not _is_regular_client(client):
+            continue
+        clid = _int_or_none(client.get("clid"))
+        if clid not in bot_client_ids:
+            continue
+        cid = _int_or_none(client.get("cid"))
+        if clid is not None and cid is not None:
+            channels[clid] = cid
     return channels
 
 
@@ -218,10 +243,27 @@ class BotIdleManager:
             self._bot_status.clear()
             return
 
-        nick_results = await asyncio.gather(
-            *(tsmusic.get_bot_nickname(str(bot["id"])) for bot in bots),
-            return_exceptions=True,
+        # clid remains stable for one TS connection while the visible nickname may
+        # change to the current song or gain a <WEB通讯> suffix. Resolve both in
+        # parallel: clid is authoritative, nickname is only an old-upstream fallback.
+        client_id_results, nick_results = await asyncio.gather(
+            asyncio.gather(
+                *(tsmusic.get_bot_client_id(str(bot["id"])) for bot in bots),
+                return_exceptions=True,
+            ),
+            asyncio.gather(
+                *(tsmusic.get_bot_nickname(str(bot["id"])) for bot in bots),
+                return_exceptions=True,
+            ),
         )
+        bot_client_id_by_id: dict[str, int] = {}
+        for bot, result in zip(bots, client_id_results, strict=False):
+            if isinstance(result, Exception):
+                logger.warning("获取 bot %s clid 失败: %s", bot.get("id"), result)
+                continue
+            client_id = _int_or_none(result)
+            if client_id is not None:
+                bot_client_id_by_id[str(bot["id"])] = client_id
         bot_nick_by_id: dict[str, str] = {}
         for bot, result in zip(bots, nick_results, strict=False):
             if isinstance(result, Exception):
@@ -236,6 +278,8 @@ class BotIdleManager:
 
         clients = await asyncio.to_thread(fetch_ts_clients, self._settings)
         bot_nicks = set(bot_nick_by_id.values())
+        bot_client_ids = set(bot_client_id_by_id.values())
+        channels_by_client_id = bot_channel_map_by_client_id(clients, bot_client_ids)
         channels_by_nick = bot_channel_map(clients, bot_nicks)
         now = self._clock()
         for stale_bot_id in set(self._idle_since) - active_bot_ids:
@@ -248,14 +292,17 @@ class BotIdleManager:
         for bot in bots:
             bot_id = str(bot["id"])
             nick = bot_nick_by_id.get(bot_id)
-            cid = channels_by_nick.get(nick or "")
+            client_id = bot_client_id_by_id.get(bot_id)
+            cid = channels_by_client_id.get(client_id) if client_id is not None else None
+            if cid is None:
+                cid = channels_by_nick.get(nick or "")
             if cid is None:
                 # Unknown is not active: preserve an existing timer, but never stop
                 # while the bot cannot be located authoritatively.
                 self._set_unknown(bot_id, nick or str(bot.get("name") or bot_id), "bot_not_visible_in_serverquery")
                 continue
 
-            humans = channel_human_count(clients, cid, bot_nicks)
+            humans = channel_human_count(clients, cid, bot_nicks, bot_client_ids)
             if humans > 0:
                 self._idle_since.pop(bot_id, None)
                 self._unknown_since.pop(bot_id, None)
@@ -270,7 +317,8 @@ class BotIdleManager:
                     await self._resume_auto_paused(tsmusic, bot_id)
                 continue
 
-            if auto_pause and bot.get("playing") and not bot.get("paused") and bot_id not in self._auto_paused:
+            # auto_pause 判定需真实播放态：列表端点 playing 不实时（常驻 False），改用详情端点 get_bot_status
+            if auto_pause and bot_id not in self._auto_paused and await self._is_playing(tsmusic, bot_id):
                 await self._pause_empty_bot(tsmusic, bot_id, nick or bot_id)
 
             if idle_timeout_minutes <= 0:
@@ -323,7 +371,21 @@ class BotIdleManager:
                 idle_timeout_minutes,
             )
             self._bot_status[bot_id]["state"] = "disconnecting"
-            await tsmusic.stop_bot_checked(bot_id)
+            try:
+                result = await tsmusic.stop_bot_checked(bot_id)
+            except Exception:
+                # 上游抖动/网络异常：不传播到 _run 顶层（避免 _mark_all_unknown 误伤其他 bot）；
+                # 保留 _idle_since 计时器，下轮重试。
+                logger.warning("bot %s 自动下线请求失败，下轮重试", nick or bot_id, exc_info=True)
+                self._bot_status[bot_id]["state"] = "unknown"
+                self._bot_status[bot_id]["reason"] = "stop_request_failed"
+                continue
+            if isinstance(result, dict) and result.get("error"):
+                # 上游 200 但业务失败：不清计时器，下轮重试，避免误判已下线
+                logger.warning("bot %s 自动下线返回错误: %s", nick or bot_id, result.get("error"))
+                self._bot_status[bot_id]["state"] = "unknown"
+                self._bot_status[bot_id]["reason"] = "stop_returned_error"
+                continue
             self._idle_since.pop(bot_id, None)
             self._unknown_since.pop(bot_id, None)
             self._auto_paused.discard(bot_id)
@@ -344,6 +406,18 @@ class BotIdleManager:
     def _mark_all_unknown(self, reason: str) -> None:
         for bot_id, status in list(self._bot_status.items()):
             self._set_unknown(bot_id, str(status.get("label") or bot_id), reason)
+
+    async def _is_playing(self, tsmusic: TSMusicClient, bot_id: str) -> bool:
+        """详情端点查 bot 是否正在播放（列表端点 playing 不实时，常驻 False）。
+
+        失败按未播放处理（保守，避免误暂停），并记 warning。
+        """
+        try:
+            status = await tsmusic.get_bot_status(bot_id)
+            return bool(status.get("playing")) and not status.get("paused")
+        except Exception:
+            logger.warning("bot %s 查询播放状态失败，跳过自动暂停判定", bot_id, exc_info=True)
+            return False
 
     async def _pause_empty_bot(self, tsmusic: TSMusicClient, bot_id: str, label: str) -> None:
         try:

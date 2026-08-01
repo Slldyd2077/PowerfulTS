@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Monitor, Headset, User, Setting } from '@element-plus/icons-vue'
+import { Monitor, Headset, Microphone, User, Setting } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
@@ -11,6 +11,7 @@ const auth = useAuthStore()
 const items = computed(() => [
   { path: '/', label: '监控', icon: Monitor, restricted: false },
   { path: '/music', label: '音乐', icon: Headset, restricted: auth.isGuest },
+  { path: '/voice', label: '通话', icon: Microphone, restricted: auth.isGuest },
   { path: '/friends', label: '好友', icon: User, restricted: auth.isGuest },
   ...(auth.isAdmin ? [{ path: '/admin', label: '设置', icon: Setting, restricted: false }] : []),
 ])

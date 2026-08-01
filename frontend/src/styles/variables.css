@@ -96,6 +96,7 @@
   --bg-secondary: var(--surface-2);
   --bg-card: var(--surface-3);
   --bg-card-hover: var(--surface-3-hover);
+  --bg-elevated: var(--surface-2);
   --border-color: var(--border-default);
   --border-radius: var(--radius-md);
   --gradient-primary: var(--gradient-brand);

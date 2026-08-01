@@ -1,10 +1,10 @@
 [project]
 name = "PowerfulTS"
-version = "0.11.0"
+version = "0.12.1"
 description = ""
 readme = "README.md"
 requires-python = ">=3.11"
-license = "AGPL-3.0-or-later"
+license = "MIT"
 authors = [
     { name = "Slldyd2077" },
 ]

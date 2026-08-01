@@ -33,6 +33,8 @@ class MusicFollowTests(IsolatedAsyncioTestCase):
     async def test_follow_retries_while_reconnecting_and_refreshes_nickname(self) -> None:
         client = SimpleNamespace(
             follow_enabled=True,
+            ensure_player_ready=AsyncMock(),
+            get_bot_client_id=AsyncMock(return_value=None),
             get_bot_nickname=AsyncMock(side_effect=["OldNick", "NewNick"]),
         )
         missing = {"moved": False, "reason": "bot_not_found"}
@@ -61,6 +63,8 @@ class MusicFollowTests(IsolatedAsyncioTestCase):
     async def test_follow_rechecks_after_move_to_prevent_default_channel_race(self) -> None:
         client = SimpleNamespace(
             follow_enabled=True,
+            ensure_player_ready=AsyncMock(),
+            get_bot_client_id=AsyncMock(return_value=42),
             get_bot_nickname=AsyncMock(return_value="BotNick"),
         )
         moved = {"moved": True, "reason": "moved", "user_cid": 9}

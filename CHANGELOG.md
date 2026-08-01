@@ -1,3 +1,29 @@
+## v0.12.1 (2026-08-01)
+
+### Fix
+
+- **bot-idle**: 使用稳定的 TS clientId 定位动态昵称机器人，恢复空频道自动下线与自动暂停。
+- **play-follow**: 播放前先唤醒已自动下线的机器人，并按 clientId 移动到操作者频道；旧版上游保留昵称兼容回退。
+- **voice-mobile**: 为移动端网页通话增加 WASM Opus 兼容解码、音频解锁与前后台恢复，并优化触控设备选择控件。
+- **docker**: TSMusicBot API 的 Origin 跟随 `TSMUSIC_URL`，修复容器部署下的来源校验失败。
+
+## v0.12.0 (2026-07-29)
+
+### Feat
+
+- **voice**: 网页通话——浏览器直接收听频道并发言
+
+### Fix
+
+- **bot-idle**: 修复自动下线/暂停失效
+- 替换为正确的品牌 LOGO（png，此前 jpg 用错图）
+- logo 用动态 :src 绑定（rolldown-vite 会把 src="/public" 编译成 import 导致构建失败）
+
+### Refactor
+
+- 「监控面板」统一改称「管理面板」
+- TS 歌单移入「我的音乐」tab（与网易云/QQ等平台并列，不再主区独立栏目）
+
 ## v0.11.0 (2026-07-27)
 
 ### Feat

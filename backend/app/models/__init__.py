@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from ..core.database import Base
-from .account import Account, BotOwnership, BotShare, ServerMember, Session, VerifyCode
+from .account import Account, BotOwnership, BotShare, ServerMember, Session, VerifyCode, VoiceBot
 from .app_setting import AppSetting
 from .bot_player_state import BotPlayerState
 from .community import ChannelRental, Friend, FriendRequest, PendingNotification
@@ -15,6 +15,7 @@ __all__ = [
     "ServerMember",
     "BotOwnership",
     "BotShare",
+    "VoiceBot",
     "Session",
     "VerifyCode",
     "AppSetting",

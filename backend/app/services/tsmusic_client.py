@@ -8,9 +8,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, AsyncIterator
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
+from websockets.asyncio.client import connect as websocket_connect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import Settings
@@ -62,6 +64,25 @@ _QUALITY_ALIASES: dict[str, dict[str, str]] = {
         "hires": "high",
     },
 }
+
+
+# TeamSpeak error ids that a channel join can come back with.
+_TS_ERR_INVALID_CHANNEL_PASSWORD = 781
+_TS_JOIN_ERRORS: dict[int, str] = {
+    768: "频道不存在",
+    777: "频道已满",
+    778: "该频道树已达人数上限",
+    781: "频道密码不正确",
+    2568: "机器人没有进入该频道的权限",
+}
+
+
+class TSMusicUnavailable(RuntimeError):
+    """连不上 TSMusicBot（没起来 / 地址不通 / 登录没成功）。
+
+    _ensure_login 对连接失败是「记一条日志然后继续」，调用方光看异常类型分不出
+    「机器人没起来」和「代码出错」——这个类型就是用来把前者标出来的。
+    """
 
 
 class TSMusicClient:
@@ -451,6 +472,37 @@ class TSMusicClient:
         # A 404 means the deployed TSMusicBot predates live-input support.
         resp.raise_for_status()
         return self._json(resp)
+
+    async def voice_packets(self, bot_id: str | None = None) -> AsyncIterator[bytes]:
+        """Subscribe to a bot's authenticated raw Opus downlink WebSocket."""
+        await self._ensure_login()
+        bid = self._bid(bot_id)
+        if not bid:
+            raise ValueError("bot id is required for voice downlink")
+
+        parsed = urlsplit(self._base)
+        scheme = "wss" if parsed.scheme == "https" else "ws"
+        base_path = parsed.path.rstrip("/")
+        ws_url = urlunsplit(
+            (scheme, parsed.netloc, f"{base_path}/api/voice/downlink/{bid}", "", "")
+        )
+        cookie_header = "; ".join(
+            f"{cookie.name}={cookie.value}" for cookie in self._http.cookies.jar
+        )
+        if not cookie_header:
+            raise TSMusicUnavailable("TSMusicBot login did not yield a session cookie")
+
+        async with websocket_connect(
+            ws_url,
+            additional_headers={"Cookie": cookie_header},
+            open_timeout=10,
+            close_timeout=3,
+            ping_interval=20,
+            max_size=64 * 1024,
+        ) as websocket:
+            async for message in websocket:
+                if isinstance(message, bytes) and message:
+                    yield message
 
     async def pause(self, bot_id: str | None = None) -> dict:
         await self._ensure_login()
@@ -966,7 +1018,7 @@ class TSMusicClient:
         return self._json(resp)
 
     async def get_bot_nickname(self, bot_id: str | None = None, *, refresh: bool = False) -> str | None:
-        """获取 bot 的 TS 昵称（供 bot_mover 在 clientlist 中定位 bot client）。
+        """获取 bot 配置的 TS 昵称（仅供旧版上游缺少 clientId 时兼容定位）。
 
         GET /api/bot/{id}/config 返回移除 identity/apiKey 后的 bot 配置，含 nickname。
         默认使用缓存；refresh=True 时强制重新读取，供跟随失败后的自愈重试。
@@ -988,6 +1040,58 @@ class TSMusicClient:
         if nick:
             self._bot_nickname_cache[bid] = nick
         return nick or None
+
+    async def get_bot_client_id(self, bot_id: str | None = None) -> int | None:
+        """获取 bot 当前的 TS clid（离线为 None）。
+
+        不缓存：clid 每次重连都会变。用它而不是昵称来定位 bot，因为昵称会随
+        正在播放的歌和 <WEB通讯> 标记变化。
+        """
+        await self._ensure_login()
+        try:
+            resp = await self._http.get(f"/api/bot/{self._bid(bot_id)}")
+            if resp.status_code >= 400:
+                logger.warning("获取 bot clid 失败: 上游 %s", resp.status_code)
+                return None
+            data = self._json(resp)
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("获取 bot clid 异常: %s", exc)
+            return None
+        if not data.get("connected"):
+            return None
+        try:
+            clid = int(data.get("clientId") or 0)
+        except (TypeError, ValueError):
+            return None
+        return clid or None
+
+    async def join_channel(
+        self, cid: int, password: str = "", bot_id: str | None = None
+    ) -> dict:
+        """让 bot 用自己的 TS 客户端身份进入频道，返回 {ok, detail}。
+
+        故意不走 ServerQuery clientmove：SQ 管理账号通常有
+        b_channel_join_ignore_password，那条路会把频道密码直接绕过去。
+        以 bot 自己的身份移动，密码才由服务端正常校验。
+        """
+        await self._ensure_login()
+        try:
+            resp = await self._http.post(
+                f"/api/bot/{self._bid(bot_id)}/channel",
+                json={"cid": cid, "password": password},
+            )
+        except httpx.HTTPError as exc:
+            logger.warning("切换频道失败: %s", exc)
+            return {"ok": False, "detail": "连不上音乐机器人"}
+        if resp.status_code < 400:
+            return {"ok": True, "detail": ""}
+        data = self._json(resp)
+        ts_error = data.get("tsErrorId")
+        if ts_error == _TS_ERR_INVALID_CHANNEL_PASSWORD:
+            return {"ok": False, "detail": "频道密码不正确", "invalid_password": True}
+        detail = _TS_JOIN_ERRORS.get(ts_error) or str(data.get("error") or "切换频道失败")
+        logger.warning("切换频道被拒 [ts=%s] %s", ts_error, detail)
+        return {"ok": False, "detail": detail}
 
     # ───────────────────────── 音质设置 ─────────────────────────
 

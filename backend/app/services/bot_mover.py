@@ -39,7 +39,12 @@ def _int_or_none(value: object) -> int | None:
         return None
 
 
-def move_bot_to_user(settings: Settings, bot_nickname: str, user: Account) -> dict:
+def move_bot_to_user(
+    settings: Settings,
+    bot_client_id: int | None,
+    bot_nickname: str | None,
+    user: Account,
+) -> dict:
     """临时 SQ 连接：把 bot 移到 user 所在频道。不抛异常。
 
     返回 ``{moved: bool, reason: str, user_cid: int|None, bot_cid: int|None}``。
@@ -75,9 +80,18 @@ def move_bot_to_user(settings: Settings, bot_nickname: str, user: Account) -> di
                 if (user_uid and uid == user_uid) or (user_nick and nick == user_nick):
                     user_found = True
                     user_cid = _int_or_none(cl.get("cid"))
-            # 定位 bot：兼容基础昵称与“歌曲名 - 基础昵称”的动态昵称。
-            if bot_clid is None and bot_nickname_matches(nick, bot_nickname):
-                bot_clid = _int_or_none(cl.get("clid"))
+            # bot 播放时会把昵称改成歌名，网页通话还会追加标记；优先使用本次
+            # 连接稳定不变的 clid。仅在旧版 TSMusicBot 没有暴露 clientId 时
+            # 回退到配置昵称（含播放时的动态后缀），保证滚动升级期间仍可工作。
+            clid = _int_or_none(cl.get("clid"))
+            matches_client_id = bot_client_id is not None and clid == bot_client_id
+            matches_legacy_nickname = (
+                bot_client_id is None
+                and bool(bot_nickname)
+                and bot_nickname_matches(nick, bot_nickname)
+            )
+            if bot_clid is None and (matches_client_id or matches_legacy_nickname):
+                bot_clid = clid
                 bot_cid = _int_or_none(cl.get("cid"))
 
         if not user_found:
@@ -92,7 +106,7 @@ def move_bot_to_user(settings: Settings, bot_nickname: str, user: Account) -> di
         conn.send("clientmove", clid=bot_clid, cid=user_cid)
         logger.info(
             "跟随: bot「%s」(clid=%s) → cid=%s（用户 %s 所在频道）",
-            bot_nickname, bot_clid, user_cid, user.ts_nickname,
+            bot_nickname or "unknown", bot_clid, user_cid, user.ts_nickname,
         )
         return {"moved": True, "reason": "moved", "user_cid": user_cid, "bot_cid": user_cid}
     except TS3QueryError as exc:

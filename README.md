@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="assets/banner.png" alt="PowerfulTS — TS3 Monitoring Dashboard" width="800" />
+  <img src="assets/banner.png" alt="PowerfulTS — TS3 管理面板" width="800" />
 </p>
 
 <p align="center">
-  <strong>TS3 服务器监控面板</strong> · 独立前后端架构 · 原生 TS3 直连 + TSMusicBot 音乐引擎
+  <strong>TS3 服务器管理面板</strong> · 独立前后端架构 · 原生 TS3 直连 + TSMusicBot 音乐引擎
 </p>
 
 <p align="center">
@@ -22,9 +22,11 @@
 
 ## 📖 简介
 
-**PowerfulTS** 是一个面向 TeamSpeak（TS3 / TS6）服务器的实时监控与多媒体面板，采用**前后端分离**架构。
-后端原生直连 TS3 ServerQuery 提供监控数据，并将音乐与点播能力委托给 TSMusicBot 多平台引擎，
+**PowerfulTS** 是一个面向 TeamSpeak（TS3 / TS6）服务器的 Web 管理面板，采用**前后端分离**架构。
+后端原生直连 TS3 ServerQuery 提供服务器数据，并将音乐与点播能力委托给 TSMusicBot 多平台引擎，
 让一个 Web 面板即可聚合呈现服务器的在线状态、用户、频道与多媒体能力。
+
+其中**网页通话**让成员不装 TeamSpeak 客户端也能直接在浏览器里收听频道并发言。
 
 > 💡 **跨平台**：提供完整 Docker 化方案，Linux / Windows / macOS / NAS（群晖、威联通等）均可一键部署。
 
@@ -37,17 +39,15 @@
 | 模块 | 状态 | 能力 |
 |------|:----:|------|
 | 👤 账户 | ✅ | 登录 / 注册（QQ + TS 昵称绑定 + 验证码） |
-| 📊 实时监控 | ✅ | 服务器概览 · 5 秒轮询刷新 |
-| 👥 在线用户 | ✅ | 昵称 · 游戏 · 所在频道 · 在线时长 |
-| 🎮 游戏统计 | ✅ | 各游戏实时人数分布 |
-| 📡 频道列表 | ✅ | 频道树浏览 |
-| 🎵 音乐中心 | ✅ | 搜索 · 点歌 · 队列 · 音量 · 播放模式（网易云 / QQ / 酷狗） |
+| 🎙️ **网页通话** | ✅ | **不装 TS 客户端，直接在网页收听频道并发言**：以自己的昵称接入、浏览并切换频道（支持频道密码）、按人调节音量、麦克风增益与输入输出设备选择 |
+| 👥 在线用户 | ✅ | 昵称 · 游戏 · 所在频道 · 在线时长 · 各游戏人数分布 |
+| 📡 频道列表 | ✅ | 频道树浏览 · 各频道在场成员 |
+| 🎵 音乐中心 | ✅ | 搜索 · 点歌 · 队列 · 音量 · 播放模式（网易云 / QQ / 酷狗 / B 站） |
 | 📡 电脑音频直播 | ✅ | 用户主动选择应用/屏幕并授权后，通过音乐机器人实时共享音频 |
-| 🎬 Bilibili | ✅ | 番剧 / 视频浏览与点播（TSMusicBot 多平台） |
-| 🔐 平台账号 | ✅ | 网易云 / QQ / 酷狗 扫码登录（解锁 VIP / 个人歌单） |
+| 🔐 平台账号 | ✅ | 网易云 / QQ / 酷狗 / Bilibili 扫码登录（解锁 VIP 曲库、个人歌单、番剧与视频点播） |
+| 🎮 Steam | ✅ | OpenID 绑定 · 好友在线状态 · 共同游戏 · 游戏时长排行；TS 在线列表优先显示 Steam 当前游戏 |
 | 📱 QQ通知 | ✅ | 通过 NapCat/OneBot 实现QQ好友上线通知（需配置 NapCat） |
 | 🤝 社交 | ✅ | 好友添加 / 删除 / 在线状态 |
-| 🎼 开屏音乐 | ✅ | 登录页真实音频频谱 + 随机背景音乐（本地目录，不入库） |
 | 📱 移动端 | ✅ | 手机 / 平板自适应（抽屉导航 · 响应式布局 · 触屏长按操作） |
 
 ---
@@ -75,9 +75,11 @@ PowerfulTS 后端原生直连 TS3 ServerQuery，同时代理 TSMusicBot 的多�
                                                                  （网易云 / QQ / B 站 多平台 · TS3/TS6 双协议）
 ```
 
-- `/api/stats`、`/api/channels` → 原生 TS3 ServerQuery（监控 / 频道，直读）
+- `/api/stats`、`/api/channels` → 原生 TS3 ServerQuery（概览 / 频道，直读）
 - `/api/auth/*`、`/api/friends/*` → 原生 TS3 ServerQuery + SQLite（认证 / 好友 / 账户）
 - `/api/music/*` → TSMusicBot 音乐引擎（搜索 / 播放控制 / 平台账号登录）
+- `/api/music/voice/*` → 网页通话（浏览器 ⇄ TSMusicBot 的双向 Opus 中继 + 频道浏览/切换）
+- `/api/steam/*` → Steam OpenID 绑定与好友 / 游戏数据
 - `/api/bili/*` → Bilibili 浏览与点播（点播由 TSMusicBot 多平台引擎驱动）+ 图片代理
 
 > 监控、认证、社交等模块已由原生 TS3 ServerQuery 直连 + SQLite 数据层实现，不再依赖外部桥接服务。
@@ -88,23 +90,27 @@ PowerfulTS 后端原生直连 TS3 ServerQuery，同时代理 TSMusicBot 的多�
 
 ```
 PowerfulTS/
-├── assets/                      # 项目 LOGO
+├── assets/                      # 项目 LOGO 与 banner
 ├── backend/                     # FastAPI 后端 — 原生 TS3 直连 + 代理网关
 │   ├── app/
 │   │   ├── core/config.py           # 配置：从环境变量读取 TSMusicBot / TS3 凭据
-│   │   ├── routers/                 # music / bilibili / monitor / auth / friends 路由
-│   │   ├── services/                # TSMusicBot / 网易云 / TS3 监控 客户端
+│   │   ├── models/                  # SQLAlchemy 模型（账号 / bot 归属 / 歌单 …）
+│   │   ├── routers/                 # music(含 voice) / bilibili / monitor / auth / friends / steam / admin
+│   │   ├── services/                # TSMusicBot 客户端 · TS3 监控 · 语音中继 · 通话 bot · Steam …
 │   │   └── main.py                  # 应用入口（原生数据层 + TS3 监控 + 多媒体代理）
+│   ├── tests/                   # 后端测试
 │   ├── Dockerfile               # 后端镜像
-│   ├── .dockerignore
 │   ├── .env.example             # 配置模板（复制为 .env 填写）
 │   └── requirements.txt
 ├── frontend/                    # Vue 3 前端
 │   ├── src/
+│   │   ├── components/voice/        # 网页通话面板与频道浏览器
+│   │   ├── workers/                 # AudioWorklet：抖动缓冲 + 多人混音 + 每人增益
+│   │   └── views/                   # 各页面
 │   ├── Dockerfile               # 多阶段构建（node 编译 → nginx 托管）
 │   ├── nginx.conf               # 静态托管 + /api 反向代理
-│   ├── .dockerignore
 │   └── vite.config.ts
+├── docs/                        # 设计与校验文档
 ├── docker-compose.yml           # 一键编排（backend + frontend）
 └── README.md
 ```
@@ -277,10 +283,11 @@ PowerfulTS 本身不含 TS3 服务端与音乐引擎，需接入两个上游：
 
 | 功能 | 入口 | 说明 |
 |------|------|------|
-| 📊 监控 | 首页 Dashboard | 服务器概览、在线用户、游戏统计、频道树，每 5 秒自动刷新 |
-| 🎵 音乐 | 音乐中心 | 搜索（默认网易云，可切 QQ/酷狗/B 站）、播放/暂停/上下首/进度/音量/播放模式/清空队列 |
-| 🎬 B站点播 | Bilibili | 搜索 B 站视频，点击播放（音频由 TSMusicBot 拉取） |
-| 🔐 平台账号 | 音乐中心 → 账号 | 网易云 / QQ / 酷狗 扫码登录，解锁 VIP 曲库与个人歌单 |
+| 🎙️ 网页通话 | 网页通话 | 点「加入通话」即以自己的昵称进入频道；右侧点频道即可切换（带 🔒 的需输密码）；可单独调节频道里每个人的音量 |
+| 📊 概览 | 首页 Dashboard | 服务器概览、在线用户、游戏统计、频道树，每 5 秒自动刷新 |
+| 🎵 音乐 | 音乐控制 | 搜索（默认网易云，可切 QQ/酷狗/B 站）、播放/暂停/上下首/进度/音量/播放模式/清空队列 |
+| 🔐 平台账号 | 音乐控制 → 账号 | 网易云 / QQ / 酷狗 / B 站扫码登录，解锁 VIP 曲库、个人歌单与番剧点播 |
+| 🎮 Steam | Steam | 绑定 Steam 账号后查看好友在线状态、共同游戏与时长排行 |
 | 🤝 社交 | 好友 | 添加 / 删除好友，查看好友在线状态 |
 | 📱 QQ通知 | 配置 NapCat | 通过 NapCat/OneBot 在 QQ 上接收好友上线通知 |
 | 👤 账户 | 登录 / 注册 | QQ + TS 昵称绑定，ServerQuery 私聊下发验证码完成实名 |
@@ -302,6 +309,41 @@ PowerfulTS 本身不含 TS3 服务端与音乐引擎，需接入两个上游：
 
 ---
 
+## 🎙️ 网页通话
+
+不安装 TeamSpeak 客户端，直接在浏览器里收听频道并发言。点「加入通话」后，PowerfulTS 会以**你自己的昵称**开一个专属通话身份进入服务器，挂断即离开——它和音乐机器人相互独立，不会出现在音乐控制的实例列表里，也不影响点歌。
+
+| 能力 | 说明 |
+|------|------|
+| 收听 + 发言 | 一个按钮同时开启，进去后可随时静音只听不说 |
+| 频道浏览 / 切换 | 看到每个频道里有谁，点一下就过去；加锁频道会提示输密码 |
+| 每人独立音量 | 频道里每个人一条滑条（0–200%，可静音），按昵称记住，下次进来仍然有效 |
+| 设备与增益 | 麦克风增益、输入设备、播放设备（支持 `setSinkId` 的浏览器）均可选择 |
+| 通话标记 | 通话期间频道里的人会看到你的昵称前带 `<WEB通讯>`，挂断后自动恢复 |
+
+**运行要求**
+
+- 浏览器需支持 **WebCodecs `AudioDecoder`**（Chrome / Edge 等 Chromium 内核）；不支持时会明确报错而不是静默失灵。
+- 生产环境需 HTTPS（localhost 开发环境除外），否则拿不到麦克风权限。
+- TSMusicBot 需要带 `/api/voice/downlink/:botId` 下行接口与 `POST /api/player/:botId/live` 实时流入口。**改完 TSMusicBot 源码要重新 build 镜像并重建容器**，否则跑的还是旧代码。
+- 若 TSMusicBot 无法通过浏览器所用域名反连 PowerfulTS，把 `LIVE_AUDIO_PUBLIC_URL` 设为它能访问的后端地址（例如 `http://host.docker.internal:8001`）。
+- **建议戴耳机**；同一台设备不要让 TS 客户端和网页同时待在同一频道，否则会形成回声。
+
+> 实现细节与协议见 [`docs/web-voice-downlink-spec.md`](docs/web-voice-downlink-spec.md)。
+
+---
+
+## 📡 电脑音频实时共享
+
+音乐控制的「共享电脑音频」只会在用户点击按钮后调用浏览器的屏幕共享选择器。选择网易云等应用窗口并勾选「共享音频」后，浏览器才会将音频实时发送给当前音乐机器人；停止系统共享、切换机器人或离开页面都会自动断开。
+
+- 生产环境需要 HTTPS（localhost 开发环境除外），建议使用最新版 Chrome / Edge。
+- 优先选择单个应用窗口。共享整个屏幕可能把 TeamSpeak 的声音再次录入，造成回声。
+- TSMusicBot 需要包含 `POST /api/player/:botId/live` 实时流入口。
+- 如果 TSMusicBot 无法通过浏览器访问的域名反向连接 PowerfulTS，可将 `LIVE_AUDIO_PUBLIC_URL` 设置为它能访问的后端地址，例如 `http://host.docker.internal:8001`。
+
+---
+
 ## 🎼 开屏背景音乐（可选）
 
 登录页左侧的音频频谱会随**真实音频**律动，开屏可随机播放本地背景音乐。
@@ -317,16 +359,6 @@ PowerfulTS 本身不含 TS3 服务端与音乐引擎，需接入两个上游：
 - 开屏先尝试有声播放；若被浏览器拦截，则**静音播放**（频谱随之贴底静止）并在左下角显示 🔇 按钮，点击即可开声。
 - 左下角按钮支持**悬停展开音量滑块**：频谱高度随音量**等比例**变化——默认 40% 为基准，往上拖更高、往下更矮，**静音或拖到 0 时频谱贴底不动**；音量自动记忆，下次进入恢复。
 - 频谱在**首次与页面交互**（动鼠标 / 点击 / 按键）后才会切换为真实音频律动——这是 `AudioContext` 的浏览器限制。
-
-### 电脑音频实时共享
-
-音乐中心的「共享电脑音频」只会在用户点击按钮后调用浏览器的屏幕共享选择器。选择网易云等应用窗口并勾选「共享音频」后，浏览器才会将音频实时发送给当前音乐机器人；停止系统共享、切换机器人或离开页面都会自动断开。
-
-- 生产环境需要 HTTPS（localhost 开发环境除外），建议使用最新版 Chrome / Edge。
-- 优先选择单个应用窗口。共享整个屏幕可能把 TeamSpeak 的声音再次录入，造成回声。
-- TSMusicBot 需要包含 `POST /api/player/:botId/live` 实时流入口。
-- 如果 TSMusicBot 无法通过浏览器访问的域名反向连接 PowerfulTS，可将 `LIVE_AUDIO_PUBLIC_URL` 设置为它能访问的后端地址，例如 `http://host.docker.internal:8001`。
-- 目录为空时，频谱回退为模拟律动，不影响正常使用。
 
 ### Docker 部署挂载音乐
 
@@ -357,16 +389,21 @@ backend:
 - 统一鉴权：`X-Session-Token` 由 `get_current_account` 真实校验，无效会话一律 401。
 - CORS 默认收敛为白名单（`CORS_ORIGINS`），生产部署请改为实际域名。
 - B 站图片代理 `/api/bili/pic` 限制为 B 站 CDN 域名白名单，防止 SSRF。
+- 网页通话的收听凭据是 32 字节一次性票据（30 秒过期、只能消费一次），不把登录 Token 放进 WebSocket URL。
+- 切换频道由通话 bot 以**自己的 TS 客户端身份**执行，频道密码由服务端正常校验；刻意不走 ServerQuery `clientmove`——查询管理员通常持有 `b_channel_join_ignore_password`，那条路会直接绕过频道密码。
 - 数据持久化于 Docker volume `powerfults-data`，`docker compose down` 不会丢失（`-v` 才删除）。
 
 ---
 
 ## 🗺️ 路线图
 
-- [x] 账户 / 监控 / 音乐 / Bilibili / 社交（核心功能）
-- [x] 原生 TS3 ServerQuery 直连（监控 / 认证 / 好友）
-- [x] 音乐与点播引擎迁移至 TSMusicBot（网易云 / QQ / B 站 多平台）
+- [x] 账户 / 概览 / 音乐 / 平台账号 / 社交（核心功能）
+- [x] 原生 TS3 ServerQuery 直连（概览 / 认证 / 好友）
+- [x] 音乐与点播引擎迁移至 TSMusicBot（网易云 / QQ / 酷狗 / B 站 多平台）
+- [x] Steam 集成（OpenID 绑定 · 好友在线 · 共同游戏 · 时长排行）
 - [x] Docker 化跨平台一键部署
+- [x] 网页通话（浏览器直连频道语音，双向）
+- [ ] 网页通话：多人同时接入的实机压测与延迟基线
 
 ---
 

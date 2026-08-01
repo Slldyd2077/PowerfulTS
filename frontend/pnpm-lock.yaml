@@ -20,6 +20,9 @@ importers:
       element-plus:
         specifier: ^2.14.1
         version: 2.14.1(vue@3.5.35(typescript@6.0.3))
+      opus-decoder:
+        specifier: ^0.7.11
+        version: 0.7.11
       pinia:
         specifier: ^3.0.4
         version: 3.0.4(typescript@6.0.3)(vue@3.5.35(typescript@6.0.3))
@@ -88,6 +91,9 @@ packages:
 
   '@emnapi/wasi-threads@1.2.1':
     resolution: {integrity: sha512-uTII7OYF+/Mes/MrcIOYp5yOtSMLBWSIoLPpcgwipoiKbli6k322tcoFsxoIIxPDqW01SQGAgko4EzZi2BNv2w==}
+
+  '@eshaz/web-worker@1.2.2':
+    resolution: {integrity: sha512-WxXiHFmD9u/owrzempiDlBB1ZYqiLnm9s6aPc8AlFQalq2tKmqdmMr9GXOupDgzXtqnBipj8Un0gkIm7Sjf8mw==}
 
   '@floating-ui/core@1.7.5':
     resolution: {integrity: sha512-1Ih4WTWyw0+lKyFMcBHGbb5U5FtuHJuujoyyr5zTaWS5EYMeT6Jb2AuDeftsCsEuchO+mM2ij5+q9crhydzLhQ==}
@@ -312,6 +318,9 @@ packages:
     resolution: {integrity: sha512-bZpge9eSXwa4ToSiqJ7j6KRwhAsneMFoSz3LMWKQDkqimm3D/tbFlrklrs/IOqC8tEcYmXQZJ6N0UrjhBirVCg==}
     peerDependencies:
       vue: ^3.5.0
+
+  '@wasm-audio-decoders/common@9.0.7':
+    resolution: {integrity: sha512-WRaUuWSKV7pkttBygml/a6dIEpatq2nnZGFIoPTc5yPLkxL6Wk4YaslPM98OPQvWacvNZ+Py9xROGDtrFBDzag==}
 
   agent-base@6.0.0:
     resolution: {integrity: sha512-j1Q7cSCqN+AwrmDd+pzgqc0/NpC655x2bUf5ZjRIO77DcNBFmh+OgRNzF6OKdCC9RSCb19fGd99+bhXFdkRNqw==}
@@ -634,6 +643,9 @@ packages:
   normalize-wheel-es@1.2.0:
     resolution: {integrity: sha512-Wj7+EJQ8mSuXr2iWfnujrimU35R2W4FAErEyTmJoJ7ucwTn2hOUSsRehMb5RSYkxXGTM7Y9QpvPmp++w5ftoJw==}
 
+  opus-decoder@0.7.11:
+    resolution: {integrity: sha512-+e+Jz3vGQLxRTBHs8YJQPRPc1Tr+/aC6coV/DlZylriA29BdHQAYXhvNRKtjftof17OFng0+P4wsFIqQu3a48A==}
+
   p-limit@2.2.0:
     resolution: {integrity: sha512-pZbTJpoUsCzV48Mc9Nh51VbwO0X9cuPFE8gYwx9BTCt9SF8/b7Zljd2fVgOxhIF/HDTKgpVzs+GPhyKfjLLFRQ==}
     engines: {node: '>=6'}
@@ -706,6 +718,9 @@ packages:
 
   set-blocking@2.0.0:
     resolution: {integrity: sha512-KiKBS8AnWGEyLzofFfmvKwpdPzqiy16LvQfK3yv/fVH7Bj13/wl3JSR1J+rfgRE9q7xUJK4qvgS8raSOeLUehw==}
+
+  simple-yenc@1.0.4:
+    resolution: {integrity: sha512-5gvxpSd79e9a3V4QDYUqnqxeD4HGlhCakVpb6gMnDD7lexJggSBJRBO5h52y/iJrdXRilX9UCuDaIJhSWm5OWw==}
 
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
@@ -864,6 +879,8 @@ snapshots:
     dependencies:
       tslib: 2.8.1
     optional: true
+
+  '@eshaz/web-worker@1.2.2': {}
 
   '@floating-ui/core@1.7.5':
     dependencies:
@@ -1080,6 +1097,11 @@ snapshots:
   '@vueuse/shared@14.3.0(vue@3.5.35(typescript@6.0.3))':
     dependencies:
       vue: 3.5.35(typescript@6.0.3)
+
+  '@wasm-audio-decoders/common@9.0.7':
+    dependencies:
+      '@eshaz/web-worker': 1.2.2
+      simple-yenc: 1.0.4
 
   agent-base@6.0.0:
     dependencies:
@@ -1356,6 +1378,10 @@ snapshots:
 
   normalize-wheel-es@1.2.0: {}
 
+  opus-decoder@0.7.11:
+    dependencies:
+      '@wasm-audio-decoders/common': 9.0.7
+
   p-limit@2.2.0:
     dependencies:
       p-try: 2.2.0
@@ -1427,6 +1453,8 @@ snapshots:
       '@rolldown/binding-win32-x64-msvc': 1.0.3
 
   set-blocking@2.0.0: {}
+
+  simple-yenc@1.0.4: {}
 
   source-map-js@1.2.1: {}
 

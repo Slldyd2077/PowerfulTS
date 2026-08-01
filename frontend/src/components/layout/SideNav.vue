@@ -4,6 +4,7 @@ import { computed } from 'vue'
 import {
   Monitor,
   Headset,
+  Microphone,
   User,
   Aim,
   Setting,
@@ -21,6 +22,7 @@ const appVersion = __APP_VERSION__
 const activeIndex = computed(() => {
   if (route.path === '/') return 'dashboard'
   if (route.path === '/music') return 'music'
+  if (route.path === '/voice') return 'voice'
   if (route.path === '/friends') return 'friends'
   if (route.path === '/steam') return 'steam'
   if (route.path === '/admin') return 'admin'
@@ -29,12 +31,13 @@ const activeIndex = computed(() => {
 
 function navigate(key: string) {
   // 游客受限功能 → 跳登录页（保留游客态；登录成功后由 setToken 升级为真实用户）
-  if (auth.isGuest && (key === 'music' || key === 'friends' || key === 'steam')) {
+  if (auth.isGuest && (key === 'music' || key === 'voice' || key === 'friends' || key === 'steam')) {
     router.push('/login')
     return
   }
   if (key === 'dashboard') router.push('/')
   else if (key === 'music') router.push('/music')
+  else if (key === 'voice') router.push('/voice')
   else if (key === 'friends') router.push('/friends')
   else if (key === 'steam') router.push('/steam')
   else if (key === 'admin') router.push('/admin')
@@ -50,7 +53,7 @@ function navigate(key: string) {
       </div>
       <div class="brand-text">
         <span class="brand-kicker label-mono">PowerfulTS</span>
-        <h1 class="brand-title">监控面板</h1>
+        <h1 class="brand-title">管理面板</h1>
       </div>
     </div>
 
@@ -66,6 +69,12 @@ function navigate(key: string) {
       <el-menu-item index="music" :class="{ 'guest-locked': auth.isGuest }">
         <el-icon><Headset /></el-icon>
         <span>音乐控制</span>
+        <span v-if="auth.isGuest" class="lock-hint label-mono">登录后查看</span>
+      </el-menu-item>
+
+      <el-menu-item index="voice" :class="{ 'guest-locked': auth.isGuest }">
+        <el-icon><Microphone /></el-icon>
+        <span>网页通话</span>
         <span v-if="auth.isGuest" class="lock-hint label-mono">登录后查看</span>
       </el-menu-item>
 

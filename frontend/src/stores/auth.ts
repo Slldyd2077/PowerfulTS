@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getSession, logout as apiLogout, type SessionData } from '@/api/auth'
 
-// 游客虚拟用户：不持有真实 token，仅用于访问免鉴权的监控面板
+// 游客虚拟用户：不持有真实 token，仅用于访问免鉴权的管理面板
 const GUEST_USER: SessionData = { ts_nickname: '游客', is_admin: false, role: 'guest' }
 const GUEST_STORAGE_KEY = 'guest_session'
 
@@ -32,7 +32,7 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = sessionData
   }
 
-  /** 以游客身份进入（仅可访问监控面板，无真实会话） */
+  /** 以游客身份进入（仅可访问管理面板，无真实会话） */
   function enterAsGuest() {
     isGuest.value = true
     user.value = GUEST_USER
