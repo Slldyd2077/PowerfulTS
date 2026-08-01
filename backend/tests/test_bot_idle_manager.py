@@ -8,6 +8,7 @@ from app.services.bot_idle_manager import (
     bot_channel_map_by_client_id,
     channel_human_count,
 )
+from app.services.bot_mover import bot_nickname_matches
 
 
 class FakeClock:
@@ -106,6 +107,11 @@ def test_settings() -> SimpleNamespace:
 
 
 class BotIdleManagerTests(unittest.TestCase):
+    def test_dynamic_now_playing_nickname_matches_configured_bot(self) -> None:
+        self.assertTrue(bot_nickname_matches("♪ 崩坏摇… - PowerfulTS", "PowerfulTS"))
+        self.assertTrue(bot_nickname_matches("PowerfulTS", "PowerfulTS"))
+        self.assertFalse(bot_nickname_matches("Another Bot", "PowerfulTS"))
+
     def test_bots_in_same_channel_do_not_count_as_humans(self) -> None:
         clients = [
             {"client_type": "0", "client_nickname": "MusicBot A", "cid": "10"},
@@ -144,6 +150,15 @@ class BotIdleManagerTests(unittest.TestCase):
 
         self.assertEqual(bot_channel_map_by_client_id(clients, {42}), {42: 10})
         self.assertEqual(channel_human_count(clients, 10, {"MusicBot"}, {42}), 1)
+
+    def test_dynamic_bot_nickname_is_mapped_and_not_counted_as_human(self) -> None:
+        clients = [
+            {"client_type": "0", "client_nickname": "♪ Song - PowerfulTS", "cid": "13"},
+            {"client_type": "0", "client_nickname": "Alice", "cid": "13"},
+        ]
+
+        self.assertEqual(bot_channel_map(clients, {"PowerfulTS"}), {"PowerfulTS": 13})
+        self.assertEqual(channel_human_count(clients, 13, {"PowerfulTS"}), 1)
 
 
 class BotIdleManagerAsyncTests(unittest.IsolatedAsyncioTestCase):

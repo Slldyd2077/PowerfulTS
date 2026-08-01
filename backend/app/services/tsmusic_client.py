@@ -18,14 +18,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.config import Settings
 from . import app_setting
 
+import os
+
 if TYPE_CHECKING:
     from .bot_player_state import BotPlayerStateStore
 
 logger = logging.getLogger(__name__)
 
 # TSMusicBot 需要 Origin header 才允许 API 调用（CSRF 防护）
+# 设置容器header兼容性
 _HEADERS = {
-    "Origin": "http://127.0.0.1:3000",
+    "Origin": os.environ.get(
+        "TSMUSIC_URL",
+        "http://127.0.0.1:3000"
+    ),
     "Content-Type": "application/json",
 }
 
@@ -1011,14 +1017,14 @@ class TSMusicClient:
         resp = await self._http.get(f"/api/bot/{bot_id}/config")
         return self._json(resp)
 
-    async def get_bot_nickname(self, bot_id: str | None = None) -> str | None:
+    async def get_bot_nickname(self, bot_id: str | None = None, *, refresh: bool = False) -> str | None:
         """获取 bot 配置的 TS 昵称（仅供旧版上游缺少 clientId 时兼容定位）。
 
         GET /api/bot/{id}/config 返回移除 identity/apiKey 后的 bot 配置，含 nickname。
-        bot 改昵称需重连（低频），故永久缓存。
+        默认使用缓存；refresh=True 时强制重新读取，供跟随失败后的自愈重试。
         """
         bid = self._bid(bot_id)
-        cached = self._bot_nickname_cache.get(bid)
+        cached = None if refresh else self._bot_nickname_cache.get(bid)
         if cached:
             return cached
         await self._ensure_login()

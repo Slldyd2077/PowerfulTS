@@ -13,6 +13,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Callable
 
 from ..core.config import Settings
+from .bot_mover import bot_nickname_matches
 from .ts3_query import TS3QueryClient
 
 if TYPE_CHECKING:
@@ -54,7 +55,8 @@ def channel_human_count(
             continue
         if _int_or_none(client.get("clid")) in known_bot_client_ids:
             continue
-        if _norm_nickname(client.get("client_nickname")) in bot_nicknames:
+        nick = _norm_nickname(client.get("client_nickname"))
+        if any(bot_nickname_matches(nick, configured) for configured in bot_nicknames):
             continue
         count += 1
     return count
@@ -67,11 +69,13 @@ def bot_channel_map(clients: Iterable[dict], bot_nicknames: set[str]) -> dict[st
         if not _is_regular_client(client):
             continue
         nick = _norm_nickname(client.get("client_nickname"))
-        if nick not in bot_nicknames:
-            continue
         cid = _int_or_none(client.get("cid"))
-        if cid is not None:
-            channels[nick] = cid
+        if cid is None:
+            continue
+        for configured in bot_nicknames:
+            if bot_nickname_matches(nick, configured):
+                channels[configured] = cid
+                break
     return channels
 
 

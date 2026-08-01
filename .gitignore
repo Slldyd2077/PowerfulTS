@@ -48,3 +48,10 @@ backend/data/intro-music/*
 # 本地素材与草稿：宣传视频（数百 MB）与文案脚本，不入仓库
 video/
 script/
+
+# 运行日志（uvicorn 输出等，勿提交）
+backend/uvicorn.err.log
+backend/uvicorn.out.log
+
+# 部署备份目录（本地发布前的快照，勿提交）
+.deploy-backup/

@@ -18,6 +18,19 @@ from .ts3_query import TS3QueryClient, TS3QueryError
 logger = logging.getLogger(__name__)
 
 
+def bot_nickname_matches(actual: object, configured: object) -> bool:
+    """匹配 Bot 的静态昵称或播放状态动态昵称。
+
+    TSMusicBot 开启 ``nicknameEnabled`` 后会把 TS 昵称改成
+    ``♪ 歌曲名 - 配置昵称``。配置 API 仍只返回基础昵称，因此不能只做精确匹配。
+    """
+    actual_nick = str(actual or "").strip()
+    configured_nick = str(configured or "").strip()
+    if not actual_nick or not configured_nick:
+        return False
+    return actual_nick == configured_nick or actual_nick.endswith(f" - {configured_nick}")
+
+
 def _int_or_none(value: object) -> int | None:
     """安全 int 转换，空/异常返回 None（区分「字段缺失」与合法的 0 频道 cid）。"""
     try:
@@ -69,13 +82,13 @@ def move_bot_to_user(
                     user_cid = _int_or_none(cl.get("cid"))
             # bot 播放时会把昵称改成歌名，网页通话还会追加标记；优先使用本次
             # 连接稳定不变的 clid。仅在旧版 TSMusicBot 没有暴露 clientId 时
-            # 回退到配置昵称，保证滚动升级期间仍可工作。
+            # 回退到配置昵称（含播放时的动态后缀），保证滚动升级期间仍可工作。
             clid = _int_or_none(cl.get("clid"))
             matches_client_id = bot_client_id is not None and clid == bot_client_id
             matches_legacy_nickname = (
                 bot_client_id is None
                 and bool(bot_nickname)
-                and nick == bot_nickname
+                and bot_nickname_matches(nick, bot_nickname)
             )
             if bot_clid is None and (matches_client_id or matches_legacy_nickname):
                 bot_clid = clid

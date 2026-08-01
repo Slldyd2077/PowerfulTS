@@ -119,16 +119,23 @@ class FollowBeforePlaybackTests(unittest.IsolatedAsyncioTestCase):
         tsmusic = FakeTSMusic()
         account = _user()
         moved_with: list[tuple[int | None, str | None]] = []
+        move_results = iter(
+            [
+                {"moved": True, "reason": "moved", "user_cid": 9, "bot_cid": 9},
+                {"moved": False, "reason": "already_together", "user_cid": 9, "bot_cid": 9},
+                {"moved": False, "reason": "already_together", "user_cid": 9, "bot_cid": 9},
+            ]
+        )
 
         def fake_move(_settings, client_id, nickname, _account):
             moved_with.append((client_id, nickname))
-            return {"moved": True, "reason": "moved", "user_cid": 9, "bot_cid": 9}
+            return next(move_results)
 
         with patch("app.routers.music.bot_mover.move_bot_to_user", side_effect=fake_move):
             result = await _ensure_follow(SimpleNamespace(), tsmusic, account, "bot-1")
 
         self.assertTrue(tsmusic.ready)
-        self.assertEqual(moved_with, [(42, "MusicBot")])
+        self.assertEqual(moved_with, [(42, "MusicBot")] * 3)
         self.assertEqual(result["reason"], "moved")
 
 
