@@ -2,7 +2,12 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.services.bot_idle_manager import BotIdleManager, bot_channel_map, channel_human_count
+from app.services.bot_idle_manager import (
+    BotIdleManager,
+    bot_channel_map,
+    bot_channel_map_by_client_id,
+    channel_human_count,
+)
 
 
 class FakeClock:
@@ -58,6 +63,9 @@ class FakeTSMusic:
 
     async def get_bot_nickname(self, bot_id: str) -> str:
         return "MusicBot"
+
+    async def get_bot_client_id(self, bot_id: str) -> int:
+        return 42
 
     async def stop_bot_checked(self, bot_id: str) -> dict:
         self.stop_calls.append(bot_id)
@@ -128,13 +136,22 @@ class BotIdleManagerTests(unittest.TestCase):
             {"MusicBot A": 10, "MusicBot B": 12},
         )
 
+    def test_client_id_map_survives_dynamic_bot_nickname(self) -> None:
+        clients = [
+            {"client_type": "0", "clid": "42", "client_nickname": "♪ 当前歌曲", "cid": "10"},
+            {"client_type": "0", "clid": "7", "client_nickname": "Alice", "cid": "10"},
+        ]
+
+        self.assertEqual(bot_channel_map_by_client_id(clients, {42}), {42: 10})
+        self.assertEqual(channel_human_count(clients, 10, {"MusicBot"}, {42}), 1)
+
 
 class BotIdleManagerAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_empty_channel_reaches_checked_stop_after_timeout(self) -> None:
         clock = FakeClock()
         tsmusic = FakeTSMusic(timeout=1)
         manager = BotIdleManager(test_settings(), tsmusic, clock=clock)
-        clients = [{"client_type": "0", "client_nickname": "MusicBot", "cid": "10"}]
+        clients = [{"client_type": "0", "clid": "42", "client_nickname": "MusicBot", "cid": "10"}]
 
         with patch("app.services.bot_idle_manager.fetch_ts_clients", return_value=clients):
             await manager.poll_once()
@@ -151,7 +168,7 @@ class BotIdleManagerAsyncTests(unittest.IsolatedAsyncioTestCase):
         clock = FakeClock()
         tsmusic = FakeTSMusic(timeout=1)
         manager = BotIdleManager(test_settings(), tsmusic, clock=clock)
-        empty = [{"client_type": "0", "client_nickname": "MusicBot", "cid": "10"}]
+        empty = [{"client_type": "0", "clid": "42", "client_nickname": "MusicBot", "cid": "10"}]
         occupied = empty + [{"client_type": "0", "client_nickname": "Alice", "cid": "10"}]
 
         with patch("app.services.bot_idle_manager.fetch_ts_clients", return_value=empty):
@@ -170,7 +187,7 @@ class BotIdleManagerAsyncTests(unittest.IsolatedAsyncioTestCase):
         clock = FakeClock()
         tsmusic = FakeTSMusic(timeout=1)
         manager = BotIdleManager(test_settings(), tsmusic, clock=clock)
-        empty = [{"client_type": "0", "client_nickname": "MusicBot", "cid": "10"}]
+        empty = [{"client_type": "0", "clid": "42", "client_nickname": "MusicBot", "cid": "10"}]
 
         with patch("app.services.bot_idle_manager.fetch_ts_clients", return_value=empty):
             await manager.poll_once()
@@ -187,7 +204,7 @@ class BotIdleManagerAsyncTests(unittest.IsolatedAsyncioTestCase):
         clock = FakeClock()
         tsmusic = FakeTSMusic(timeout=1)
         manager = BotIdleManager(test_settings(), tsmusic, clock=clock)
-        empty = [{"client_type": "0", "client_nickname": "MusicBot", "cid": "10"}]
+        empty = [{"client_type": "0", "clid": "42", "client_nickname": "MusicBot", "cid": "10"}]
 
         with patch("app.services.bot_idle_manager.fetch_ts_clients", return_value=empty):
             await manager.poll_once()
@@ -211,7 +228,7 @@ class BotIdleManagerAsyncTests(unittest.IsolatedAsyncioTestCase):
         new_client = FakeTSMusic(timeout=1)
         holder = {"client": old_client}
         manager = BotIdleManager(test_settings(), lambda: holder["client"], clock=clock)
-        clients = [{"client_type": "0", "client_nickname": "MusicBot", "cid": "10"}]
+        clients = [{"client_type": "0", "clid": "42", "client_nickname": "MusicBot", "cid": "10"}]
 
         with patch("app.services.bot_idle_manager.fetch_ts_clients", return_value=clients):
             await manager.poll_once()
@@ -232,7 +249,7 @@ class BotIdleManagerAsyncTests(unittest.IsolatedAsyncioTestCase):
         clock = FakeClock()
         tsmusic = FakeTSMusic(timeout=0, auto_pause=True, playing=True)
         manager = BotIdleManager(test_settings(), tsmusic, clock=clock)
-        clients = [{"client_type": "0", "client_nickname": "MusicBot", "cid": "10"}]  # 空频道
+        clients = [{"client_type": "0", "clid": "42", "client_nickname": "♪ 当前歌曲", "cid": "10"}]  # 动态昵称的空频道
         with patch("app.services.bot_idle_manager.fetch_ts_clients", return_value=clients):
             await manager.poll_once()
         self.assertEqual(tsmusic.pause_calls, ["bot-1"])
@@ -245,7 +262,7 @@ class BotIdleManagerAsyncTests(unittest.IsolatedAsyncioTestCase):
         clock = FakeClock()
         tsmusic = FakeTSMusic(timeout=1, stop_error=RuntimeError("upstream down"))
         manager = BotIdleManager(test_settings(), tsmusic, clock=clock)
-        clients = [{"client_type": "0", "client_nickname": "MusicBot", "cid": "10"}]
+        clients = [{"client_type": "0", "clid": "42", "client_nickname": "MusicBot", "cid": "10"}]
         with patch("app.services.bot_idle_manager.fetch_ts_clients", return_value=clients):
             await manager.poll_once()  # 开始空闲计时
             clock.now = 60

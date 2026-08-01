@@ -1012,7 +1012,7 @@ class TSMusicClient:
         return self._json(resp)
 
     async def get_bot_nickname(self, bot_id: str | None = None) -> str | None:
-        """获取 bot 的 TS 昵称（供 bot_mover 在 clientlist 中定位 bot client）。
+        """获取 bot 配置的 TS 昵称（仅供旧版上游缺少 clientId 时兼容定位）。
 
         GET /api/bot/{id}/config 返回移除 identity/apiKey 后的 bot 配置，含 nickname。
         bot 改昵称需重连（低频），故永久缓存。

@@ -1,3 +1,12 @@
+## v0.12.1 (2026-08-01)
+
+### Fix
+
+- **bot-idle**: 使用稳定的 TS clientId 定位动态昵称机器人，恢复空频道自动下线与自动暂停。
+- **play-follow**: 播放前先唤醒已自动下线的机器人，并按 clientId 移动到操作者频道；旧版上游保留昵称兼容回退。
+- **voice-mobile**: 为移动端网页通话增加 WASM Opus 兼容解码、音频解锁与前后台恢复，并优化触控设备选择控件。
+- **docker**: TSMusicBot API 的 Origin 跟随 `TSMUSIC_URL`，修复容器部署下的来源校验失败。
+
 ## v0.12.0 (2026-07-29)
 
 ### Feat

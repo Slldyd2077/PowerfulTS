@@ -189,11 +189,21 @@ async def _ensure_follow(
     try:
         if not tsmusic.follow_enabled:
             return {"moved": False, "reason": "disabled"}
+        # 自动下线后的首次播放会在实际播放命令里重新启动 bot。跟随必须先确保
+        # bot 已上线，否则此刻还没有可供 ServerQuery 移动的 clid。
+        await tsmusic.ensure_player_ready(bot_id)
+        bot_client_id = await tsmusic.get_bot_client_id(bot_id)
         bot_nick = await tsmusic.get_bot_nickname(bot_id)
-        if not bot_nick:
-            logger.warning("跟随跳过: 未能解析 bot 昵称 (bot_id=%s)", bot_id)
-            return {"moved": False, "reason": "bot_nickname_unknown"}
-        result = await asyncio.to_thread(bot_mover.move_bot_to_user, settings, bot_nick, account)
+        if bot_client_id is None and not bot_nick:
+            logger.warning("跟随跳过: 未能解析 bot clid 或昵称 (bot_id=%s)", bot_id)
+            return {"moved": False, "reason": "bot_identity_unknown"}
+        result = await asyncio.to_thread(
+            bot_mover.move_bot_to_user,
+            settings,
+            bot_client_id,
+            bot_nick,
+            account,
+        )
         reason = result.get("reason")
         if result.get("moved"):
             logger.info("跟随完成: bot→cid=%s (用户=%s)", result.get("user_cid"), account.ts_nickname)

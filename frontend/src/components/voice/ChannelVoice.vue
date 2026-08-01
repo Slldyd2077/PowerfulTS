@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import type { OpusDecoderWebWorker as WasmOpusDecoder } from 'opus-decoder'
 import { useAuthStore } from '@/stores/auth'
 import { useVoiceChannels } from '@/composables/useVoiceChannels'
 import { stopLiveAudio } from '@/api/music'
@@ -14,11 +15,22 @@ import {
 
 const emit = defineEmits<{ (e: 'session-change'): void }>()
 
-type SpeakerDecoder = {
+type NativeSpeakerDecoder = {
+  kind: 'webcodecs'
   decoder: AudioDecoder
   timestamp: number
   lastSeen: number
 }
+
+type WasmSpeakerDecoder = {
+  kind: 'wasm'
+  decoder: WasmOpusDecoder<48000>
+  pending: number
+  chain: Promise<void>
+  lastSeen: number
+}
+
+type SpeakerDecoder = NativeSpeakerDecoder | WasmSpeakerDecoder
 
 const auth = useAuthStore()
 // 通话身份由后端按登录账号开，前端只需要知道它开好了没有。
@@ -32,6 +44,7 @@ const activeSpeakers = ref(0)
 const speakingIds = ref<number[]>([])
 const outputVolume = ref(85)
 const microphoneVolume = ref(100)
+const decoderBackend = ref<'webcodecs' | 'wasm' | ''>('')
 
 const { roommates, refresh: refreshChannels } = useVoiceChannels()
 
@@ -62,6 +75,11 @@ const selectedOutput = ref('')
 // setSinkId on AudioContext is Chromium-only; hide the picker where it is absent.
 const canChooseOutput = typeof AudioContext !== 'undefined'
   && 'setSinkId' in AudioContext.prototype
+const compatibilityNote = computed(() => {
+  if (!window.isSecureContext) return '手机浏览器必须通过 HTTPS 打开本页，才能使用麦克风。'
+  if (decoderBackend.value === 'wasm') return '兼容模式已启用：当前设备使用 WASM 解码频道语音。'
+  return ''
+})
 
 // 4502 = TSMusicBot 没有下行接口（版本过旧），重连多少次都一样，直接收手。
 // 4503（连不上）和 1011（流中途断）交给下面的有限次退避重连。
@@ -76,6 +94,7 @@ let reconnectTimer: number | null = null
 let reconnectAttempt = 0
 let listenGeneration = 0
 const decoders = new Map<number, SpeakerDecoder>()
+let WasmDecoderCtor: typeof import('opus-decoder').OpusDecoderWebWorker | null = null
 
 let microphone: MediaStream | null = null
 let microphoneRecorder: MediaRecorder | null = null
@@ -132,14 +151,26 @@ function waitForSocket(socket: WebSocket): Promise<void> {
 
 function closeDecoders() {
   for (const speaker of decoders.values()) {
-    try { speaker.decoder.close() } catch { /* already closed */ }
+    try {
+      if (speaker.kind === 'webcodecs') speaker.decoder.close()
+      else void speaker.decoder.free()
+    } catch { /* already closed */ }
   }
   decoders.clear()
   workletNode?.port.postMessage({ type: 'reset' })
   activeSpeakers.value = 0
 }
 
-function deliverPcm(clientId: number, frame: AudioData) {
+function postPcm(clientId: number, left: Float32Array, right: Float32Array) {
+  const leftBuffer = left.buffer as ArrayBuffer
+  const rightBuffer = right.buffer as ArrayBuffer
+  workletNode?.port.postMessage(
+    { type: 'pcm', clientId, left: leftBuffer, right: rightBuffer },
+    [leftBuffer, rightBuffer],
+  )
+}
+
+function deliverWebCodecsPcm(clientId: number, frame: AudioData) {
   try {
     const left = new Float32Array(frame.numberOfFrames)
     frame.copyTo(left, { planeIndex: 0, format: 'f32-planar' })
@@ -150,12 +181,7 @@ function deliverPcm(clientId: number, frame: AudioData) {
     } else {
       right = left.slice()
     }
-    const leftBuffer = left.buffer as ArrayBuffer
-    const rightBuffer = right.buffer as ArrayBuffer
-    workletNode?.port.postMessage(
-      { type: 'pcm', clientId, left: leftBuffer, right: rightBuffer },
-      [leftBuffer, rightBuffer],
-    )
+    postPcm(clientId, left, right)
   } finally {
     frame.close()
   }
@@ -164,14 +190,57 @@ function deliverPcm(clientId: number, frame: AudioData) {
 function getSpeakerDecoder(clientId: number): SpeakerDecoder {
   const existing = decoders.get(clientId)
   if (existing) return existing
+  if (decoderBackend.value === 'wasm' && WasmDecoderCtor) {
+    const decoder = new WasmDecoderCtor({ forceStereo: true, sampleRate: 48000 })
+    const speaker: WasmSpeakerDecoder = {
+      kind: 'wasm', decoder, pending: 0, chain: decoder.ready, lastSeen: performance.now(),
+    }
+    decoders.set(clientId, speaker)
+    return speaker
+  }
   const decoder = new AudioDecoder({
-    output: (frame) => deliverPcm(clientId, frame),
+    output: (frame) => deliverWebCodecsPcm(clientId, frame),
     error: (error) => console.warn(`TS voice decoder ${clientId} failed`, error),
   })
   decoder.configure({ codec: 'opus', sampleRate: 48000, numberOfChannels: 2 })
-  const speaker = { decoder, timestamp: 0, lastSeen: performance.now() }
+  const speaker: NativeSpeakerDecoder = {
+    kind: 'webcodecs', decoder, timestamp: 0, lastSeen: performance.now(),
+  }
   decoders.set(clientId, speaker)
   return speaker
+}
+
+function decodeWasmPacket(speaker: WasmSpeakerDecoder, clientId: number, packet: Uint8Array) {
+  if (speaker.pending > 24) return
+  speaker.pending++
+  speaker.chain = speaker.chain
+    .then(async () => {
+      const decoded = await speaker.decoder.decodeFrame(packet)
+      if (!decoded.samplesDecoded || !decoded.channelData.length) return
+      if (decoded.errors.length) {
+        console.warn(`TS voice WASM decoder ${clientId} reported errors`, decoded.errors)
+      }
+      // Copy out of decoder-owned memory before transferring the buffers to the worklet.
+      const left = new Float32Array(decoded.channelData[0]!)
+      const right = decoded.channelData[1]
+        ? new Float32Array(decoded.channelData[1])
+        : left.slice()
+      postPcm(clientId, left, right)
+    })
+    .catch((error) => console.warn(`TS voice WASM decoder ${clientId} failed`, error))
+    .finally(() => { speaker.pending-- })
+}
+
+function pruneStaleDecoders() {
+  const now = performance.now()
+  for (const [id, stale] of decoders) {
+    if (now - stale.lastSeen <= 10000) continue
+    try {
+      if (stale.kind === 'webcodecs') stale.decoder.close()
+      else void stale.decoder.free()
+    } catch { /* already closed */ }
+    decoders.delete(id)
+  }
 }
 
 function decodeVoicePacket(buffer: ArrayBuffer) {
@@ -185,6 +254,11 @@ function decodeVoicePacket(buffer: ArrayBuffer) {
   const duration = Math.round(durationSamples * 1_000_000 / 48000)
   const speaker = getSpeakerDecoder(clientId)
   speaker.lastSeen = performance.now()
+  if (speaker.kind === 'wasm') {
+    decodeWasmPacket(speaker, clientId, new Uint8Array(buffer, 6).slice())
+    pruneStaleDecoders()
+    return
+  }
   if (speaker.decoder.decodeQueueSize > 24) {
     speaker.timestamp += duration
     return
@@ -196,25 +270,55 @@ function decodeVoicePacket(buffer: ArrayBuffer) {
     data: new Uint8Array(buffer, 6),
   }))
   speaker.timestamp += duration
-
-  const now = performance.now()
-  for (const [id, stale] of decoders) {
-    if (now - stale.lastSeen > 10000) {
-      try { stale.decoder.close() } catch { /* already closed */ }
-      decoders.delete(id)
-    }
-  }
+  pruneStaleDecoders()
 }
 
 async function ensureAudioPipeline() {
-  const Decoder = globalThis.AudioDecoder
-  if (!Decoder) throw new Error('当前浏览器缺少 WebCodecs AudioDecoder')
-  const support = await Decoder.isConfigSupported({
-    codec: 'opus', sampleRate: 48000, numberOfChannels: 2,
-  })
-  if (!support.supported) throw new Error('当前浏览器不支持 WebCodecs Opus 解码')
+  if (!window.isSecureContext) {
+    throw new Error('手机端语音需要 HTTPS；请使用 HTTPS 地址打开本页')
+  }
+  if (typeof AudioContext === 'undefined' || typeof AudioWorkletNode === 'undefined') {
+    throw new Error('当前浏览器缺少实时音频能力，请升级浏览器')
+  }
+  if (audioContext && workletNode && outputGain) {
+    await audioContext.resume()
+    return
+  }
 
+  // Must happen before the first await: iOS only unlocks playback while the
+  // original tap still owns user activation.
   audioContext = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 })
+  const resumePromise = audioContext.resume()
+  if (!microphoneContext || microphoneContext.state === 'closed') {
+    microphoneContext = new AudioContext({ latencyHint: 'interactive' })
+  }
+  const microphoneResumePromise = microphoneContext.resume()
+
+  const Decoder = globalThis.AudioDecoder
+  let webCodecsSupported = false
+  if (Decoder) {
+    try {
+      webCodecsSupported = (await Decoder.isConfigSupported({
+        codec: 'opus', sampleRate: 48000, numberOfChannels: 2,
+      })).supported === true
+    } catch { /* fall through to WASM */ }
+  }
+  if (webCodecsSupported) {
+    decoderBackend.value = 'webcodecs'
+  } else {
+    if (typeof WebAssembly === 'undefined' || typeof Worker === 'undefined') {
+      throw new Error('当前浏览器无法加载 Opus 兼容解码器，请升级浏览器')
+    }
+    const module = await import('opus-decoder')
+    WasmDecoderCtor = module.OpusDecoderWebWorker
+    // Fail before opening a server-side voice identity if this browser cannot
+    // actually start the worker/WASM decoder (CSP and old WebViews can block it).
+    const probe = new WasmDecoderCtor({ forceStereo: true, sampleRate: 48000 })
+    await probe.ready
+    await probe.free()
+    decoderBackend.value = 'wasm'
+  }
+
   await audioContext.audioWorklet.addModule(
     new URL('../../workers/voice-player-worklet.js', import.meta.url),
   )
@@ -233,6 +337,10 @@ async function ensureAudioPipeline() {
     speakingIds.value = event.data.speaking || []
   }
   pushAllSpeakerGains()
+  await resumePromise
+  // Playback is required; the microphone is best-effort and may stay suspended
+  // until getUserMedia completes on stricter mobile browsers.
+  await microphoneResumePromise.catch(() => {})
   await audioContext.resume()
 }
 
@@ -410,7 +518,10 @@ function setMicrophoneVolume() {
 
 /** Route the raw mic through a gain node so the slider actually changes what is sent. */
 function buildMicrophonePipeline(stream: MediaStream): MediaStream {
-  microphoneContext = new AudioContext()
+  if (!microphoneContext || microphoneContext.state === 'closed') {
+    microphoneContext = new AudioContext({ latencyHint: 'interactive' })
+  }
+  void microphoneContext.resume()
   const source = microphoneContext.createMediaStreamSource(stream)
   microphoneGain = microphoneContext.createGain()
   microphoneGain.gain.value = microphoneVolume.value / 100
@@ -535,12 +646,18 @@ async function joinCall() {
   joining.value = true
   listenError.value = ''
   try {
+    // Unlock playback while the original tap still owns user activation.
+    // It also prevents creating a server-side voice identity on an unsupported device.
+    await ensureAudioPipeline()
     // 后端按登录账号开通话身份：以你自己的昵称进服务器，挂断就离开。
     const session = await openVoiceSession()
     voiceBotId.value = session.botId
     emit('session-change')
-    await refreshChannels() // 立刻拿到同频道成员，音量面板才有内容
+    void refreshChannels() // 频道列表失败不应阻止已经可用的语音链路
   } catch (error) {
+    await stopMicrophone()
+    await stopListening()
+    voiceBotId.value = ''
     listenError.value = errorText(error, '无法加入通话')
     ElMessage.error(listenError.value)
     return
@@ -549,7 +666,12 @@ async function joinCall() {
   }
 
   await startListening()
-  if (!listening.value) return
+  if (!listening.value) {
+    voiceBotId.value = ''
+    await closeVoiceSession().catch(() => {})
+    emit('session-change')
+    return
+  }
   await startMicrophone()
 }
 
@@ -573,6 +695,13 @@ async function toggleMicrophone() {
   }
 }
 
+function resumeAudioAfterForeground() {
+  if (document.visibilityState !== 'visible') return
+  if (listening.value) void audioContext?.resume()
+  if (microphoneLive.value) void microphoneContext?.resume()
+  void refreshDevices()
+}
+
 // 直接关标签页时没有机会调 leaveCall，但下行 WebSocket 会随页面一起断开，
 // 后端看到断开就会在宽限期后把通话身份收回——不需要 sendBeacon（它也带不上
 // X-Session-Token 请求头，发了后端也认不出是谁）。
@@ -582,10 +711,14 @@ watch(roommates, pushAllSpeakerGains)
 onMounted(() => {
   void refreshDevices()
   navigator.mediaDevices?.addEventListener?.('devicechange', refreshDevices)
+  document.addEventListener('visibilitychange', resumeAudioAfterForeground)
+  window.addEventListener('pageshow', resumeAudioAfterForeground)
 })
 
 onBeforeUnmount(() => {
   navigator.mediaDevices?.removeEventListener?.('devicechange', refreshDevices)
+  document.removeEventListener('visibilitychange', resumeAudioAfterForeground)
+  window.removeEventListener('pageshow', resumeAudioAfterForeground)
   void leaveCall()
 })
 </script>
@@ -674,8 +807,15 @@ onBeforeUnmount(() => {
           </option>
         </select>
       </label>
+      <div v-else class="setting">
+        <span class="setting-label">播放设备</span>
+        <span class="system-device">由手机系统控制</span>
+      </div>
       <p v-if="!inputDevices.length || !inputDevices[0].label" class="setting-hint">
         设备名称要等浏览器授予过一次麦克风权限才会显示。
+      </p>
+      <p v-if="compatibilityNote" class="compatibility-note" role="status">
+        {{ compatibilityNote }}
       </p>
     </div>
 
@@ -778,17 +918,55 @@ p { margin: 0; color: var(--text-secondary); font-size: .76em; line-height: 1.6;
 .setting-label b { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .setting input[type="range"] { width: 100%; accent-color: var(--color-primary); }
 .setting select {
+  appearance: none;
   width: 100%;
   min-width: 0;
-  padding: 6px 8px;
-  border: 1px solid var(--border-subtle);
+  min-height: 38px;
+  padding: 8px 36px 8px 11px;
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
+  color-scheme: dark;
+  background-color: var(--surface-2);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237387a5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  color: var(--text-primary);
   font-family: inherit;
-  font-size: .68em;
+  font-size: .7em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .025);
+  cursor: pointer;
+  transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
+}
+.setting select:hover { border-color: var(--border-emphasis); background-color: #0e1d32; }
+.setting select:focus-visible {
+  outline: none;
+  border-color: rgba(var(--color-primary-rgb), .62);
+  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), .14);
+}
+.setting select:disabled { opacity: .52; cursor: not-allowed; }
+.setting select option { background-color: var(--surface-2); color: var(--text-primary); }
+.system-device {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  padding: 8px 11px;
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-sm);
+  background: rgba(var(--color-primary-rgb), .025);
+  color: var(--text-secondary);
+  font-size: .7em;
 }
 .setting-hint { grid-column: 1 / -1; margin: 0; color: var(--text-muted); font-size: .62em; }
+.compatibility-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid rgba(var(--color-accent-rgb), .22);
+  border-radius: var(--radius-sm);
+  background: rgba(var(--color-accent-rgb), .06);
+  color: var(--color-accent);
+  font-size: .65em;
+}
 
 .speaker-mixer {
   grid-column: 1 / -1;
@@ -859,7 +1037,9 @@ p { margin: 0; color: var(--text-secondary); font-size: .76em; line-height: 1.6;
 @media (max-width: 680px) {
   .voice-panel { grid-template-columns: 1fr; padding: 18px; }
   .voice-status { align-items: flex-start; min-width: 0; }
-  .voice-actions button { flex-basis: 100%; }
+  .voice-actions button { min-height: 46px; flex-basis: 100%; touch-action: manipulation; }
+  .setting select, .system-device { min-height: 44px; font-size: 16px; }
+  .setting input[type="range"], .mixer-list input[type="range"] { min-height: 32px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .is-listening .voice-mark span, .live-ring { animation: none; }
