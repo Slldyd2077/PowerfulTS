@@ -16,14 +16,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.config import Settings
 from . import app_setting
 
+import os
+
 if TYPE_CHECKING:
     from .bot_player_state import BotPlayerStateStore
 
 logger = logging.getLogger(__name__)
 
 # TSMusicBot 需要 Origin header 才允许 API 调用（CSRF 防护）
+# 设置容器header兼容性
 _HEADERS = {
-    "Origin": "http://127.0.0.1:3000",
+    "Origin": os.environ.get(
+        "TSMUSIC_URL",
+        "http://127.0.0.1:3000"
+    ),
     "Content-Type": "application/json",
 }
 
