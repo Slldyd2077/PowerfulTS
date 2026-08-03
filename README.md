@@ -52,6 +52,54 @@
 
 ---
 
+## 📸 界面预览
+
+> 以下截图取自一台本地搭建的 **演示 TS3 服务器**（频道与在线成员均为演示数据），并非任何真实服务器的用户信息。
+
+### 服务器监控
+
+在线人数、游戏分布、在线用户列表与频道树，每 5 秒自动刷新。
+
+<p align="center">
+  <img src="assets/screenshots/dashboard.png" alt="服务器监控 — 在线用户 · 游戏分布 · 频道树" width="900" />
+</p>
+
+### 音乐控制
+
+多平台搜索（网易云 / QQ / 酷狗 / B 站）、播放队列、音量与播放模式，右侧管理多个 TS Bot 实例。
+
+<p align="center">
+  <img src="assets/screenshots/music.png" alt="音乐控制 — 搜索 · 点歌 · 队列 · 播放器" width="900" />
+</p>
+
+### 网页通话
+
+不装 TeamSpeak 客户端，直接在浏览器收听频道并发言；右侧可浏览频道与在场成员，带 🔒 的频道需要密码。
+
+<p align="center">
+  <img src="assets/screenshots/voice.png" alt="网页通话 — 频道浏览 · 设备与增益设置" width="900" />
+</p>
+
+### 登录页
+
+左侧音频频谱随开屏背景音乐律动，支持以游客身份浏览管理面板。
+
+<p align="center">
+  <img src="assets/screenshots/login.png" alt="登录页 — 音频频谱开屏" width="900" />
+</p>
+
+### 移动端
+
+手机 / 平板自适应：底部标签栏导航、单栏布局、触摸友好的操作按钮。
+
+<p align="center">
+  <img src="assets/screenshots/mobile-dashboard.png" alt="移动端 — 服务器监控" width="260" />
+  <img src="assets/screenshots/mobile-music.png" alt="移动端 — 音乐控制" width="260" />
+  <img src="assets/screenshots/mobile-voice.png" alt="移动端 — 网页通话" width="260" />
+</p>
+
+---
+
 ## 🧱 技术栈
 
 | 层 | 技术 |
@@ -90,7 +138,7 @@ PowerfulTS 后端原生直连 TS3 ServerQuery，同时代理 TSMusicBot 的多�
 
 ```
 PowerfulTS/
-├── assets/                      # 项目 LOGO 与 banner
+├── assets/                      # 项目 LOGO、banner 与界面截图（screenshots/）
 ├── backend/                     # FastAPI 后端 — 原生 TS3 直连 + 代理网关
 │   ├── app/
 │   │   ├── core/config.py           # 配置：从环境变量读取 TSMusicBot / TS3 凭据
