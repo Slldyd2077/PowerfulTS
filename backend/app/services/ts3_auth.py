@@ -3,6 +3,10 @@
 发码使用独立临时连接（不共享 monitor 长连接，避免并发污染其命令流）。
 send_verify_code 返回发码目标的 unique_identifier（注册时校验一致，防昵称换人冒名）。
 target_mode=1 表示向 target=clid 的客户端发私聊消息。
+
+在线判定按 monitor 的 identity（已去掉 `<WEB通讯>` 前缀），所以网页通话身份也算在线；
+但私聊仍按 TS 原样昵称精确匹配 —— 私聊发给网页身份等于发给一个机器人，用户在浏览器里
+根本看不到，认成「已送达」会把待发通知白白清掉。
 """
 from __future__ import annotations
 
@@ -21,7 +25,7 @@ def _find_online_entry(monitor: TS3Monitor, nickname: str) -> dict | None:
     now = time.time()
     with monitor._lock:
         for entry in monitor.client_data.values():
-            if entry["nickname"] == nickname and now - entry["last_seen"] <= ONLINE_WINDOW:
+            if entry["identity"] == nickname and now - entry["last_seen"] <= ONLINE_WINDOW:
                 return entry
     return None
 
@@ -36,7 +40,7 @@ def get_online_uid(monitor: TS3Monitor, nickname: str) -> str | None:
     now = time.time()
     with monitor._lock:
         for uid, entry in monitor.client_data.items():
-            if entry["nickname"] == nickname and now - entry["last_seen"] <= ONLINE_WINDOW:
+            if entry["identity"] == nickname and now - entry["last_seen"] <= ONLINE_WINDOW:
                 return uid
     return None
 

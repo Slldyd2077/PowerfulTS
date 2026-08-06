@@ -101,8 +101,11 @@ export interface VoiceChannelOverview {
   monitorRunning: boolean
 }
 
-export async function getVoiceChannels(): Promise<VoiceChannelOverview> {
-  const { data } = await apiClient.get('/music/voice/channels')
+/** `fresh` 让后端先催一轮 TS 轮询再返回，用于用户主动刷新（后台轮询不必带）。 */
+export async function getVoiceChannels(fresh = false): Promise<VoiceChannelOverview> {
+  const { data } = await apiClient.get('/music/voice/channels', {
+    params: fresh ? { fresh: 1 } : undefined,
+  })
   return data
 }
 

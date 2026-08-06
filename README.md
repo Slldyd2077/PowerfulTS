@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="assets/banner.png" alt="PowerfulTS — TS3 管理面板" width="800" />
+  <img src="assets/banner.png" alt="PowerfulTS — TeamSpeak 管理面板" width="800" />
 </p>
 
 <p align="center">
-  <strong>TS3 服务器管理面板</strong> · 独立前后端架构 · 原生 TS3 直连 + TSMusicBot 音乐引擎
+  <strong>TeamSpeak 服务器管理面板</strong> · 独立前后端架构 · 原生 TS 直连 + TSMusicBot 音乐引擎
 </p>
 
 <p align="center">
@@ -50,6 +50,56 @@
 | 🤝 社交 | ✅ | 好友添加 / 删除 / 在线状态 |
 | 📱 移动端 | ✅ | 手机 / 平板自适应（抽屉导航 · 响应式布局 · 触屏长按操作） |
 
+> 音乐、点播、社交等功能**需登录后使用**；浏览器会自动在请求头注入会话 Token。
+
+---
+
+## 📸 界面预览
+
+> 以下截图取自一台本地搭建的 **演示 TS3 服务器**（频道与在线成员均为演示数据），并非任何真实服务器的用户信息。
+
+### 服务器监控
+
+在线人数、游戏分布、在线用户列表与频道树，每 5 秒自动刷新。
+
+<p align="center">
+  <img src="assets/screenshots/dashboard.png" alt="服务器监控 — 在线用户 · 游戏分布 · 频道树" width="900" />
+</p>
+
+### 音乐控制
+
+多平台搜索（网易云 / QQ / 酷狗 / B 站）、播放队列、音量与播放模式，右侧管理多个 TS Bot 实例。
+
+<p align="center">
+  <img src="assets/screenshots/music.png" alt="音乐控制 — 搜索 · 点歌 · 队列 · 播放器" width="900" />
+</p>
+
+### 网页通话
+
+不装 TeamSpeak 客户端，直接在浏览器收听频道并发言；右侧可浏览频道与在场成员，带 🔒 的频道需要密码。
+
+<p align="center">
+  <img src="assets/screenshots/voice.png" alt="网页通话 — 频道浏览 · 设备与增益设置" width="900" />
+</p>
+
+### 登录页
+
+左侧音频频谱随开屏背景音乐律动，支持以游客身份浏览管理面板。
+
+<p align="center">
+  <img src="assets/screenshots/login.png" alt="登录页 — 音频频谱开屏" width="900" />
+</p>
+
+### 移动端
+
+手机 / 平板自适应：底部标签栏导航、单栏布局、触摸友好的操作按钮。
+
+<p align="center">
+  <img src="assets/screenshots/mobile-dashboard.png" alt="移动端 — 服务器监控" width="260" />
+  <img src="assets/screenshots/mobile-music.png" alt="移动端 — 音乐控制" width="260" />
+  <img src="assets/screenshots/mobile-voice.png" alt="移动端 — 网页通话" width="260" />
+</p>
+
 ---
 
 ## 🧱 技术栈
@@ -90,7 +140,7 @@ PowerfulTS 后端原生直连 TS3 ServerQuery，同时代理 TSMusicBot 的多�
 
 ```
 PowerfulTS/
-├── assets/                      # 项目 LOGO 与 banner
+├── assets/                      # 项目 LOGO、banner 与界面截图（screenshots/）
 ├── backend/                     # FastAPI 后端 — 原生 TS3 直连 + 代理网关
 │   ├── app/
 │   │   ├── core/config.py           # 配置：从环境变量读取 TSMusicBot / TS3 凭据
@@ -276,23 +326,6 @@ PowerfulTS 本身不含 TS3 服务端与音乐引擎，需接入两个上游：
 - PowerfulTS 通过 ServerQuery 长连接轮询在线用户 / 频道 / 游戏状态
 
 > 两者均可运行在宿主机、独立容器或同一 compose 网络中，按 [容器网络地址说明](#方式一docker-一键部署推荐) 配置连接地址即可。
-
----
-
-## 🎮 功能使用指南
-
-| 功能 | 入口 | 说明 |
-|------|------|------|
-| 🎙️ 网页通话 | 网页通话 | 点「加入通话」即以自己的昵称进入频道；右侧点频道即可切换（带 🔒 的需输密码）；可单独调节频道里每个人的音量 |
-| 📊 概览 | 首页 Dashboard | 服务器概览、在线用户、游戏统计、频道树，每 5 秒自动刷新 |
-| 🎵 音乐 | 音乐控制 | 搜索（默认网易云，可切 QQ/酷狗/B 站）、播放/暂停/上下首/进度/音量/播放模式/清空队列 |
-| 🔐 平台账号 | 音乐控制 → 账号 | 网易云 / QQ / 酷狗 / B 站扫码登录，解锁 VIP 曲库、个人歌单与番剧点播 |
-| 🎮 Steam | Steam | 绑定 Steam 账号后查看好友在线状态、共同游戏与时长排行 |
-| 🤝 社交 | 好友 | 添加 / 删除好友，查看好友在线状态 |
-| 📱 QQ通知 | 配置 NapCat | 通过 NapCat/OneBot 在 QQ 上接收好友上线通知 |
-| 👤 账户 | 登录 / 注册 | QQ + TS 昵称绑定，ServerQuery 私聊下发验证码完成实名 |
-
-> 音乐、点播、社交等功能**需登录后使用**；浏览器会自动在请求头注入会话 Token。
 
 ---
 

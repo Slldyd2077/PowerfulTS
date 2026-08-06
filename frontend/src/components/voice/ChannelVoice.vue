@@ -46,7 +46,7 @@ const outputVolume = ref(85)
 const microphoneVolume = ref(100)
 const decoderBackend = ref<'webcodecs' | 'wasm' | ''>('')
 
-const { roommates, refresh: refreshChannels } = useVoiceChannels()
+const { roommates, refresh: refreshChannels, clearPendingChannel } = useVoiceChannels()
 
 // 每人音量按 TS 唯一昵称记，不按 clid：clid 每次重连都会变，按它记等于每次重进
 // 频道都要重设一遍。localStorage 持久化，下次进来还是你调好的样子。
@@ -652,6 +652,8 @@ async function joinCall() {
     // 后端按登录账号开通话身份：以你自己的昵称进服务器，挂断就离开。
     const session = await openVoiceSession()
     voiceBotId.value = session.botId
+    // 新一轮通话，上一轮记住的「刚切到哪个频道」作废。
+    clearPendingChannel()
     emit('session-change')
     void refreshChannels() // 频道列表失败不应阻止已经可用的语音链路
   } catch (error) {
@@ -684,6 +686,7 @@ async function leaveCall() {
   } catch {
     /* 后端还有宽限期兜底，这里失败不必打扰用户 */
   }
+  clearPendingChannel()
   emit('session-change')
 }
 

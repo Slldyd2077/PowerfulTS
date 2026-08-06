@@ -33,6 +33,19 @@ POLL_INTERVAL = 3  # 秒：轮询间隔
 INITIAL_BACKOFF = 2  # 秒：连接失败初始退避
 MAX_BACKOFF = 30  # 秒：最大退避
 
+# 网页通话身份在 TS 里的昵称前缀，由 TSMusicBot 的 BotProfileManager 加上。
+# 昵称是 PowerfulTS 各处的身份键（上线提醒、好友在线状态、ServerQuery 私聊），
+# 带着这个标记去精确匹配账号昵称会全线失配 —— 网页上线因此收不到 QQ 提醒。
+# 所以快照里同时留两份：nickname 是 TS 里的原样（展示用），identity 去掉标记（匹配用）。
+WEB_VOICE_MARKER = "<WEB通讯>"
+
+
+def strip_web_voice_marker(nickname: str) -> str:
+    """去掉 `<WEB通讯>` 前缀，得到账号本身的 TS 昵称；没有标记则原样返回。"""
+    if nickname.startswith(WEB_VOICE_MARKER):
+        return nickname[len(WEB_VOICE_MARKER):].lstrip()
+    return nickname
+
 
 def _safe_int(value: object, default: int = 0) -> int:
     """安全 int 转换，空/异常字段返回 default，避免 ValueError 杀线程。"""
@@ -137,7 +150,7 @@ class TS3Monitor:
         self.port = settings.ts3_query_port
         self._conn: TS3QueryClient | None = None
         self._lock = threading.Lock()
-        # unique_identifier -> {nickname, clid, cid, first_seen, last_seen}
+        # unique_identifier -> {nickname, identity, clid, cid, first_seen, last_seen}
         self.client_data: dict[str, dict] = {}
         # cid -> channel_name
         self.channel_map: dict[int, str] = {}
@@ -151,6 +164,13 @@ class TS3Monitor:
         self.running = False
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        # 按需轮询：加入通话 / 切频道这类动作做完就该立刻看到新状态，
+        # 不该等下一个 POLL_INTERVAL。_wake 提前唤醒轮询线程，
+        # _polls_started/_polls_done 让调用方能等到「请求之后才开始」的那次轮询跑完。
+        self._wake = threading.Event()
+        self._poll_cv = threading.Condition()
+        self._polls_started = 0
+        self._polls_done = 0
         # 上线提醒：主 event loop + notifier 由 app 启动时注入（同步线程 → async 主循环）
         self._loop = None
         self._notifier = None
@@ -225,7 +245,7 @@ class TS3Monitor:
             self.channel_tree = new_tree
             self.channel_password = new_password
 
-    def _refresh_clients(self) -> tuple[list[tuple[str, str]], list[str]]:
+    def _refresh_clients(self) -> tuple[list[tuple[str, str, bool]], list[str]]:
         now = time.time()
         resp = self._conn.send("clientlist", uid=True)
         # 锁外完成解析（resp 已是纯数据）
@@ -244,11 +264,13 @@ class TS3Monitor:
             seen_uids.add(uid)
             updates[uid] = {
                 "nickname": nickname,
+                "identity": strip_web_voice_marker(nickname),
                 "clid": _safe_int(cl.get("clid")),
                 "cid": _safe_int(cl.get("cid")),
             }
-        # 锁内一次性应用写 + 清理（短临界区，整个写原子）；同时收集上线/离线 nickname
-        new_online: list[tuple[str, str]] = []
+        # 锁内一次性应用写 + 清理（短临界区，整个写原子）；同时收集上线/离线事件。
+        # 上线事件带 identity（账号昵称）而不是原样昵称，网页身份才认得出是谁。
+        new_online: list[tuple[str, str, bool]] = []
         went_offline: list[str] = []
         with self._lock:
             for uid, u in updates.items():
@@ -256,18 +278,25 @@ class TS3Monitor:
                 if entry is None:
                     self.client_data[uid] = {
                         "nickname": u["nickname"],
+                        "identity": u["identity"],
                         "clid": u["clid"],
                         "cid": u["cid"],
                         "first_seen": now,
                         "last_seen": now,
                     }
                     self._total_users.add(uid)
-                    new_online.append((u["nickname"], uid))
+                    new_online.append((u["identity"], uid, u["identity"] != u["nickname"]))
                 else:
-                    entry.update(nickname=u["nickname"], clid=u["clid"], cid=u["cid"], last_seen=now)
+                    entry.update(
+                        nickname=u["nickname"],
+                        identity=u["identity"],
+                        clid=u["clid"],
+                        cid=u["cid"],
+                        last_seen=now,
+                    )
             for uid in list(self.client_data.keys()):
                 if uid not in seen_uids and now - self.client_data[uid]["last_seen"] > ONLINE_WINDOW:
-                    went_offline.append(self.client_data[uid]["nickname"])
+                    went_offline.append(self.client_data[uid]["identity"])
                     del self.client_data[uid]
         return new_online, went_offline
 
@@ -286,12 +315,14 @@ class TS3Monitor:
             logger.warning("TS3 轮询失败，将重连: %s", exc)
             self._disconnect()
 
-    def _dispatch_online(self, clients: list[tuple[str, str]]) -> None:
+    def _dispatch_online(self, clients: list[tuple[str, str, bool]]) -> None:
         """上线事件投递到主 loop（同步线程 → async 主循环），fire-and-forget。"""
         if self._loop is None or self._notifier is None or self._loop.is_closed():
             return
-        for nick, uid in clients:
-            fut = asyncio.run_coroutine_threadsafe(self._notifier.on_online(nick, uid), self._loop)
+        for nick, uid, web_voice in clients:
+            fut = asyncio.run_coroutine_threadsafe(
+                self._notifier.on_online(nick, uid, web_voice=web_voice), self._loop
+            )
             fut.add_done_callback(self._on_dispatch_done)
 
     def _dispatch_offline(self, nicknames: list[str]) -> None:
@@ -308,6 +339,27 @@ class TS3Monitor:
         except Exception:
             logger.exception("上线提醒投递异常")
 
+    def _poll_and_publish(self) -> None:
+        """轮询一次并推进代次，让 request_refresh 的等待者知道新快照已就绪。
+
+        失败（连接断开）也要推进：等待方只是「等这一轮跑完」，不该被吊到超时。
+        """
+        with self._poll_cv:
+            self._polls_started += 1
+            started = self._polls_started
+        try:
+            self._poll_once()
+        finally:
+            with self._poll_cv:
+                self._polls_done = started
+                self._poll_cv.notify_all()
+
+    def _sleep_between_polls(self, seconds: float) -> bool:
+        """轮询间隔；request_refresh 与 stop 都能提前唤醒。True 表示该退出线程。"""
+        self._wake.wait(seconds)
+        self._wake.clear()
+        return self._stop_event.is_set()
+
     def _run(self) -> None:
         backoff = INITIAL_BACKOFF
         while not self._stop_event.is_set():
@@ -322,14 +374,14 @@ class TS3Monitor:
                             break
                         backoff = min(backoff * 2, MAX_BACKOFF)
                         continue
-                self._poll_once()
+                self._poll_and_publish()
                 if self._conn is None:
                     # poll 失败已断开 → 走重连退避（backoff 增长）
                     if self._stop_event.wait(backoff):
                         break
                     backoff = min(backoff * 2, MAX_BACKOFF)
                     continue
-                if self._stop_event.wait(POLL_INTERVAL):
+                if self._sleep_between_polls(POLL_INTERVAL):
                     break
             except Exception:
                 # 兜底：任何未预期异常都不得杀掉监控线程
@@ -357,11 +409,31 @@ class TS3Monitor:
 
     def stop(self) -> None:
         self._stop_event.set()
+        self._wake.set()  # 正在等轮询间隔的线程立刻醒来收工
         if self._thread:
             self._thread.join(timeout=5)
             self._thread = None
         self._disconnect()
         logger.info("TS3 监控线程已停止")
+
+    # ─────────────────────── 按需刷新（供路由调用）───────────────────────
+
+    def request_refresh(self) -> int:
+        """请求轮询线程立刻跑一次，返回配合 wait_for_refresh 用的代次令牌。
+
+        令牌取的是「已开始的轮询数」：若此刻正好有一轮在飞，它读到的是动作之前的
+        状态，等它没意义，所以 wait_for_refresh 要求 _polls_done 严格大于令牌
+        —— 即必须是本次请求之后才开始的那一轮。
+        """
+        with self._poll_cv:
+            token = self._polls_started
+        self._wake.set()
+        return token
+
+    def wait_for_refresh(self, token: int, timeout: float = 2.0) -> bool:
+        """阻塞等到该轮轮询跑完（调用方应放线程池）。超时返回 False，不抛。"""
+        with self._poll_cv:
+            return self._poll_cv.wait_for(lambda: self._polls_done > token, timeout)
 
     # ─────────────────────── 快照（供路由读取）───────────────────────
 
@@ -376,8 +448,9 @@ class TS3Monitor:
                     continue
                 channel_name = self.channel_map.get(entry["cid"], "未知频道")
                 nickname = entry["nickname"]
-                # game 优先显示 Steam 当前游戏（后台 task 维护），无则回退 TS 频道名
-                display_game = self._steam_game(nickname) or channel_name
+                # 显示用原样昵称（TS 里就是这个），查 Steam 用 identity：
+                # 绑定按账号昵称记，带 <WEB通讯> 前缀查不到。
+                display_game = self._steam_game(entry["identity"]) or channel_name
                 online_list.append({
                     "nickname": nickname,
                     "game": display_game,
@@ -453,7 +526,8 @@ class TS3Monitor:
         now = time.time()
         with self._lock:
             for entry in self.client_data.values():
-                if entry["nickname"] == nickname and now - entry["last_seen"] <= ONLINE_WINDOW:
+                # 按 identity 比：网页通话身份的昵称带 <WEB通讯> 前缀，按原样比会判成离线。
+                if entry["identity"] == nickname and now - entry["last_seen"] <= ONLINE_WINDOW:
                     # 优先显示 Steam 当前游戏（后台 task 维护），无则回退 TS 频道名
                     steam_game = self._steam_game(nickname)
                     if steam_game:

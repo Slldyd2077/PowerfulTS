@@ -8,6 +8,7 @@ import { useVoiceChannels } from '@/composables/useVoiceChannels'
 // 频道数据和每人音量面板共用一份轮询（见 useVoiceChannels）。
 const {
   channels, botCid, botOnline, monitorRunning, loading, loadError, currentChannel, refresh,
+  markPendingChannel,
 } = useVoiceChannels()
 
 const switching = ref<number | null>(null)
@@ -53,7 +54,9 @@ async function switchTo(channel: VoiceChannel) {
   try {
     await moveVoiceChannel(channel.cid, password)
     // 别等下一次轮询，先本地跳过去，切换手感才跟得上点击。
-    botCid.value = channel.cid
+    // 后端在移动后已经催过一轮 TS 轮询，这里的 refresh 通常就能拿到新成员列表；
+    // markPendingChannel 保证万一那一轮超时，UI 也不会被旧快照弹回原频道。
+    markPendingChannel(channel.cid)
     ElMessage.success(`已进入「${channel.name}」`)
     await refresh()
   } catch (error) {
@@ -78,7 +81,8 @@ defineExpose({ refresh })
         <p v-else-if="!botOnline">加入通话后即可点击切换频道。</p>
         <p v-else>还没进入任何频道。</p>
       </div>
-      <button class="refresh" type="button" :disabled="loading" @click="refresh">刷新</button>
+      <!-- 手动刷新带 fresh：用户点它就是嫌数据旧了，让后端先催一轮 TS 轮询。 -->
+      <button class="refresh" type="button" :disabled="loading" @click="refresh(true)">刷新</button>
     </div>
 
     <p v-if="loadError" class="browser-error" role="alert">{{ loadError }}</p>

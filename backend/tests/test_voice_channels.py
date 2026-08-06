@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import httpx
 
-from app.services.ts3_monitor import TS3Monitor
+from app.services.ts3_monitor import TS3Monitor, strip_web_voice_marker
 from app.services.tsmusic_client import TSMusicClient
 
 _SETTINGS = SimpleNamespace(
@@ -25,7 +25,13 @@ def _monitor_with(clients: list[dict], channels: list[dict]) -> TS3Monitor:
     monitor.channel_tree = channels
     monitor.channel_password = {ch["cid"]: ch.pop("_locked", False) for ch in channels}
     monitor.client_data = {
-        f"uid-{c['clid']}": {**c, "first_seen": now, "last_seen": now} for c in clients
+        f"uid-{c['clid']}": {
+            "identity": strip_web_voice_marker(c["nickname"]),
+            **c,
+            "first_seen": now,
+            "last_seen": now,
+        }
+        for c in clients
     }
     return monitor
 
