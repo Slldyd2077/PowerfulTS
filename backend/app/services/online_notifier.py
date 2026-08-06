@@ -131,7 +131,17 @@ class OnlineNotifier:
             )
             return friend_online, server_online, server_first_join
 
-    async def on_online(self, nickname: str, unique_identifier: str | None = None) -> None:
+    async def on_online(
+        self,
+        nickname: str,
+        unique_identifier: str | None = None,
+        web_voice: bool = False,
+    ) -> None:
+        """nickname 是账号昵称（监控已去掉 `<WEB通讯>` 前缀），网页上线也走这里。
+
+        web_voice=True 表示这次上线来自网页通话身份：它是 TSMusicBot 开的机器人，
+        自带一个全新的 TS unique_identifier，登记成「首次进服务器的新成员」是误报。
+        """
         async with self._lock:
             if nickname in self._notified:
                 return
@@ -150,6 +160,8 @@ class OnlineNotifier:
         if online_subscribers:
             await self._send_server_notice(online_subscribers, server_online_msg.format(nick=nickname))
 
+        if web_voice:
+            return
         if unique_identifier and await self._mark_first_seen(unique_identifier, nickname):
             first_join_subscribers = await self._resolve_server_subscribers("notify_server_first_join")
             if first_join_subscribers:

@@ -440,6 +440,24 @@ async def _voice_bot_id(request: Request, account: Account, db: AsyncSession) ->
     return bid
 
 
+# 等一次强制轮询的上限。TS 在同机/同网时一轮 channellist+clientlist 只要几十毫秒；
+# 真超时了就退回原来的行为（下一个 3 秒周期补上），不把动作本身拖失败。
+_SNAPSHOT_SYNC_TIMEOUT = 2.0
+
+
+async def _sync_ts3_snapshot(request: Request) -> None:
+    """让 TS 监控立刻重跑一轮，别让刚做完的动作等下一个轮询周期才在页面上出现。
+
+    /voice/channels 读的是监控的内存快照（3 秒一轮）。加入通话、切频道之后马上去读，
+    拿到的还是动作之前的状态 —— 表现就是「点了没反应，过一会儿才更新」。
+    """
+    monitor = request.app.state.ts3_monitor
+    if not monitor.running:
+        return
+    token = monitor.request_refresh()
+    await asyncio.to_thread(monitor.wait_for_refresh, token, _SNAPSHOT_SYNC_TIMEOUT)
+
+
 @router.post("/voice/session")
 async def open_voice_session(
     request: Request,
@@ -448,9 +466,12 @@ async def open_voice_session(
 ):
     """按需开通本账号的通话 bot（以自己的昵称进入服务器）并等它连上。"""
     try:
-        return {"ok": True, **await request.app.state.voice_bots.acquire(db, account)}
+        session = await request.app.state.voice_bots.acquire(db, account)
     except VoiceBotError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # 刚进服务器的通话身份要立刻能在频道列表里看到，前端才不用等轮询。
+    await _sync_ts3_snapshot(request)
+    return {"ok": True, **session}
 
 
 @router.post("/voice/session/stop")
@@ -463,6 +484,7 @@ async def close_voice_session(
     bid = await request.app.state.voice_bots.current_bot_id(db, account.id)
     if bid:
         await request.app.state.voice_bots.release_now(account.id, bid)
+        await _sync_ts3_snapshot(request)
     return {"ok": True, "stopped": bool(bid)}
 
 
@@ -493,12 +515,16 @@ async def voice_channels(
     request: Request,
     tsmusic: TsmusicDep,
     account: AccountDep,
+    fresh: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
 ):
     """频道树 + 各频道在场成员 + 自己的通话 bot 当前所在频道。
 
     还没加入通话时不该报错——频道列表本身是可以先看的，只是没有「当前频道」。
+    fresh=1 表示用户主动点了刷新：先催一轮轮询再读，别让他看着旧快照再点一次。
     """
+    if fresh:
+        await _sync_ts3_snapshot(request)
     bid = await request.app.state.voice_bots.current_bot_id(db, account.id)
     bot_clid = await tsmusic.get_bot_client_id(bid) if bid else None
     overview = request.app.state.ts3_monitor.get_voice_overview(bot_clid)
@@ -523,6 +549,8 @@ async def move_voice_channel(
         # 密码错误是用户能自己纠正的输入问题，其余归为上游/权限问题。
         status = 403 if result.get("invalid_password") else 502
         raise HTTPException(status_code=status, detail=result["detail"])
+    # 人已经过去了，快照得跟上：否则前端紧接着的刷新会把你「弹回」原频道。
+    await _sync_ts3_snapshot(request)
     return {"ok": True, "cid": body.cid}
 
 
