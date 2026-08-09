@@ -437,10 +437,12 @@ async def stop_live_audio(
 
 async def _voice_bot_id(request: Request, account: Account, db: AsyncSession) -> str:
     """当前账号已开通的通话 bot；没有则 409（提示先加入通话）。"""
-    bid = await request.app.state.voice_bots.current_bot_id(db, account.id)
-    if not bid:
-        raise HTTPException(status_code=409, detail="请先加入通话")
-    return bid
+    try:
+        return await request.app.state.voice_bots.ensure_existing_connected(
+            db, account.id
+        )
+    except VoiceBotError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 async def _limit_guest_voice(request: Request, account: Account, action: str) -> None:

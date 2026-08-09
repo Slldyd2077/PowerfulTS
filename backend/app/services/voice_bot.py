@@ -68,6 +68,7 @@ class VoiceBotManager:
         self._locks: dict[int, asyncio.Lock] = {}
         self._guest_capacity_lock = asyncio.Lock()
         self._release_tasks: dict[int, asyncio.Task] = {}
+        self._release_specs: dict[int, tuple[str, bool]] = {}
 
     def _lock_for(self, account_id: int) -> asyncio.Lock:
         lock = self._locks.get(account_id)
@@ -100,11 +101,29 @@ class VoiceBotManager:
         found = row.first()
         return found[0] if found else None
 
+    async def ensure_existing_connected(
+        self, db: AsyncSession, account_id: int
+    ) -> str:
+        """Return the account's existing voice bot after proving it is usable."""
+        async with self._lock_for(account_id):
+            release_spec = self._release_specs.get(account_id)
+            bot_id = await self.current_bot_id(db, account_id)
+            if not bot_id:
+                raise VoiceBotError("请先加入通话")
+            await self._ensure_connected(self._tsmusic_provider(), bot_id)
+            if release_spec is not None:
+                release_bot_id, destroy = release_spec
+                self.schedule_release(
+                    account_id, release_bot_id, destroy=destroy
+                )
+            return bot_id
+
     def schedule_release(
         self, account_id: int, bot_id: str, *, destroy: bool = False
     ) -> None:
         """浏览器断开后延迟停机；宽限期内重新 acquire 会取消这次停机。"""
         self._cancel_release(account_id)
+        self._release_specs[account_id] = (bot_id, destroy)
         self._release_tasks[account_id] = asyncio.create_task(
             self._release_after_grace(account_id, bot_id, destroy=destroy)
         )
@@ -124,6 +143,7 @@ class VoiceBotManager:
 
     def _cancel_release(self, account_id: int) -> None:
         task = self._release_tasks.pop(account_id, None)
+        self._release_specs.pop(account_id, None)
         if task is not None and not task.done():
             task.cancel()
 
@@ -142,6 +162,7 @@ class VoiceBotManager:
         finally:
             if self._release_tasks.get(account_id) is current_task:
                 self._release_tasks.pop(account_id, None)
+                self._release_specs.pop(account_id, None)
 
     async def _retire(self, account_id: int, bot_id: str, *, destroy: bool) -> None:
         if not destroy:
@@ -285,5 +306,8 @@ class VoiceBotManager:
     async def _is_connected(tsmusic: TSMusicClient, bot_id: str) -> bool:
         for bot in await tsmusic.list_bots():
             if bot.get("id") == bot_id:
-                return bot.get("status") == "connected"
+                if bot.get("status") != "connected":
+                    return False
+                client_id = await tsmusic.get_bot_client_id(bot_id)
+                return isinstance(client_id, int) and client_id > 0
         return False
