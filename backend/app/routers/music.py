@@ -32,6 +32,7 @@ from ..services.voice_bot import VoiceBotError
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/music", tags=["music"])
 settings = get_settings()
+VOICE_DIAGNOSTICS_UPSTREAM_TIMEOUT_SECONDS = 0.8
 
 
 # ───────────────────────── 依赖 ─────────────────────────
@@ -443,6 +444,31 @@ async def _voice_bot_id(request: Request, account: Account, db: AsyncSession) ->
         )
     except VoiceBotError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/voice/diagnostics")
+async def voice_diagnostics(
+    request: Request,
+    tsmusic: TsmusicDep,
+    account: VoiceAccountDep,
+    db: AsyncSession = Depends(get_db),
+):
+    """Account-scoped latency telemetry for the active web-voice bot."""
+    bid = await _voice_bot_id(request, account, db)
+    relay = await request.app.state.live_audio.status_for_bot(bid)
+    try:
+        upstream = await asyncio.wait_for(
+            tsmusic.get_bot_status(bot_id=bid),
+            timeout=VOICE_DIAGNOSTICS_UPSTREAM_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        logger.debug("TSMusicBot voice diagnostics timed out", extra={"bot_id": bid})
+        upstream = {}
+    return {
+        "relay": relay,
+        "audioPipeline": upstream.get("audioPipeline"),
+        "liveVoice": upstream.get("liveVoice"),
+    }
 
 
 async def _limit_guest_voice(request: Request, account: Account, action: str) -> None:
