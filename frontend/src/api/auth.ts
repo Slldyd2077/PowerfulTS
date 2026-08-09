@@ -8,6 +8,11 @@ export interface LoginResponse {
   error?: string
 }
 
+export interface GuestSessionResponse extends LoginResponse {
+  role: 'guest'
+  expires_in: number
+}
+
 export interface SessionData {
   ts_nickname: string
   is_admin: boolean
@@ -28,6 +33,12 @@ export async function login(tsNickname: string, password: string, ip: string = '
     password,
     ip,
   })
+  return data
+}
+
+/** 分配一个短时、仅限网页通话的游客身份。昵称由后端生成，不能冒用成员。 */
+export async function createGuestSession(): Promise<GuestSessionResponse> {
+  const { data } = await apiClient.post('/auth/guest')
   return data
 }
 

@@ -32,7 +32,13 @@ async def list_member_notifications(
     request: Request, account: AdminDep, db: AsyncSession = Depends(get_db)
 ):
     """列出成员的服务器动态通知订阅；QQ 仅返回是否已绑定。"""
-    rows = (await db.execute(select(Account).order_by(Account.ts_nickname))).scalars().all()
+    rows = (
+        await db.execute(
+            select(Account)
+            .where(Account.role != "guest")
+            .order_by(Account.ts_nickname)
+        )
+    ).scalars().all()
     napcat_enabled = bool((await request.app.state.napcat.check_status()).get("connected"))
     return {"napcat_enabled": napcat_enabled, "members": [{
         "id": row.id,

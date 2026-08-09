@@ -54,13 +54,17 @@ def _voice_downlink_app(packets):
     app.state.voice_downlink = VoiceDownlinkTickets()
 
     class FakeVoiceBots:
-        """Records the release the handler schedules when the browser drops."""
+        """Records voice lease activity when a browser connects and drops."""
 
         def __init__(self):
-            self.released: list[tuple[int, str]] = []
+            self.released: list[tuple[int, str, bool]] = []
+            self.kept_alive: list[int] = []
 
-        def schedule_release(self, account_id, bot_id):
-            self.released.append((account_id, bot_id))
+        async def keep_alive(self, account_id):
+            self.kept_alive.append(account_id)
+
+        def schedule_release(self, account_id, bot_id, *, destroy=False):
+            self.released.append((account_id, bot_id, destroy))
 
     app.state.voice_bots = FakeVoiceBots()
 
@@ -122,7 +126,108 @@ def test_browser_disconnect_closes_the_upstream_voice_socket():
         assert app.state.tsmusic.upstream_closed
         # The browser leaving must also hand the caller's voice bot back, or it
         # would sit in the channel until something else happened to evict it.
-        assert app.state.voice_bots.released == [(7, "bot-a")]
+        assert app.state.voice_bots.released == [(7, "bot-a", False)]
+        assert app.state.voice_bots.kept_alive == [7]
+
+    asyncio.run(scenario())
+
+
+def test_new_ticket_replaces_an_unclaimed_ticket_for_the_same_account():
+    async def scenario():
+        tickets = VoiceDownlinkTickets()
+        first = await tickets.create(7, "bot-a")
+        second = await tickets.create(7, "bot-a")
+
+        assert await tickets.claim(first.id) is None
+        assert await tickets.claim(second.id) == second
+        await tickets.release(second)
+
+    asyncio.run(scenario())
+
+
+def test_only_one_claimed_downlink_can_be_active_per_account():
+    async def scenario():
+        tickets = VoiceDownlinkTickets()
+        first = await tickets.create(7, "bot-a")
+        assert await tickets.claim(first.id) == first
+
+        blocked = await tickets.create(7, "bot-a")
+        assert await tickets.claim(blocked.id) is None
+
+        await tickets.release(first)
+        retry = await tickets.create(7, "bot-a")
+        assert await tickets.claim(retry.id) == retry
+        await tickets.release(retry)
+
+    asyncio.run(scenario())
+
+
+def test_guest_browser_disconnect_destroys_its_temporary_voice_identity():
+    app = _voice_downlink_app([b"\x01\x04\x00\x09\x03\xc0opus"])
+
+    async def scenario():
+        ticket = await app.state.voice_downlink.create(7, "guest-bot", ephemeral=True)
+        browser_gone = asyncio.Event()
+        handshake_done = False
+
+        async def receive():
+            nonlocal handshake_done
+            if not handshake_done:
+                handshake_done = True
+                return {"type": "websocket.connect"}
+            await browser_gone.wait()
+            return {"type": "websocket.disconnect", "code": 1001}
+
+        async def send(_message):
+            return None
+
+        websocket = WebSocket(
+            {"type": "websocket", "app": app, "headers": []}, receive, send
+        )
+        handler = asyncio.create_task(music.stream_voice_downlink(websocket, ticket.id))
+        await asyncio.sleep(0.05)
+        browser_gone.set()
+        await asyncio.wait_for(handler, timeout=5)
+
+        assert app.state.voice_bots.released == [(7, "guest-bot", True)]
+        assert app.state.voice_bots.kept_alive == [7]
+
+    asyncio.run(scenario())
+
+
+def test_guest_stream_closes_and_destroys_identity_at_session_expiry():
+    app = _voice_downlink_app([b"\x01\x04\x00\x09\x03\xc0opus"])
+
+    async def scenario():
+        ticket = await app.state.voice_downlink.create(
+            7,
+            "guest-bot",
+            ephemeral=True,
+            connection_ttl_seconds=0.05,
+        )
+        sent: list[dict] = []
+        handshake_done = False
+
+        async def receive():
+            nonlocal handshake_done
+            if not handshake_done:
+                handshake_done = True
+                return {"type": "websocket.connect"}
+            await asyncio.Event().wait()
+
+        async def send(message):
+            sent.append(message)
+
+        websocket = WebSocket(
+            {"type": "websocket", "app": app, "headers": []}, receive, send
+        )
+        await asyncio.wait_for(
+            music.stream_voice_downlink(websocket, ticket.id), timeout=5
+        )
+
+        close_messages = [message for message in sent if message["type"] == "websocket.close"]
+        assert close_messages[-1]["code"] == music.VOICE_CLOSE_GUEST_EXPIRED
+        assert app.state.voice_bots.released == [(7, "guest-bot", True)]
 
     asyncio.run(scenario())
 

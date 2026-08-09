@@ -50,7 +50,7 @@ WS /api/voice/downlink/{botId}
 Cookie: session=<TSMusicBot 登录会话>
 ```
 
-服务端复用现有会话校验，拒绝 guest、无效会话和不存在的 bot。每条 WebSocket 二进制消息对应一个完整 Opus 包：
+服务端复用现有会话校验，接受注册账号或受限的两小时 guest 会话，拒绝无效会话和不存在的 bot。每条 WebSocket 二进制消息对应一个完整 Opus 包：
 
 ```text
 [version:u8][codec:u8][clientId:u16be][durationSamples:u16be][opus:remaining]
@@ -201,7 +201,7 @@ navigator.mediaDevices.getUserMedia({
 ## 5. 安全与运行边界
 
 - 浏览器不能直接连接 TSMusicBot；所有浏览器权限仍由 PowerfulTS 校验。
-- TSMusicBot 下行只接受其现有非 guest 登录会话。
+- TSMusicBot 下行由 PowerfulTS 的一次性票据代理；注册账号和受限 guest 会话均可申请，guest 不能借此访问音乐、好友、Steam 或管理接口。
 - 一次性票据不会复用用户 token，也不能被第二条 WebSocket 重放。
 - 单条上游包限制为 64 KiB。
 - 建议使用耳机。AEC 只能降低扬声器回灌，无法保证在所有设备上完全消除回声；同一设备不要再让 TeamSpeak 桌面客户端进入同一频道。

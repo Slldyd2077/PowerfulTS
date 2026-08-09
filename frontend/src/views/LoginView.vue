@@ -363,10 +363,19 @@ onUnmounted(() => {
   audioCtx?.close().catch(() => {})
 })
 
-/** 以游客身份进入（仅可访问管理面板） */
-function handleGuest() {
-  auth.enterAsGuest()
-  router.push('/')
+/** 以服务端分配的临时身份进入，可浏览面板并使用网页通话。 */
+async function handleGuest() {
+  if (loading.value) return
+  loading.value = true
+  try {
+    await auth.enterAsGuest()
+    ElMessage.success(`已分配临时身份：${auth.nickname}`)
+    router.push('/')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '无法分配游客身份')
+  } finally {
+    loading.value = false
+  }
 }
 
 /** 登录 */
@@ -579,11 +588,11 @@ async function handleRegister() {
                 <span class="divider-text label-mono">或</span>
                 <span class="divider-line"></span>
               </div>
-              <button class="guest-btn" @click="handleGuest">
+              <button class="guest-btn" :disabled="loading" @click="handleGuest">
                 <el-icon class="guest-icon"><View /></el-icon>
                 <span>以游客身份浏览</span>
               </button>
-              <p class="guest-hint">仅可查看服务器管理面板</p>
+              <p class="guest-hint">可查看管理面板，并以临时身份使用网页通话</p>
             </div>
           </div>
 

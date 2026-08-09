@@ -12,6 +12,7 @@ import secrets
 from datetime import datetime, timedelta
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.security import generate_token, hash_password, verify_password
@@ -20,6 +21,7 @@ from ..models import Account, Session, VerifyCode
 logger = logging.getLogger(__name__)
 
 SESSION_TTL = timedelta(days=15)
+GUEST_SESSION_TTL = timedelta(hours=2)
 CODE_TTL = timedelta(minutes=5)
 CODE_DIGITS = 6
 CODE_MAX_ATTEMPTS = 5  # 验证码最大尝试次数，超过即失效
@@ -87,6 +89,46 @@ class AuthService:
         ))
         await self.db.commit()
         return token
+
+    async def create_guest_session(self) -> tuple[Account, str]:
+        """Create a server-named, short-lived account for browser voice access."""
+        now = _now()
+        alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        for _attempt in range(5):
+            nickname = "游客-" + "".join(secrets.choice(alphabet) for _ in range(6))
+            account = Account(
+                ts_nickname=nickname,
+                unique_identifier=f"guest:{secrets.token_urlsafe(24)}",
+                password_hash=None,
+                role="guest",
+                status="active",
+            )
+            token = generate_token()
+            self.db.add(account)
+            try:
+                await self.db.flush()
+                self.db.add(
+                    Session(
+                        token=token,
+                        account_id=account.id,
+                        expires_at=now + GUEST_SESSION_TTL,
+                    )
+                )
+                await self.db.commit()
+                await self.db.refresh(account)
+                return account, token
+            except IntegrityError:
+                await self.db.rollback()
+        raise RuntimeError("无法分配临时游客身份")
+
+    async def get_active_session_expiry(self, account_id: int) -> datetime | None:
+        """Return the latest active expiry for an account's current sessions."""
+        return await self.db.scalar(
+            select(func.max(Session.expires_at)).where(
+                Session.account_id == account_id,
+                Session.expires_at > _now(),
+            )
+        )
 
     async def get_session_account(self, token: str) -> Account | None:
         """返回 token 对应的有效账号；过期/不存在返回 None。"""

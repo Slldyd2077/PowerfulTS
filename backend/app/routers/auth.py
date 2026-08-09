@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.config import get_settings
 from ..core.database import get_db
 from ..services import ts3_auth
-from ..services.auth_service import AuthService
+from ..services.auth_service import AuthService, GUEST_SESSION_TTL
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -122,6 +122,23 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
         "token": token,
         "ts_nickname": account.ts_nickname,
         "is_admin": account.role == "admin",
+    }
+
+
+@router.post("/guest")
+async def create_guest_session(request: Request, db: AsyncSession = Depends(get_db)):
+    """Issue a short-lived, voice-scoped session with a server-generated TS name."""
+    peer = request.client.host if request.client else "unknown"
+    if not await request.app.state.guest_session_limiter.allow(peer):
+        raise HTTPException(status_code=429, detail="游客身份申请过于频繁，请稍后再试")
+    account, token = await AuthService(db).create_guest_session()
+    return {
+        "success": True,
+        "token": token,
+        "ts_nickname": account.ts_nickname,
+        "is_admin": False,
+        "role": "guest",
+        "expires_in": int(GUEST_SESSION_TTL.total_seconds()),
     }
 
 

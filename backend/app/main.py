@@ -27,6 +27,7 @@ from .services.steam_client import SteamClient
 from .services.bot_idle_manager import BotIdleManager
 from .services.bot_player_state import BotPlayerStateStore
 from .services.live_audio import LiveAudioRelay
+from .services.guest_access import GuestSessionRateLimiter
 from .services.voice_bot import VoiceBotManager
 from .services.voice_downlink import VoiceDownlinkTickets
 from .services.online_notifier import OnlineNotifier
@@ -102,6 +103,17 @@ async def _refresh_steam_games_loop(app: FastAPI) -> None:
         await asyncio.sleep(120)
 
 
+async def _cleanup_expired_guests_loop(app: FastAPI) -> None:
+    """Retry upstream + local cleanup for expired temporary voice identities."""
+    while True:
+        try:
+            async with AsyncSessionLocal() as session:
+                await app.state.voice_bots.cleanup_expired_guests(session)
+        except Exception:
+            logger.warning("清理过期游客通话身份失败", exc_info=True)
+        await asyncio.sleep(60)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期：原生数据层 + TS3 监控 + 多媒体代理客户端 + NapCat 推送。"""
@@ -145,9 +157,16 @@ async def lifespan(app: FastAPI):
         state_store=BotPlayerStateStore(AsyncSessionLocal),
     )
     app.state.live_audio = LiveAudioRelay()
+    app.state.guest_session_limiter = GuestSessionRateLimiter()
+    app.state.guest_voice_limiter = GuestSessionRateLimiter(
+        max_requests=60, window_seconds=60
+    )
     app.state.voice_downlink = VoiceDownlinkTickets()
     # 同样解析 tsmusic：admin 热重载会换掉 app.state.tsmusic。
-    app.state.voice_bots = VoiceBotManager(lambda: app.state.tsmusic)
+    app.state.voice_bots = VoiceBotManager(
+        lambda: app.state.tsmusic, AsyncSessionLocal
+    )
+    guest_cleanup_task = asyncio.create_task(_cleanup_expired_guests_loop(app))
     # Resolve the client lazily: admin hot reload replaces app.state.tsmusic.
     # Capturing the object here would leave the idle manager using a closed client.
     app.state.bot_idle_manager = BotIdleManager(settings, lambda: app.state.tsmusic)
@@ -163,6 +182,11 @@ async def lifespan(app: FastAPI):
     finally:
         app.state.ts3_monitor.stop()
         await app.state.bot_idle_manager.stop()
+        guest_cleanup_task.cancel()
+        try:
+            await guest_cleanup_task
+        except (asyncio.CancelledError, Exception):
+            pass
         await app.state.netease.close()
         await app.state.tsmusic.close()
         await app.state.napcat.close()

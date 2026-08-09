@@ -10,6 +10,7 @@ from typing import Annotated, Literal
 import asyncio
 import logging
 import re
+from datetime import datetime
 
 import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, Response, WebSocket, WebSocketDisconnect
@@ -21,9 +22,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import get_settings
 from ..core.database import get_db
-from ..deps import AccountDep, AdminDep, TsmusicDep, get_current_account
+from ..deps import AccountDep, AdminDep, TsmusicDep, VoiceAccountDep, get_current_account
 from ..models import Account, BotOwnership, BotShare, Friend
 from ..services import bot_mover
+from ..services.auth_service import AuthService
 from ..services.tsmusic_client import TSMusicClient, TSMusicUnavailable
 from ..services.voice_bot import VoiceBotError
 
@@ -349,7 +351,7 @@ async def start_voice_microphone(
     body: VoiceMicRequest,
     request: Request,
     tsmusic: TsmusicDep,
-    account: AccountDep,
+    account: VoiceAccountDep,
     db: AsyncSession = Depends(get_db),
 ):
     """网页通话的麦克风上行。
@@ -360,6 +362,7 @@ async def start_voice_microphone(
     也刻意不做「跟随」：跟随会把 bot 拽到用户 TS 客户端所在频道，把网页上刚选好的
     频道覆盖掉——网页通话里用户的选择才是准的。
     """
+    await _limit_guest_voice(request, account, "microphone")
     bid = await _voice_bot_id(request, account, db)
     return await _open_live_relay(
         request,
@@ -419,7 +422,7 @@ async def stop_live_audio(
     session_id: str,
     request: Request,
     tsmusic: TsmusicDep,
-    account: AccountDep,
+    account: VoiceAccountDep,
 ):
     session = await request.app.state.live_audio.get(session_id)
     if session is None:
@@ -438,6 +441,16 @@ async def _voice_bot_id(request: Request, account: Account, db: AsyncSession) ->
     if not bid:
         raise HTTPException(status_code=409, detail="请先加入通话")
     return bid
+
+
+async def _limit_guest_voice(request: Request, account: Account, action: str) -> None:
+    if account.role != "guest":
+        return
+    allowed = await request.app.state.guest_voice_limiter.allow(
+        f"{account.id}:{action}"
+    )
+    if not allowed:
+        raise HTTPException(status_code=429, detail="游客通话操作过于频繁，请稍后再试")
 
 
 # 等一次强制轮询的上限。TS 在同机/同网时一轮 channellist+clientlist 只要几十毫秒；
@@ -461,14 +474,21 @@ async def _sync_ts3_snapshot(request: Request) -> None:
 @router.post("/voice/session")
 async def open_voice_session(
     request: Request,
-    account: AccountDep,
+    account: VoiceAccountDep,
     db: AsyncSession = Depends(get_db),
 ):
     """按需开通本账号的通话 bot（以自己的昵称进入服务器）并等它连上。"""
+    await _limit_guest_voice(request, account, "session")
     try:
         session = await request.app.state.voice_bots.acquire(db, account)
     except VoiceBotError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if account.role == "guest":
+        # If the browser never claims a downlink, do not leave an anonymous TS
+        # client connected indefinitely. A claimed stream cancels this lease.
+        request.app.state.voice_bots.schedule_release(
+            account.id, session["botId"], destroy=True
+        )
     # 刚进服务器的通话身份要立刻能在频道列表里看到，前端才不用等轮询。
     await _sync_ts3_snapshot(request)
     return {"ok": True, **session}
@@ -477,13 +497,15 @@ async def open_voice_session(
 @router.post("/voice/session/stop")
 async def close_voice_session(
     request: Request,
-    account: AccountDep,
+    account: VoiceAccountDep,
     db: AsyncSession = Depends(get_db),
 ):
     """挂断：让通话 bot 立刻离开服务器。"""
     bid = await request.app.state.voice_bots.current_bot_id(db, account.id)
     if bid:
-        await request.app.state.voice_bots.release_now(account.id, bid)
+        await request.app.state.voice_bots.release_now(
+            account.id, bid, destroy=account.role == "guest"
+        )
         await _sync_ts3_snapshot(request)
     return {"ok": True, "stopped": bool(bid)}
 
@@ -491,12 +513,24 @@ async def close_voice_session(
 @router.post("/voice/start")
 async def start_voice_downlink(
     request: Request,
-    account: AccountDep,
+    account: VoiceAccountDep,
     db: AsyncSession = Depends(get_db),
 ):
     """Issue a one-use capability for an authenticated browser listener."""
+    await _limit_guest_voice(request, account, "downlink")
     bid = await _voice_bot_id(request, account, db)
-    ticket = await request.app.state.voice_downlink.create(account.id, bid)
+    connection_ttl_seconds = None
+    if account.role == "guest":
+        session_expiry = await AuthService(db).get_active_session_expiry(account.id)
+        if session_expiry is None:
+            raise HTTPException(status_code=401, detail="游客会话已过期")
+        connection_ttl_seconds = (session_expiry - datetime.now()).total_seconds()
+    ticket = await request.app.state.voice_downlink.create(
+        account.id,
+        bid,
+        ephemeral=account.role == "guest",
+        connection_ttl_seconds=connection_ttl_seconds,
+    )
     return {
         "ok": True,
         "sessionId": ticket.id,
@@ -514,7 +548,7 @@ class VoiceChannelRequest(BaseModel):
 async def voice_channels(
     request: Request,
     tsmusic: TsmusicDep,
-    account: AccountDep,
+    account: VoiceAccountDep,
     fresh: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
 ):
@@ -537,10 +571,11 @@ async def move_voice_channel(
     body: VoiceChannelRequest,
     request: Request,
     tsmusic: TsmusicDep,
-    account: AccountDep,
+    account: VoiceAccountDep,
     db: AsyncSession = Depends(get_db),
 ):
     """把自己的通话 bot 移到目标频道；频道有密码时由 body.password 提供。"""
+    await _limit_guest_voice(request, account, "channel")
     bid = await _voice_bot_id(request, account, db)
     if await tsmusic.get_bot_client_id(bid) is None:
         raise HTTPException(status_code=409, detail="通话机器人不在线，请重新加入通话")
@@ -556,6 +591,7 @@ async def move_voice_channel(
 
 # 4000-4999 是 WebSocket 应用自定义关闭码，code 与 reason 都会原样送达浏览器。
 VOICE_CLOSE_TICKET_INVALID = 4404
+VOICE_CLOSE_GUEST_EXPIRED = 4401
 VOICE_CLOSE_UPSTREAM_UNSUPPORTED = 4502
 VOICE_CLOSE_UPSTREAM_UNREACHABLE = 4503
 VOICE_CLOSE_UPSTREAM_ERROR = 1011
@@ -601,30 +637,50 @@ async def stream_voice_downlink(websocket: WebSocket, ticket_id: str):
     if ticket is None:
         await websocket.close(code=VOICE_CLOSE_TICKET_INVALID, reason="语音订阅不存在或已过期")
         return
-    await websocket.accept()
-
-    pump = asyncio.create_task(_pump_voice_downlink(websocket, ticket.bot_id))
-    watchdog = asyncio.create_task(_await_client_gone(websocket))
-    done, pending = await asyncio.wait({pump, watchdog}, return_when=asyncio.FIRST_COMPLETED)
-    for task in pending:
-        task.cancel()
-    # 取消 pump 会把 CancelledError 抛回 voice_packets 的 async with，上游 WS 随之关闭。
-    await asyncio.gather(*pending, return_exceptions=True)
-
-    # 浏览器没了就把通话 bot 收回去（带宽限期：刷新页面会立刻重新接上）。
-    websocket.app.state.voice_bots.schedule_release(ticket.account_id, ticket.bot_id)
-
-    if watchdog in done:
-        return
-    error = pump.exception()
-    if error is None or isinstance(error, WebSocketDisconnect):
-        return
-    code, reason = voice_close_for(error)
-    logger.warning("Bot %s 语音下行中断：%s", ticket.bot_id, reason, exc_info=error)
     try:
-        await websocket.close(code=code, reason=reason)
-    except RuntimeError:
-        pass
+        await websocket.app.state.voice_bots.keep_alive(ticket.account_id)
+        await websocket.accept()
+
+        pump = asyncio.create_task(_pump_voice_downlink(websocket, ticket.bot_id))
+        watchdog = asyncio.create_task(_await_client_gone(websocket))
+        tasks = {pump, watchdog}
+        expiry = None
+        if ticket.connection_expires_at is not None:
+            expiry = asyncio.create_task(
+                asyncio.sleep(max(0.0, ticket.connection_expires_at - asyncio.get_running_loop().time()))
+            )
+            tasks = {*tasks, expiry}
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        # 取消 pump 会把 CancelledError 抛回 voice_packets 的 async with，上游 WS 随之关闭。
+        await asyncio.gather(*pending, return_exceptions=True)
+
+        if expiry is not None and expiry in done:
+            try:
+                await websocket.close(
+                    code=VOICE_CLOSE_GUEST_EXPIRED, reason="游客通话身份已过期"
+                )
+            except RuntimeError:
+                pass
+            return
+        if watchdog in done:
+            return
+        error = pump.exception()
+        if error is None or isinstance(error, WebSocketDisconnect):
+            return
+        code, reason = voice_close_for(error)
+        logger.warning("Bot %s 语音下行中断：%s", ticket.bot_id, reason, exc_info=error)
+        try:
+            await websocket.close(code=code, reason=reason)
+        except RuntimeError:
+            pass
+    finally:
+        await websocket.app.state.voice_downlink.release(ticket)
+        # 浏览器没了就把通话 bot 收回去（带宽限期：刷新页面会立刻重新接上）。
+        websocket.app.state.voice_bots.schedule_release(
+            ticket.account_id, ticket.bot_id, destroy=ticket.ephemeral
+        )
 
 
 @router.post("/pause")

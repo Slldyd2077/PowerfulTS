@@ -31,7 +31,7 @@ const activeIndex = computed(() => {
 
 function navigate(key: string) {
   // 游客受限功能 → 跳登录页（保留游客态；登录成功后由 setToken 升级为真实用户）
-  if (auth.isGuest && (key === 'music' || key === 'voice' || key === 'friends' || key === 'steam')) {
+  if (auth.isGuest && (key === 'music' || key === 'friends' || key === 'steam')) {
     router.push('/login')
     return
   }
@@ -72,10 +72,10 @@ function navigate(key: string) {
         <span v-if="auth.isGuest" class="lock-hint label-mono">登录后查看</span>
       </el-menu-item>
 
-      <el-menu-item index="voice" :class="{ 'guest-locked': auth.isGuest }">
+      <el-menu-item index="voice">
         <el-icon><Microphone /></el-icon>
         <span>网页通话</span>
-        <span v-if="auth.isGuest" class="lock-hint label-mono">登录后查看</span>
+        <span v-if="auth.isGuest" class="guest-voice-hint label-mono">临时身份</span>
       </el-menu-item>
 
       <el-menu-item index="friends" :class="{ 'guest-locked': auth.isGuest }">
@@ -177,6 +177,12 @@ function navigate(key: string) {
 .guest-locked:hover {
   opacity: 0.8;
   background: rgba(248, 113, 113, 0.04) !important;
+}
+
+.guest-voice-hint {
+  margin-left: auto;
+  color: var(--color-accent);
+  font-size: 0.58em;
 }
 
 .lock-hint {

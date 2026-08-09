@@ -726,7 +726,14 @@ class TSMusicClient:
     async def delete_bot(self, bot_id: str) -> dict:
         await self._ensure_login()
         resp = await self._http.delete(f"/api/bot/{bot_id}")
+        if resp.status_code == 404:
+            if self._state_store is not None:
+                await self._state_store.delete(bot_id)
+            return {"alreadyDeleted": True}
+        resp.raise_for_status()
         result = self._json(resp)
+        if result.get("error"):
+            raise TSMusicUnavailable(str(result["error"]))
         if self._state_store is not None and not result.get("error"):
             await self._state_store.delete(bot_id)
         return result
