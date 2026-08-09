@@ -454,7 +454,11 @@ async def voice_diagnostics(
     db: AsyncSession = Depends(get_db),
 ):
     """Account-scoped latency telemetry for the active web-voice bot."""
-    bid = await _voice_bot_id(request, account, db)
+    # Diagnostics is observational: polling it must not restart or extend the
+    # lifetime of a voice bot. Interactive voice operations use _voice_bot_id.
+    bid = await request.app.state.voice_bots.current_bot_id(db, account.id)
+    if not bid:
+        raise HTTPException(status_code=409, detail="请先加入通话")
     relay = await request.app.state.live_audio.status_for_bot(bid)
     try:
         upstream = await asyncio.wait_for(
