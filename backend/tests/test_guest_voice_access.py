@@ -54,6 +54,9 @@ async def _exercise_guest_access(*, request_limit: int = 5) -> dict:
         async def current_bot_id(self, _db, _account_id) -> str | None:
             return "guest-bot"
 
+        async def ensure_existing_connected(self, _db, _account_id) -> str:
+            return "guest-bot"
+
     app.state.voice_bots = FakeVoiceBots()
     app.state.ts3_monitor = SimpleNamespace(running=False)
     app.state.tsmusic = SimpleNamespace()
@@ -410,7 +413,9 @@ def test_guest_microphone_start_has_its_own_operation_limit() -> None:
                         max_requests=1, window_seconds=60
                     ),
                     voice_bots=SimpleNamespace(
-                        current_bot_id=AsyncMock(return_value="guest-bot")
+                        ensure_existing_connected=AsyncMock(
+                            return_value="guest-bot"
+                        )
                     ),
                 )
             )

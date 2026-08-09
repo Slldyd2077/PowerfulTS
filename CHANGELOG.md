@@ -1,3 +1,9 @@
+## v0.12.4 (2026-08-09)
+
+### Fix
+
+- **voice**: detect stale TeamSpeak voice bot connections before browser downlink, microphone, and channel operations, then restart the bot instead of reusing a dead identity.
+
 ## v0.12.3 (2026-08-09)
 
 ### Feat
