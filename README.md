@@ -364,6 +364,10 @@ PowerfulTS 本身不含 TS3 服务端与音乐引擎，需接入两个上游：
 
 > 实现细节与协议见 [`docs/web-voice-downlink-spec.md`](docs/web-voice-downlink-spec.md)。
 
+**延迟诊断**：已加入通话的账号可调用 `GET /api/music/voice/diagnostics`。响应只返回当前账号
+通话 bot 的中继队列驻留、TSMusicBot decoded-PCM 与首个有声 TS 发送指标；不会返回 botId、
+上行 capability/sessionId 或当前歌曲等无关状态。该接口供 S-Live 做非阻塞首响归因，不参与音频热路径。
+
 ---
 
 ## 📡 电脑音频实时共享

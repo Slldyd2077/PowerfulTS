@@ -7,18 +7,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import os
 import re
-from typing import TYPE_CHECKING, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
-from websockets.asyncio.client import connect as websocket_connect
 from sqlalchemy.ext.asyncio import AsyncSession
+from websockets.asyncio.client import connect as websocket_connect
 
-from ..core.config import Settings
 from . import app_setting
-
-import os
 
 if TYPE_CHECKING:
     from .bot_player_state import BotPlayerStateStore
@@ -34,6 +34,54 @@ _HEADERS = {
     ),
     "Content-Type": "application/json",
 }
+
+def _nonnegative_metric(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value) or value < 0:
+        return None
+    return round(value)
+
+
+def _audio_pipeline_diagnostics(value: object) -> dict | None:
+    if not isinstance(value, dict) or value.get("mode") not in {"media", "realtime"}:
+        return None
+    numeric_keys = (
+        "bufferedMs",
+        "maxBufferedMs",
+        "droppedMs",
+        "decodedSpeechStarts",
+        "lastDecodedPcmAt",
+        "lastDecodedSpeechStartedAt",
+    )
+    metrics = {key: _nonnegative_metric(value.get(key)) for key in numeric_keys}
+    if any(metric is None for metric in metrics.values()):
+        return None
+    if not isinstance(value.get("decoderPaused"), bool):
+        return None
+    return {
+        "mode": value["mode"],
+        **metrics,
+        "decoderPaused": value["decoderPaused"],
+    }
+
+
+def _live_voice_diagnostics(value: object) -> dict | None:
+    if not isinstance(value, dict) or not isinstance(value.get("speechActive"), bool):
+        return None
+    numeric_keys = (
+        "consecutiveSilentFrames",
+        "speechStarts",
+        "lastFrameSentAt",
+        "lastVoicedFrameSentAt",
+        "lastSpeechStartedAt",
+        "lastStartBufferedMs",
+    )
+    metrics = {key: _nonnegative_metric(value.get(key)) for key in numeric_keys}
+    if any(metric is None for metric in metrics.values()):
+        return None
+    return {"speechActive": value["speechActive"], **metrics}
+
 
 _QUALITY_POLICY: dict[str, dict[str, bool]] = {
     "netease": {
@@ -618,6 +666,8 @@ class TSMusicClient:
                 "platform": cs.get("platform", ""),
                 # vip 来自搜索 / 详情时缓存的元数据回填（currentSong 本身不带 vip）
                 "vip": cs.get("vip"),
+                "audioPipeline": _audio_pipeline_diagnostics(bot.get("audioPipeline")),
+                "liveVoice": _live_voice_diagnostics(bot.get("liveVoice")),
             }
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("TSMusicBot 状态获取失败: %s", exc)
