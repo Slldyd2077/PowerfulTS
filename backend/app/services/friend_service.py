@@ -18,7 +18,12 @@ class FriendService:
         self.db = db
 
     async def get_by_nickname(self, nickname: str) -> Account | None:
-        result = await self.db.execute(select(Account).where(Account.ts_nickname == nickname))
+        result = await self.db.execute(
+            select(Account).where(
+                Account.ts_nickname == nickname,
+                Account.role != "guest",
+            )
+        )
         return result.scalar_one_or_none()
 
     async def list_friend_nicknames(self, account: Account) -> list[str]:

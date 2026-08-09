@@ -11,11 +11,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import delete, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Account, BotOwnership, VoiceBot
+from ..models import Account, BotOwnership, Session, VoiceBot
 from .tsmusic_client import TSMusicClient
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ RELEASE_GRACE_SECONDS = 20.0
 # 等 bot 连上 TS 的上限。
 CONNECT_TIMEOUT_SECONDS = 25.0
 _CONNECT_POLL_SECONDS = 0.5
+MAX_ACTIVE_GUEST_VOICE_BOTS = 10
 
 
 class VoiceBotError(RuntimeError):
@@ -60,9 +62,11 @@ async def _resolve_server_target(tsmusic: TSMusicClient, db: AsyncSession) -> _B
 class VoiceBotManager:
     """按账号维护通话 bot 的创建、连接与延迟回收。"""
 
-    def __init__(self, tsmusic_provider) -> None:
+    def __init__(self, tsmusic_provider, session_factory=None) -> None:
         self._tsmusic_provider = tsmusic_provider
+        self._session_factory = session_factory
         self._locks: dict[int, asyncio.Lock] = {}
+        self._guest_capacity_lock = asyncio.Lock()
         self._release_tasks: dict[int, asyncio.Task] = {}
 
     def _lock_for(self, account_id: int) -> asyncio.Lock:
@@ -77,7 +81,14 @@ class VoiceBotManager:
         tsmusic = self._tsmusic_provider()
         async with self._lock_for(account.id):
             self._cancel_release(account.id)
-            bot_id = await self._ensure_bot(db, tsmusic, account)
+            if account.role == "guest":
+                # Production runs a single backend process; serialize the global
+                # capacity check and reservation so burst joins cannot overshoot.
+                async with self._guest_capacity_lock:
+                    await self._ensure_guest_capacity(db, account)
+                    bot_id = await self._ensure_bot(db, tsmusic, account)
+            else:
+                bot_id = await self._ensure_bot(db, tsmusic, account)
             await self._ensure_connected(tsmusic, bot_id)
             return {"botId": bot_id, "nickname": account.ts_nickname}
 
@@ -89,30 +100,125 @@ class VoiceBotManager:
         found = row.first()
         return found[0] if found else None
 
-    def schedule_release(self, account_id: int, bot_id: str) -> None:
+    def schedule_release(
+        self, account_id: int, bot_id: str, *, destroy: bool = False
+    ) -> None:
         """浏览器断开后延迟停机；宽限期内重新 acquire 会取消这次停机。"""
         self._cancel_release(account_id)
         self._release_tasks[account_id] = asyncio.create_task(
-            self._release_after_grace(account_id, bot_id)
+            self._release_after_grace(account_id, bot_id, destroy=destroy)
         )
 
-    async def release_now(self, account_id: int, bot_id: str) -> None:
+    async def keep_alive(self, account_id: int) -> None:
+        """Claim the account lease before a browser starts consuming voice."""
+        async with self._lock_for(account_id):
+            self._cancel_release(account_id)
+
+    async def release_now(
+        self, account_id: int, bot_id: str, *, destroy: bool = False
+    ) -> None:
         """用户明确挂断：立刻停机，不等宽限期。"""
-        self._cancel_release(account_id)
-        await self._stop(bot_id)
+        async with self._lock_for(account_id):
+            self._cancel_release(account_id)
+            await self._retire(account_id, bot_id, destroy=destroy)
 
     def _cancel_release(self, account_id: int) -> None:
         task = self._release_tasks.pop(account_id, None)
         if task is not None and not task.done():
             task.cancel()
 
-    async def _release_after_grace(self, account_id: int, bot_id: str) -> None:
+    async def _release_after_grace(
+        self, account_id: int, bot_id: str, *, destroy: bool
+    ) -> None:
+        current_task = asyncio.current_task()
         try:
             await asyncio.sleep(RELEASE_GRACE_SECONDS)
+            async with self._lock_for(account_id):
+                if self._release_tasks.get(account_id) is not current_task:
+                    return
+                await self._retire(account_id, bot_id, destroy=destroy)
         except asyncio.CancelledError:
             return
-        self._release_tasks.pop(account_id, None)
-        await self._stop(bot_id)
+        finally:
+            if self._release_tasks.get(account_id) is current_task:
+                self._release_tasks.pop(account_id, None)
+
+    async def _retire(self, account_id: int, bot_id: str, *, destroy: bool) -> None:
+        if not destroy:
+            await self._stop(bot_id)
+            return
+        try:
+            await self._tsmusic_provider().delete_bot(bot_id)
+            await self._delete_voice_bot_record(account_id, bot_id)
+            logger.info("临时通话 bot 已删除: %s", bot_id)
+        except Exception:
+            logger.warning("删除临时通话 bot 失败: %s", bot_id, exc_info=True)
+            await self._stop(bot_id)
+
+    async def _delete_voice_bot_record(self, account_id: int, bot_id: str) -> None:
+        if self._session_factory is None:
+            return
+        async with self._session_factory() as db:
+            await db.execute(
+                delete(VoiceBot).where(
+                    VoiceBot.account_id == account_id,
+                    VoiceBot.bot_id == bot_id,
+                )
+            )
+            await db.commit()
+
+    async def cleanup_expired_guests(self, db: AsyncSession) -> int:
+        """Delete upstream identities before removing expired guest accounts."""
+        has_active_session = exists(
+            select(Session.token).where(
+                Session.account_id == Account.id,
+                Session.expires_at > datetime.now(),
+            )
+        )
+        rows = (
+            await db.execute(
+                select(Account.id, VoiceBot.bot_id)
+                .outerjoin(VoiceBot, VoiceBot.account_id == Account.id)
+                .where(Account.role == "guest", ~has_active_session)
+            )
+        ).all()
+        removable_ids: list[int] = []
+        for account_id, bot_id in rows:
+            if bot_id:
+                try:
+                    await self._tsmusic_provider().delete_bot(bot_id)
+                except Exception:
+                    logger.warning(
+                        "清理过期游客通话 bot 失败: %s", bot_id, exc_info=True
+                    )
+                    continue
+            removable_ids = [*removable_ids, account_id]
+        if removable_ids:
+            account_ids = tuple(dict.fromkeys(removable_ids))
+            await db.execute(
+                delete(VoiceBot).where(VoiceBot.account_id.in_(account_ids))
+            )
+            await db.execute(
+                delete(Session).where(Session.account_id.in_(account_ids))
+            )
+            await db.execute(delete(Account).where(Account.id.in_(account_ids)))
+            await db.commit()
+        return len(dict.fromkeys(removable_ids))
+
+    async def _ensure_guest_capacity(self, db: AsyncSession, account: Account) -> None:
+        if account.role != "guest" or await self.current_bot_id(db, account.id):
+            return
+        active_count = await db.scalar(
+            select(func.count(func.distinct(VoiceBot.id)))
+            .join(Account, Account.id == VoiceBot.account_id)
+            .join(Session, Session.account_id == Account.id)
+            .where(
+                Account.role == "guest",
+                Session.expires_at > datetime.now(),
+            )
+        )
+        if int(active_count or 0) >= MAX_ACTIVE_GUEST_VOICE_BOTS:
+            raise VoiceBotError("游客通话席位已满，请稍后再试")
 
     async def _stop(self, bot_id: str) -> None:
         try:

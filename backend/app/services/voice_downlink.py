@@ -12,7 +12,9 @@ class VoiceDownlinkTicket:
     id: str
     account_id: int
     bot_id: str
+    ephemeral: bool
     expires_at: float
+    connection_expires_at: float | None
 
 
 class VoiceDownlinkTickets:
@@ -21,18 +23,37 @@ class VoiceDownlinkTickets:
     def __init__(self, ttl_seconds: float = 30.0) -> None:
         self._ttl = ttl_seconds
         self._tickets: dict[str, VoiceDownlinkTicket] = {}
+        self._active_accounts: frozenset[int] = frozenset()
         self._lock = asyncio.Lock()
 
-    async def create(self, account_id: int, bot_id: str) -> VoiceDownlinkTicket:
+    async def create(
+        self,
+        account_id: int,
+        bot_id: str,
+        *,
+        ephemeral: bool = False,
+        connection_ttl_seconds: float | None = None,
+    ) -> VoiceDownlinkTicket:
         async with self._lock:
             self._prune_unlocked()
+            self._tickets = {
+                ticket_id: existing
+                for ticket_id, existing in self._tickets.items()
+                if existing.account_id != account_id
+            }
             ticket = VoiceDownlinkTicket(
                 id=secrets.token_urlsafe(32),
                 account_id=account_id,
                 bot_id=bot_id,
+                ephemeral=ephemeral,
                 expires_at=time.monotonic() + self._ttl,
+                connection_expires_at=(
+                    time.monotonic() + max(0.0, connection_ttl_seconds)
+                    if connection_ttl_seconds is not None
+                    else None
+                ),
             )
-            self._tickets[ticket.id] = ticket
+            self._tickets = {**self._tickets, ticket.id: ticket}
             return ticket
 
     async def claim(self, ticket_id: str) -> VoiceDownlinkTicket | None:
@@ -42,10 +63,20 @@ class VoiceDownlinkTickets:
             ticket = self._tickets.pop(ticket_id, None)
             if ticket is None or ticket.expires_at <= time.monotonic():
                 return None
+            if ticket.account_id in self._active_accounts:
+                return None
+            self._active_accounts = self._active_accounts | {ticket.account_id}
             return ticket
+
+    async def release(self, ticket: VoiceDownlinkTicket) -> None:
+        """Release the per-account stream lease after the socket closes."""
+        async with self._lock:
+            self._active_accounts = self._active_accounts - {ticket.account_id}
 
     def _prune_unlocked(self) -> None:
         now = time.monotonic()
-        for ticket_id, ticket in list(self._tickets.items()):
-            if ticket.expires_at <= now:
-                self._tickets.pop(ticket_id, None)
+        self._tickets = {
+            ticket_id: ticket
+            for ticket_id, ticket in self._tickets.items()
+            if ticket.expires_at > now
+        }

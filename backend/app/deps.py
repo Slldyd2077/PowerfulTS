@@ -16,11 +16,11 @@ from .services.auth_service import AuthService
 from .services.tsmusic_client import TSMusicClient
 
 
-async def get_current_account(
+async def get_authenticated_account(
     x_session_token: Annotated[str | None, Header(alias="X-Session-Token")] = None,
     db: AsyncSession = Depends(get_db),
 ) -> Account:
-    """校验登录态并返回当前账号；未登录/会话无效则 401。"""
+    """Resolve any valid session, including a voice-scoped guest session."""
     if not x_session_token:
         raise HTTPException(status_code=401, detail="未登录")
     account = await AuthService(db).get_session_account(x_session_token)
@@ -29,7 +29,25 @@ async def get_current_account(
     return account
 
 
+AuthenticatedAccountDep = Annotated[Account, Depends(get_authenticated_account)]
+
+
+async def get_current_account(account: AuthenticatedAccountDep) -> Account:
+    """Require a registered member/admin session for ordinary application APIs."""
+    if account.role == "guest":
+        raise HTTPException(status_code=403, detail="游客仅可使用服务器监控和网页通话")
+    return account
+
+
 AccountDep = Annotated[Account, Depends(get_current_account)]
+
+
+async def get_voice_account(account: AuthenticatedAccountDep) -> Account:
+    """Allow registered accounts and temporary guests to use browser voice."""
+    return account
+
+
+VoiceAccountDep = Annotated[Account, Depends(get_voice_account)]
 
 
 async def require_admin(account: AccountDep) -> Account:
