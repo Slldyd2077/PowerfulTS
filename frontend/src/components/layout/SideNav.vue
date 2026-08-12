@@ -182,13 +182,17 @@ function navigate(key: string) {
 .guest-voice-hint {
   margin-left: auto;
   color: var(--color-accent);
-  font-size: 0.58em;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.2;
 }
 
 .lock-hint {
   margin-left: auto;
   padding-left: 8px;
-  font-size: 0.5em;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.2;
   color: var(--color-danger);
   opacity: 0.9;
   white-space: nowrap;
