@@ -12,3 +12,11 @@ authors = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+# backend 的 app 包未声明为可安装包（backend/pyproject.toml 无 [build-system] 包导出），
+# 靠 cwd=backend 才能 import。从仓库根跑 pytest（如全局 pre-push hook）时 sys.path 不含
+# backend，collection 阶段会 `No module named 'app'` 全挂。这里显式把 backend 加入 pythonpath，
+# 并限定 testpaths，让任意 cwd 下都能正常收集运行。
+pythonpath = ["backend"]
+testpaths = ["backend/tests"]
