@@ -1355,5 +1355,39 @@ async def auth_cookie(body: CookieRequest, tsmusic: TsmusicDep, _account: Accoun
 
 @router.delete("/auth/cookie")
 async def auth_logout(platform: str, tsmusic: TsmusicDep, _account: AccountDep, bot_id: StrictOwnedBotId = None):
-    """退出某平台登录（清除该 bot 的平台 cookie）。"""
+    """退出某平台登录（清除该 bot 的平台 cookie；Jellyfin 清除该 bot 的凭据）。"""
     return await tsmusic.delete_cookie(platform, bot_id=bot_id)
+
+
+# ───────────────────────── 音源开关 / Jellyfin ─────────────────────────
+
+
+@router.get("/providers")
+async def music_providers(tsmusic: TsmusicDep, _account: AccountDep):
+    """音源开关 + 默认音源（配置级；前端据此隐藏未启用的音源 tab）。"""
+    return await tsmusic.get_providers()
+
+
+class JellyfinForm(BaseModel):
+    serverUrl: str = ""
+    authMode: str = "userpass"
+    username: str = ""
+    password: str = ""
+    apiKey: str = ""
+    userId: str = ""
+
+
+@router.post("/auth/jellyfin/test")
+async def auth_jellyfin_test(
+    body: JellyfinForm, tsmusic: TsmusicDep, _account: AccountDep, bot_id: StrictOwnedBotId = None
+):
+    """测试该 bot 的 Jellyfin 连接（空凭据字段回落该 bot 已存值，不落盘）。"""
+    return await tsmusic.jellyfin_test(body.model_dump(), bot_id=bot_id)
+
+
+@router.post("/auth/jellyfin/login")
+async def auth_jellyfin_login(
+    body: JellyfinForm, tsmusic: TsmusicDep, _account: AccountDep, bot_id: StrictOwnedBotId = None
+):
+    """保存该 bot 的 Jellyfin 凭据（热重配 + 验证连接）。"""
+    return await tsmusic.jellyfin_login(body.model_dump(), bot_id=bot_id)
