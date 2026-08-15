@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import FriendRequestsPanel from '@/components/social/FriendRequestsPanel.vue'
 import FriendsList from '@/components/social/FriendsList.vue'
 import AddFriendDialog from '@/components/social/AddFriendDialog.vue'
 import FriendNotifySettings from '@/components/social/FriendNotifySettings.vue'
@@ -21,6 +22,7 @@ function refreshFriends() {
     </div>
 
     <div class="friends-content">
+      <FriendRequestsPanel @changed="refreshFriends" />
       <FriendsList :key="friendsListKey" />
       <div class="add-friend-wrapper">
         <el-button type="primary" plain @click="showAddFriend = true" class="add-friend-btn">
