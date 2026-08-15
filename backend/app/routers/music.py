@@ -154,10 +154,17 @@ class ModeRequest(BaseModel):
     mode: str = Field(description="seq | loop | random | rloop")
 
 
+class VoiceDuckingRequest(BaseModel):
+    """语音闪避（人说话时自动压低音乐音量），字段均可选、部分更新。"""
+    enabled: bool | None = Field(default=None, description="是否启用闪避")
+    volumePercent: float | None = Field(default=None, ge=0, le=100, description="有人说话时音乐保留的音量百分比")
+
+
 class BotSettingsRequest(BaseModel):
-    """全局 bot 行为设置（两项均可选，未传项上游保持不变）。"""
+    """全局 bot 行为设置（各项均可选，未传项上游保持不变）。"""
     idleTimeoutMinutes: int | None = Field(default=None, ge=0, description="频道无人多少分钟后自动断开，0=禁用")
     autoPauseOnEmpty: bool | None = Field(default=None, description="频道无人时自动暂停")
+    voiceDucking: VoiceDuckingRequest | None = Field(default=None, description="语音闪避设置")
 
 
 class BotProfileRequest(BaseModel):
@@ -1247,7 +1254,11 @@ async def get_bot_idle_status(request: Request, _account: AdminDep):
 async def put_bot_settings(body: BotSettingsRequest, tsmusic: TsmusicDep, _account: AccountDep):
     """更新全局 bot 行为设置（仅透传非 None 字段）。"""
     try:
-        return await tsmusic.set_bot_settings(body.idleTimeoutMinutes, body.autoPauseOnEmpty)
+        return await tsmusic.set_bot_settings(
+            body.idleTimeoutMinutes,
+            body.autoPauseOnEmpty,
+            body.voiceDucking.model_dump(exclude_none=True) if body.voiceDucking else None,
+        )
     except (httpx.HTTPError, ValueError):
         raise HTTPException(status_code=502, detail="TSMusicBot 不可达，请确认其 Docker 容器在运行")
 

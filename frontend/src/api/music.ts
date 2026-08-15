@@ -278,12 +278,21 @@ export async function setFollowSetting(enabled: boolean): Promise<{ enabled: boo
 
 // ───────────────────────── bot 行为 / 外观设置 ─────────────────────────
 
+/** 语音闪避（人说话时自动压低音乐，说完渐升恢复） */
+export interface VoiceDuckingSettings {
+  enabled: boolean
+  /** 有人说话时音乐保留的音量百分比（0-100） */
+  volumePercent: number
+}
+
 /** 全局 bot 行为设置 */
 export interface BotSettings {
   /** 频道无人多少分钟后自动断开，0=禁用 */
   idleTimeoutMinutes: number
   /** 频道无人时自动暂停 */
   autoPauseOnEmpty: boolean
+  /** 语音闪避 */
+  voiceDucking: VoiceDuckingSettings
 }
 
 /** per-bot profile 开关（头像/昵称/描述等 6 字段） */

@@ -80,8 +80,8 @@ export const useMusicStore = defineStore('music', () => {
   const followEnabled = ref(true)
 
   // ── bot 行为 / 外观设置 ──
-  // 全局：空闲下线 + 空频道自动暂停（所有 bot 共享）
-  const botSettings = ref<BotSettings>({ idleTimeoutMinutes: 0, autoPauseOnEmpty: false })
+  // 全局：空闲下线 + 空频道自动暂停 + 语音闪避（所有 bot 共享）
+  const botSettings = ref<BotSettings>({ idleTimeoutMinutes: 0, autoPauseOnEmpty: false, voiceDucking: { enabled: false, volumePercent: 30 } })
   // per-bot profile 开关（6 字段），随 activeBotId 切换而重新拉取
   const activeBotProfile = ref<BotProfile | null>(null)
   // 当前 active bot 的固定头像（objectURL；切换/上传/删除时 revoke 重建）

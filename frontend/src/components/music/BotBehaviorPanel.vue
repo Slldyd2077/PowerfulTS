@@ -29,9 +29,10 @@ const SWITCHES: { key: keyof BotProfile; label: string; hint: string }[] = [
   { key: 'nowPlayingMsgEnabled', label: '切歌发送正在播放', hint: '频道聊天发消息' },
 ]
 
-// 头部一览：已开启的开关数（autoPause + per-bot 外观开关）
+// 头部一览：已开启的开关数（autoPause + 语音闪避 + per-bot 外观开关）
 const activeCount = computed(() => {
   let n = music.botSettings.autoPauseOnEmpty ? 1 : 0
+  if (music.botSettings.voiceDucking?.enabled) n++
   if (music.followEnabled) n++
   const prof = music.activeBotProfile
   if (prof) for (const s of SWITCHES) if (prof[s.key]) n++
@@ -75,9 +76,44 @@ async function toggleAutoPause(val: boolean) {
   try {
     await music.saveBotSettings({ autoPauseOnEmpty: val })
   } catch {
-    ElMessage.error('保存失败')
+    ElMessage.error('设置失败')
   } finally {
     autoPauseBusy.value = false
+  }
+}
+
+// ── 全局行为：语音闪避（有人说话时压低音乐）──
+const duckingBusy = ref(false)
+const duckVolume = ref(30)
+
+watch(() => music.botSettings.voiceDucking, (v) => {
+  duckVolume.value = v?.volumePercent ?? 30
+}, { immediate: true })
+
+async function toggleDucking(val: boolean) {
+  if (duckingBusy.value) return
+  duckingBusy.value = true
+  try {
+    await music.saveBotSettings({ voiceDucking: { enabled: val, volumePercent: Math.round(duckVolume.value) } })
+  } catch {
+    ElMessage.error('设置失败')
+  } finally {
+    duckingBusy.value = false
+  }
+}
+
+async function saveDuckVolume() {
+  if (duckingBusy.value) return
+  duckingBusy.value = true
+  try {
+    await music.saveBotSettings({
+      voiceDucking: { enabled: music.botSettings.voiceDucking.enabled, volumePercent: Math.round(duckVolume.value) },
+    })
+  } catch {
+    duckVolume.value = music.botSettings.voiceDucking?.volumePercent ?? 30
+    ElMessage.error('保存失败')
+  } finally {
+    duckingBusy.value = false
   }
 }
 
@@ -240,6 +276,39 @@ async function onRemoveAvatar() {
       <div class="create-actions">
         <button class="submit-btn" :disabled="globalBusy" @click="saveGlobal">{{ globalBusy ? '保存中…' : '保存下线时长' }}</button>
       </div>
+    </section>
+
+    <!-- 语音闪避（全局） -->
+    <section class="bh-section">
+      <div class="bh-section-title">语音闪避（全局，所有 Bot 生效）</div>
+
+      <button
+        type="button"
+        role="switch"
+        :aria-checked="!!music.botSettings.voiceDucking?.enabled"
+        class="switch-row"
+        :class="{ on: !!music.botSettings.voiceDucking?.enabled, busy: duckingBusy }"
+        :disabled="duckingBusy"
+        @click="toggleDucking(!music.botSettings.voiceDucking?.enabled)"
+      >
+        <span class="field-text">
+          <span class="field-label">有人说话自动压低音乐</span>
+          <span class="field-hint">频道里有人说话时音乐自动降到下方音量，说完渐升恢复，不打断播放</span>
+        </span>
+        <span class="switch-track"><span class="switch-knob"></span></span>
+      </button>
+
+      <div v-if="music.botSettings.voiceDucking?.enabled" class="field-row field-row--inline duck-volume-row">
+        <div class="field-text">
+          <span class="field-label">说话时音乐音量</span>
+          <span class="field-hint">有人说话期间音乐保留的音量</span>
+        </div>
+        <div class="duck-slider-wrap">
+          <el-slider v-model="duckVolume" :min="0" :max="100" :step="5" :disabled="duckingBusy" size="small" @change="saveDuckVolume" />
+          <span class="duck-value mono">{{ Math.round(duckVolume) }}%</span>
+        </div>
+      </div>
+      <p class="warn-line">原生客户端与网页通话用户的说话都会触发闪避。</p>
     </section>
 
     <!-- per-bot 外观（仅当前 active bot） -->
@@ -474,9 +543,26 @@ async function onRemoveAvatar() {
 .avatar-placeholder { font-size: 0.64em; color: var(--text-muted); }
 .avatar-actions { display: flex; gap: 5px; }
 
+.duck-volume-row { align-items: center; }
+.duck-slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 190px;
+  flex-shrink: 0;
+}
+.duck-slider-wrap :deep(.el-slider) { flex: 1; }
+.duck-value {
+  font-size: 0.7em;
+  color: var(--text-secondary);
+  min-width: 40px;
+  text-align: right;
+}
+
 @media (max-width: 768px) {
   .mini-btn { padding: 5px 10px; }
   .field-row--inline { flex-wrap: wrap; }
+  .duck-slider-wrap { width: 100%; }
   .behavior-head { padding: 10px; }
   .bh-summary { display: none; }
   .switch-row { min-height: 48px; }
