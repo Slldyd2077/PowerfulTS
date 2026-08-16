@@ -278,12 +278,21 @@ export async function setFollowSetting(enabled: boolean): Promise<{ enabled: boo
 
 // ───────────────────────── bot 行为 / 外观设置 ─────────────────────────
 
+/** 语音闪避（人说话时自动压低音乐，说完渐升恢复） */
+export interface VoiceDuckingSettings {
+  enabled: boolean
+  /** 有人说话时音乐保留的音量百分比（0-100） */
+  volumePercent: number
+}
+
 /** 全局 bot 行为设置 */
 export interface BotSettings {
   /** 频道无人多少分钟后自动断开，0=禁用 */
   idleTimeoutMinutes: number
   /** 频道无人时自动暂停 */
   autoPauseOnEmpty: boolean
+  /** 语音闪避 */
+  voiceDucking: VoiceDuckingSettings
 }
 
 /** per-bot profile 开关（头像/昵称/描述等 6 字段） */
@@ -450,4 +459,34 @@ export async function logoutPlatform(platform: string, botId?: string) {
   if (botId) params.botId = botId
   const { data } = await apiClient.delete('/music/auth/cookie', { params })
   return data
+}
+
+// ───────────────────────── 音源开关 / Jellyfin ─────────────────────────
+
+/** 音源开关 + 默认音源（配置级；据此隐藏未启用的音源 tab） */
+export async function getMusicProviders(): Promise<{ enabled: string[]; default: string }> {
+  const { data } = await apiClient.get('/music/providers')
+  return data
+}
+
+/** Jellyfin 连接表单（per-bot；密码/API Key 只写不读，留空=沿用已存值） */
+export interface JellyfinForm {
+  serverUrl: string
+  authMode: 'userpass' | 'apikey'
+  username: string
+  password: string
+  apiKey: string
+  userId: string
+}
+
+/** 测试该 bot 的 Jellyfin 连接（不落盘；空凭据字段回落该 bot 已存值） */
+export async function testJellyfin(form: JellyfinForm, botId?: string) {
+  const { data } = await apiClient.post('/music/auth/jellyfin/test', form, botId ? { params: { botId } } : undefined)
+  return data as { ok: boolean; serverName?: string; version?: string; error?: string }
+}
+
+/** 保存该 bot 的 Jellyfin 凭据（热重配 + 验证连接） */
+export async function saveJellyfin(form: JellyfinForm, botId?: string) {
+  const { data } = await apiClient.post('/music/auth/jellyfin/login', form, botId ? { params: { botId } } : undefined)
+  return data as { ok: boolean; serverName?: string; version?: string; error?: string }
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import QRCode from 'qrcode'
-import { getAuthStatus, getQrcode, getQrcodeStatus, setCookie, logoutPlatform } from '@/api/music'
+import { getAuthStatus, getQrcode, getQrcodeStatus, setCookie, logoutPlatform, testJellyfin, saveJellyfin, type JellyfinForm } from '@/api/music'
 import { ElMessage } from 'element-plus'
 import { useMusicStore } from '@/stores/music'
 
@@ -194,6 +194,74 @@ async function onLogout(p: PlatformInfo) {
 
 onMounted(() => music.fetchOwnPlatformStatus())
 onUnmounted(stopPolling)
+
+// ── Jellyfin（自建音乐库；per-bot 连接，凭据只写不读） ──────────────────
+const JELLYFIN_COLOR = '#aa5cc3'
+const jellyfinStatus = computed(() => music.ownPlatformStatus['jellyfin'])
+const showJellyfin = ref(false)
+const jellyfinBusy = ref(false) // test/save 共用，防连点
+const jellyfinForm = ref<JellyfinForm>({
+  serverUrl: '', authMode: 'userpass', username: '', password: '', apiKey: '', userId: '',
+})
+
+function openJellyfin() {
+  if (!music.ownLibraryBotId) {
+    ElMessage.warning('请先在「TS Bot」面板创建一个 Bot，再配置 Jellyfin（连接绑定到 Bot 实例）')
+    return
+  }
+  // 凭据不回显：表单永远从空白开始，留空的密码/API Key 表示沿用已存值
+  jellyfinForm.value = { serverUrl: '', authMode: 'userpass', username: '', password: '', apiKey: '', userId: '' }
+  showJellyfin.value = true
+}
+
+async function doTestJellyfin() {
+  jellyfinBusy.value = true
+  try {
+    const res = await testJellyfin(jellyfinForm.value, music.ownLibraryBotId)
+    if (res.ok) ElMessage.success(`连接成功：${res.serverName ?? 'Jellyfin'} ${res.version ?? ''}`)
+    else ElMessage.error(`连接失败：${res.error ?? '未知错误'}`)
+  } catch {
+    ElMessage.error('测试请求失败')
+  } finally {
+    jellyfinBusy.value = false
+  }
+}
+
+async function doSaveJellyfin() {
+  jellyfinBusy.value = true
+  try {
+    const res = await saveJellyfin(jellyfinForm.value, music.ownLibraryBotId)
+    // 刷新该 bot 的 jellyfin 登录态（未启用音源时上游 400，视作未连接）
+    let loggedIn = false
+    let nickname: string | undefined
+    try {
+      const auth = await getAuthStatus('jellyfin', music.ownLibraryBotId)
+      loggedIn = !!auth.loggedIn
+      nickname = auth.nickname
+    } catch { /* keep defaults */ }
+    music.ownPlatformStatus['jellyfin'] = { loggedIn, nickname }
+    if (loggedIn) {
+      ElMessage.success('Jellyfin 连接已保存')
+      showJellyfin.value = false
+    } else {
+      ElMessage.warning(`凭据已保存，但连接未通过：${res.error ?? '请检查服务器地址与凭据'}`)
+    }
+  } catch {
+    ElMessage.error('保存失败')
+  } finally {
+    jellyfinBusy.value = false
+  }
+}
+
+async function jellyfinLogout() {
+  try {
+    await logoutPlatform('jellyfin', music.ownLibraryBotId)
+    music.ownPlatformStatus['jellyfin'] = { loggedIn: false }
+    ElMessage.success('Jellyfin 已断开')
+  } catch {
+    ElMessage.error('Jellyfin 断开失败')
+  }
+}
 </script>
 
 <template>
@@ -220,6 +288,68 @@ onUnmounted(stopPolling)
         <div v-else class="logout-actions">
           <span class="logged-dot" :style="{ background: p.color }"></span>
           <button class="logout-btn" @click="onLogout(p)">退出</button>
+        </div>
+      </div>
+
+      <!-- Jellyfin：自建音乐库，per-bot 连接（无扫码，凭据只写不读） -->
+      <div class="platform-row">
+        <div class="platform-icon" :style="{ background: JELLYFIN_COLOR + '20', color: JELLYFIN_COLOR }">J</div>
+        <div class="platform-info">
+          <span class="platform-name">Jellyfin</span>
+          <span class="platform-status" :class="{ logged: jellyfinStatus?.loggedIn }">
+            {{ jellyfinStatus?.loggedIn ? `✓ ${jellyfinStatus?.nickname || '已连接'}` : '未连接' }}
+          </span>
+        </div>
+        <div v-if="!jellyfinStatus?.loggedIn" class="login-actions">
+          <button class="login-btn" @click="openJellyfin">配置</button>
+        </div>
+        <div v-else class="logout-actions">
+          <span class="logged-dot" :style="{ background: JELLYFIN_COLOR }"></span>
+          <button class="logout-btn" @click="jellyfinLogout">断开</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Jellyfin 配置弹窗 -->
+    <div v-if="showJellyfin" class="qr-overlay" @click.self="showJellyfin = false">
+      <div class="cookie-box jellyfin-box">
+        <h3 class="cookie-title">Jellyfin 连接（绑定当前 Bot）</h3>
+        <p class="cookie-hint">凭据按 Bot 独立保存且不回显；密码 / API Key 留空表示沿用已保存的值</p>
+        <div class="jf-field">
+          <label class="jf-label">服务器地址</label>
+          <input v-model="jellyfinForm.serverUrl" class="jf-input" placeholder="https://jellyfin.example.com" />
+        </div>
+        <div class="jf-field">
+          <label class="jf-label">认证方式</label>
+          <div class="jf-mode">
+            <button class="jf-mode-btn" :class="{ active: jellyfinForm.authMode === 'userpass' }" @click="jellyfinForm.authMode = 'userpass'">账号密码</button>
+            <button class="jf-mode-btn" :class="{ active: jellyfinForm.authMode === 'apikey' }" @click="jellyfinForm.authMode = 'apikey'">API Key</button>
+          </div>
+        </div>
+        <template v-if="jellyfinForm.authMode === 'userpass'">
+          <div class="jf-field">
+            <label class="jf-label">用户名</label>
+            <input v-model="jellyfinForm.username" class="jf-input" placeholder="Jellyfin 用户名" />
+          </div>
+          <div class="jf-field">
+            <label class="jf-label">密码</label>
+            <input v-model="jellyfinForm.password" class="jf-input" type="password" placeholder="留空表示不修改" />
+          </div>
+        </template>
+        <template v-else>
+          <div class="jf-field">
+            <label class="jf-label">API Key</label>
+            <input v-model="jellyfinForm.apiKey" class="jf-input" type="password" placeholder="留空表示不修改" />
+          </div>
+          <div class="jf-field">
+            <label class="jf-label">用户 ID</label>
+            <input v-model="jellyfinForm.userId" class="jf-input" placeholder="该 Key 对应的 Jellyfin 用户 ID" />
+          </div>
+        </template>
+        <div class="cookie-actions">
+          <button class="qr-close" @click="showJellyfin = false">取消</button>
+          <button class="qr-close" :disabled="jellyfinBusy" @click="doTestJellyfin">{{ jellyfinBusy ? '…' : '测试连接' }}</button>
+          <button class="cookie-submit" :disabled="jellyfinBusy" @click="doSaveJellyfin">{{ jellyfinBusy ? '保存中…' : '保存' }}</button>
         </div>
       </div>
     </div>
@@ -499,5 +629,53 @@ onUnmounted(stopPolling)
   .cookie-box { width: calc(100vw - 24px); max-width: none; padding: 18px; }
   .cookie-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cookie-actions button { min-width: 0; min-height: 42px; }
+}
+</style>
+
+<style scoped>
+/* Jellyfin 配置弹窗字段（复用 cookie-box 容器样式，仅补字段排版） */
+.jellyfin-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.jf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.jf-label {
+  font-size: 0.72em;
+  color: var(--text-secondary);
+}
+.jf-input {
+  background: var(--surface-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 0.85em;
+  padding: 7px 10px;
+  outline: none;
+}
+.jf-input:focus {
+  border-color: var(--accent, #aa5cc3);
+}
+.jf-mode {
+  display: flex;
+  gap: 6px;
+}
+.jf-mode-btn {
+  flex: 1;
+  background: var(--surface-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 0.78em;
+  padding: 6px 0;
+  cursor: pointer;
+}
+.jf-mode-btn.active {
+  border-color: #aa5cc3;
+  color: #aa5cc3;
 }
 </style>

@@ -133,6 +133,19 @@ class TSMusicUnavailable(RuntimeError):
     """
 
 
+def _parse_voice_ducking(raw: object) -> dict:
+    """解析上游 voiceDucking 块，非法/缺失时回落上游默认（关，30%）。"""
+    if not isinstance(raw, dict):
+        return {"enabled": False, "volumePercent": 30}
+    volume = raw.get("volumePercent")
+    if not isinstance(volume, (int, float)) or isinstance(volume, bool) or not 0 <= volume <= 100:
+        volume = 30
+    return {
+        "enabled": raw.get("enabled") is True,
+        "volumePercent": volume,
+    }
+
+
 class TSMusicClient:
     """TSMusicBot REST API 代理客户端（per-user：每个用户连自己的专属容器）。"""
 
@@ -797,19 +810,20 @@ class TSMusicClient:
     )
 
     async def get_bot_settings(self) -> dict:
-        """全局 bot 行为设置：空闲下线分钟 + 空频道自动暂停。
+        """全局 bot 行为设置：空闲下线分钟 + 空频道自动暂停 + 语音闪避。
 
-        仅回传这两项；guestMode / adminGroups 属上游自身权限体系，PowerfulTS 不代理。
+        仅回传这三项；guestMode / adminGroups 属上游自身权限体系，PowerfulTS 不代理。
         """
         await self._ensure_login()
         try:
             data = self._json(await self._http.get("/api/bot/settings"))
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("TSMusicBot 读取 bot 设置失败: %s", exc)
-            return {"idleTimeoutMinutes": 0, "autoPauseOnEmpty": False}
+            return {"idleTimeoutMinutes": 0, "autoPauseOnEmpty": False, "voiceDucking": {"enabled": False, "volumePercent": 30}}
         return {
             "idleTimeoutMinutes": data.get("idleTimeoutMinutes", 0),
             "autoPauseOnEmpty": bool(data.get("autoPauseOnEmpty", False)),
+            "voiceDucking": _parse_voice_ducking(data.get("voiceDucking")),
         }
 
     async def get_bot_settings_checked(self) -> dict:
@@ -823,12 +837,14 @@ class TSMusicClient:
         return {
             "idleTimeoutMinutes": data.get("idleTimeoutMinutes", 0),
             "autoPauseOnEmpty": bool(data.get("autoPauseOnEmpty", False)),
+            "voiceDucking": _parse_voice_ducking(data.get("voiceDucking")),
         }
 
     async def set_bot_settings(
         self,
         idle_timeout_minutes: int | None = None,
         auto_pause_on_empty: bool | None = None,
+        voice_ducking: dict | None = None,
     ) -> dict:
         """更新全局 bot 行为设置（仅透传非 None 字段，未传项上游保持不变）。"""
         await self._ensure_login()
@@ -837,12 +853,22 @@ class TSMusicClient:
             payload["idleTimeoutMinutes"] = idle_timeout_minutes
         if auto_pause_on_empty is not None:
             payload["autoPauseOnEmpty"] = auto_pause_on_empty
+        if voice_ducking:
+            block: dict = {}
+            if voice_ducking.get("enabled") is not None:
+                block["enabled"] = bool(voice_ducking["enabled"])
+            volume = voice_ducking.get("volumePercent")
+            if volume is not None:
+                block["volumePercent"] = volume
+            if block:
+                payload["voiceDucking"] = block
         if not payload:
             return await self.get_bot_settings()
         data = self._json(await self._http.post("/api/bot/settings", json=payload))
         return {
             "idleTimeoutMinutes": data.get("idleTimeoutMinutes", 0),
             "autoPauseOnEmpty": bool(data.get("autoPauseOnEmpty", False)),
+            "voiceDucking": _parse_voice_ducking(data.get("voiceDucking")),
         }
 
     async def get_bot_profile(self, bot_id: str | None = None) -> dict:
@@ -942,6 +968,40 @@ class TSMusicClient:
         if bot_id:
             params["botId"] = bot_id
         resp = await self._http.delete("/api/auth/cookie", params=params)
+        return self._json(resp)
+
+    # ───────────────────────── 音源开关 / Jellyfin ─────────────────────────
+
+    async def get_providers(self) -> dict:
+        """GET /api/music/providers → {enabled: [...], default: str}。
+
+        配置级端点（enabledProviders 门控 + 默认音源），不带 botId。
+        前端据此隐藏未启用的音源 tab。
+        """
+        await self._ensure_login()
+        try:
+            resp = await self._http.get("/api/music/providers")
+            return self._json(resp)
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("获取音源开关失败: %s", exc)
+            return {"enabled": ["netease", "qq", "bilibili", "kugou", "local"], "default": "netease"}
+
+    async def jellyfin_test(self, form: dict, bot_id: str | None = None) -> dict:
+        """测试该 bot 的 Jellyfin 连接（空凭据字段回落该 bot 已存值）。"""
+        await self._ensure_login()
+        payload: dict = dict(form)
+        if bot_id:
+            payload["botId"] = bot_id
+        resp = await self._http.post("/api/auth/jellyfin/test", json=payload)
+        return self._json(resp)
+
+    async def jellyfin_login(self, form: dict, bot_id: str | None = None) -> dict:
+        """保存该 bot 的 Jellyfin 凭据并热重配 + 验证连接。"""
+        await self._ensure_login()
+        payload: dict = dict(form)
+        if bot_id:
+            payload["botId"] = bot_id
+        resp = await self._http.post("/api/auth/jellyfin/login", json=payload)
         return self._json(resp)
 
     # ───────────────────────── 我的音乐 / 歌单 ─────────────────────────

@@ -39,6 +39,28 @@ export async function updateFriendNotify(friendAccountId: number, enabled: boole
   return data
 }
 
+export interface FriendRequestInfo {
+  id: number
+  requester_id: number
+  requester_nickname: string
+  created_at: string
+}
+
+/** 获取收到的好友申请（待处理） */
+export async function getFriendRequests(): Promise<{ requests: FriendRequestInfo[] }> {
+  const { data } = await apiClient.get('/friends/requests')
+  return data
+}
+
+/** 接受或拒绝好友申请 */
+export async function respondFriendRequest(requestId: number, action: 'accept' | 'reject') {
+  const { data } = await apiClient.post('/friends/requests/action', {
+    request_id: requestId,
+    action,
+  })
+  return data as { success: boolean; message?: string; error?: string }
+}
+
 export interface FriendSettings {
   qq_number: string
   notify_friends_online: boolean

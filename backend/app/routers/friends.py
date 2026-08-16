@@ -235,7 +235,7 @@ async def add_friend(
     if not friend_request:
         return {"success": False, "error": "已经发送过好友申请，请等待对方接受"}
 
-    notice = f"【PowerfulTS】用户「{account.ts_nickname}」请求添加你为好友，请在管理后台接受或拒绝。"
+    notice = f"【PowerfulTS】用户「{account.ts_nickname}」请求添加你为好友，请登录网页面板「好友」页面接受或拒绝。"
     delivery = await _deliver_or_queue_friend_notice(request, db, friend, notice)
 
     return {

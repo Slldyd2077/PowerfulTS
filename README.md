@@ -28,6 +28,8 @@
 
 其中**网页通话**让成员不装 TeamSpeak 客户端也能直接在浏览器里收听频道并发言。
 
+> 🍴 **TSMusicBot 专用分支**：本项目的音乐引擎与网页通话中继依赖 [TSMusicBot](https://github.com/Slldyd2077/teamspeak-music-bot) 的专用定制分支 [`merge/upstream-v1.12`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/merge/upstream-v1.12)——per-bot 多实例架构、双向 Opus 语音中继、语音闪避（含网页通话触发）等接口仅存在于该分支。**部署时必须使用该分支构建的 TSMusicBot**（v1.12.1+），上游 [ZHANGTIANYAO1/teamspeak-music-bot](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot) 的原版不支持这些能力。
+
 > 💡 **跨平台**：提供完整 Docker 化方案，Linux / Windows / macOS / NAS（群晖、威联通等）均可一键部署。
 
 > ⚠️ **早期测试版本**：本项目目前处于**早期开发与测试阶段**，功能仍在快速迭代中，存在诸多 Bug。如遇问题，欢迎[提交 Issue](https://github.com/Slldyd2077/PowerfulTS/issues) 反馈。
@@ -42,12 +44,12 @@
 | 🎙️ **网页通话** | ✅ | **不装 TS 客户端，直接在网页收听频道并发言**：以自己的昵称接入、浏览并切换频道（支持频道密码）、按人调节音量、麦克风增益与输入输出设备选择 |
 | 👥 在线用户 | ✅ | 昵称 · 游戏 · 所在频道 · 在线时长 · 各游戏人数分布 |
 | 📡 频道列表 | ✅ | 频道树浏览 · 各频道在场成员 |
-| 🎵 音乐中心 | ✅ | 搜索 · 点歌 · 队列 · 音量 · 播放模式（网易云 / QQ / 酷狗 / B 站） |
+| 🎵 音乐中心 | ✅ | 搜索 · 点歌 · 队列 · 音量 · 播放模式 · 语音闪避（有人说话自动压低音乐）（网易云 / QQ / 酷狗 / B 站） |
 | 📡 电脑音频直播 | ✅ | 用户主动选择应用/屏幕并授权后，通过音乐机器人实时共享音频 |
 | 🔐 平台账号 | ✅ | 网易云 / QQ / 酷狗 / Bilibili 扫码登录（解锁 VIP 曲库、个人歌单、番剧与视频点播） |
 | 🎮 Steam | ✅ | OpenID 绑定 · 好友在线状态 · 共同游戏 · 游戏时长排行；TS 在线列表优先显示 Steam 当前游戏 |
 | 📱 QQ通知 | ✅ | 通过 NapCat/OneBot 实现QQ好友上线通知（需配置 NapCat） |
-| 🤝 社交 | ✅ | 好友添加 / 删除 / 在线状态 |
+| 🤝 社交 | ✅ | 好友添加 / 删除 / 在线状态 · 好友申请接受 / 拒绝 |
 | 📱 移动端 | ✅ | 手机 / 平板自适应（抽屉导航 · 响应式布局 · 触屏长按操作） |
 
 > 音乐、点播、社交等功能**需注册账号后使用**；游客会获得两小时临时身份，仅可浏览管理面板和使用网页通话。浏览器会自动在请求头注入会话 Token。
@@ -177,7 +179,7 @@ PowerfulTS/
 
 - 已安装 [Docker](https://docs.docker.com/get-docker/) 与 [Docker Compose](https://docs.docker.com/compose/install/)（Docker Desktop 自带）
 - 上游服务已就绪（见 [🔌 接入上游服务](#-接入上游服务)）：
-  - **TSMusicBot**（音乐 / 点播引擎，默认 :3000）
+  - **TSMusicBot**（音乐 / 点播引擎，默认 :3000；须使用 [专用分支 `merge/upstream-v1.12`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/merge/upstream-v1.12) 构建，v1.12.1+）
   - **TS3 服务端**（开启 ServerQuery，默认 :10011）
 
 #### 2. 配置环境变量

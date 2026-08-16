@@ -4,5 +4,5 @@ requires-python = ">=3.11"
 
 [[package]]
 name = "powerfults"
-version = "0.12.5"
+version = "0.12.6"
 source = { editable = "." }
