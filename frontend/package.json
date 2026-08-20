@@ -1,30 +1,31 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "0.12.6",
+  "version": "0.12.7",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test:unit": "tsc -p tests/tsconfig.json && node --experimental-test-coverage --test dist/.voice-tests/tests/microphone-uplink.test.js",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
     "@types/qrcode": "^1.5.6",
-    "axios": "^1.17.0",
+    "axios": "^1.19.0",
     "element-plus": "^2.14.1",
     "opus-decoder": "^0.7.11",
     "pinia": "^3.0.4",
     "qrcode": "^1.5.4",
-    "vue": "^3.5.34",
+    "vue": "^3.5.41",
     "vue-router": "^4.6.4"
   },
   "devDependencies": {
     "@types/node": "^24.12.3",
-    "@vitejs/plugin-vue": "^6.0.6",
+    "@vitejs/plugin-vue": "^6.0.8",
     "@vue/tsconfig": "^0.9.1",
-    "typescript": "~6.0.2",
-    "vite": "^8.0.12",
-    "vue-tsc": "^3.2.8"
+    "typescript": "~6.0.3",
+    "vite": "^8.2.2",
+    "vue-tsc": "^3.3.10"
   }
 }

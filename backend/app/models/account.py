@@ -10,7 +10,11 @@ from ..core.database import Base
 
 
 class Account(Base):
-    """用户账号。以 TS3 unique_identifier 为身份锚点（不可伪造）。"""
+    """用户账号。
+
+    普通注册保存已验证的 TS3 ``unique_identifier``；邀请与游客账号使用
+    服务端生成的 ``invite:`` / ``guest:`` 内部标识，不代表已绑定 TS 身份。
+    """
 
     __tablename__ = "accounts"
 
@@ -46,6 +50,25 @@ class Account(Base):
     container_status: Mapped[str] = mapped_column(String(16), default="none", server_default="none")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class FriendInvitation(Base):
+    """Hashed, single-use invitation issued by a registered account."""
+
+    __tablename__ = "friend_invitations"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    inviter_account_id: Mapped[int] = mapped_column(
+        ForeignKey("accounts.id", ondelete="CASCADE"), index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    used_by_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True
+    )
 
 
 class ServerMember(Base):

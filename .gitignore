@@ -42,6 +42,9 @@ backend/data/intro-music/*
 !backend/data/intro-music/.gitkeep
 !backend/data/intro-music/README.md
 
+# 用户自定义入场音效（运行时私有数据）
+backend/data/entry-sounds/
+
 # Claude Code 本地配置
 .claude/
 

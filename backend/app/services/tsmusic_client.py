@@ -1210,6 +1210,18 @@ class TSMusicClient:
         logger.warning("切换频道被拒 [ts=%s] %s", ts_error, detail)
         return {"ok": False, "detail": detail}
 
+    async def play_sound_effect(
+        self, url: str, *, bot_id: str | None = None
+    ) -> dict:
+        """Ask TSMusicBot to overlay a short effect fetched from a capability URL."""
+        await self._ensure_login()
+        resp = await self._http.post(
+            f"/api/player/{self._bid(bot_id)}/sound-effect",
+            json={"url": url},
+        )
+        resp.raise_for_status()
+        return self._json(resp)
+
     # ───────────────────────── 音质设置 ─────────────────────────
 
     async def get_quality(self, bot_id: str | None = None) -> dict:

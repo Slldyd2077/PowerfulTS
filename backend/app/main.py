@@ -28,6 +28,7 @@ from .services.bot_idle_manager import BotIdleManager
 from .services.bot_player_state import BotPlayerStateStore
 from .services.live_audio import LiveAudioRelay
 from .services.guest_access import GuestSessionRateLimiter
+from .services.entry_sound import EntrySoundCapabilities, EntrySoundStorage
 from .services.voice_bot import VoiceBotManager
 from .services.voice_downlink import VoiceDownlinkTickets
 from .services.online_notifier import OnlineNotifier
@@ -161,6 +162,18 @@ async def lifespan(app: FastAPI):
     app.state.guest_voice_limiter = GuestSessionRateLimiter(
         max_requests=60, window_seconds=60
     )
+    app.state.invite_registration_limiter = GuestSessionRateLimiter(
+        max_requests=20, window_seconds=3600
+    )
+    app.state.friend_invitation_limiter = GuestSessionRateLimiter(
+        max_requests=30, window_seconds=3600
+    )
+    app.state.entry_sound_upload_limiter = GuestSessionRateLimiter(
+        max_requests=10, window_seconds=3600
+    )
+    app.state.entry_sound_storage = EntrySoundStorage(settings.entry_sound_dir)
+    app.state.entry_sound_capabilities = EntrySoundCapabilities(ttl_seconds=30)
+    app.state.entry_sound_tasks = set()
     app.state.voice_downlink = VoiceDownlinkTickets()
     # 同样解析 tsmusic：admin 热重载会换掉 app.state.tsmusic。
     app.state.voice_bots = VoiceBotManager(
@@ -182,6 +195,11 @@ async def lifespan(app: FastAPI):
     finally:
         app.state.ts3_monitor.stop()
         await app.state.bot_idle_manager.stop()
+        entry_sound_tasks = tuple(app.state.entry_sound_tasks)
+        for task in entry_sound_tasks:
+            task.cancel()
+        if entry_sound_tasks:
+            await asyncio.gather(*entry_sound_tasks, return_exceptions=True)
         guest_cleanup_task.cancel()
         try:
             await guest_cleanup_task

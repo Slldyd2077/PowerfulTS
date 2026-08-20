@@ -4,6 +4,7 @@ import FriendRequestsPanel from '@/components/social/FriendRequestsPanel.vue'
 import FriendsList from '@/components/social/FriendsList.vue'
 import AddFriendDialog from '@/components/social/AddFriendDialog.vue'
 import FriendNotifySettings from '@/components/social/FriendNotifySettings.vue'
+import InviteFriendCard from '@/components/social/InviteFriendCard.vue'
 
 const showAddFriend = ref(false)
 const friendsListKey = ref(0)
@@ -22,6 +23,7 @@ function refreshFriends() {
     </div>
 
     <div class="friends-content">
+      <InviteFriendCard />
       <FriendRequestsPanel @changed="refreshFriends" />
       <FriendsList :key="friendsListKey" />
       <div class="add-friend-wrapper">
@@ -72,6 +74,7 @@ function refreshFriends() {
 
 .friends-content {
   max-width: 520px;
+  width: 100%;
 }
 
 .add-friend-wrapper {

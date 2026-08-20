@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +20,7 @@ from ..deps import get_current_account
 from ..models import Account, Friend, FriendRequest, PendingNotification
 from ..services import app_setting, ts3_auth
 from ..services.friend_service import FriendService
+from ..services.invitation_service import InvitationService
 
 settings = get_settings()
 
@@ -70,6 +71,29 @@ async def _deliver_or_queue_friend_notice(
 
 class FriendAddRequest(BaseModel):
     friend_ts_nickname: str = Field(min_length=1, max_length=64)
+
+
+@router.post("/friends/invitations")
+async def create_friend_invitation(
+    request: Request,
+    account: Account = Depends(get_current_account),
+    db: AsyncSession = Depends(get_db),
+):
+    """Issue a new seven-day invitation and revoke any older unused link."""
+    limiter = getattr(request.app.state, "friend_invitation_limiter", None)
+    if limiter is not None and not await limiter.allow(f"account:{account.id}"):
+        raise HTTPException(status_code=429, detail="邀请链接生成过于频繁，请稍后再试")
+    try:
+        token, expires_at = await InvitationService(db).issue(account)
+    except ValueError:
+        raise HTTPException(
+            status_code=403, detail="仅活跃成员可生成邀请链接"
+        ) from None
+    return {
+        "success": True,
+        "token": token,
+        "expires_at": expires_at.isoformat(),
+    }
 
 
 @router.get("/friends")

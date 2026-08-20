@@ -12,6 +12,13 @@ import {
   startVoiceDownlink,
   startVoiceMicrophone,
 } from '@/api/voice'
+import {
+  chooseSupportedMicrophoneMimeType,
+  MicrophoneUplink,
+  type MicrophoneRecorder,
+  type MicrophoneSocket,
+  type MicrophoneUplinkState,
+} from '@/services/microphone-uplink'
 
 const emit = defineEmits<{ (e: 'session-change'): void }>()
 
@@ -38,8 +45,8 @@ const voiceBotId = ref('')
 const listening = ref(false)
 const listenState = ref<'idle' | 'connecting' | 'live' | 'reconnecting'>('idle')
 const listenError = ref('')
-const microphoneLive = ref(false)
-const microphoneState = ref<'idle' | 'requesting' | 'connecting' | 'live'>('idle')
+const microphoneState = ref<MicrophoneUplinkState>('idle')
+const microphoneLive = computed(() => microphoneState.value === 'live')
 const activeSpeakers = ref(0)
 const speakingIds = ref<number[]>([])
 const outputVolume = ref(85)
@@ -80,6 +87,14 @@ const compatibilityNote = computed(() => {
   if (decoderBackend.value === 'wasm') return '兼容模式已启用：当前设备使用 WASM 解码频道语音。'
   return ''
 })
+const microphoneStatusText = computed(() => {
+  if (microphoneState.value === 'live') return '麦克风已发送音频'
+  if (microphoneState.value === 'requesting') return '等待麦克风授权'
+  if (microphoneState.value === 'connecting') return '正在连接麦克风'
+  if (microphoneState.value === 'verifying') return '正在验证麦克风音频'
+  if (microphoneState.value === 'reconnecting') return '麦克风正在重连'
+  return '麦克风已静音'
+})
 
 // 4502 = TSMusicBot 没有下行接口（版本过旧），重连多少次都一样，直接收手。
 // 4503（连不上）和 1011（流中途断）交给下面的有限次退避重连。
@@ -96,15 +111,10 @@ let listenGeneration = 0
 const decoders = new Map<number, SpeakerDecoder>()
 let WasmDecoderCtor: typeof import('opus-decoder').OpusDecoderWebWorker | null = null
 
-let microphone: MediaStream | null = null
-let microphoneRecorder: MediaRecorder | null = null
-let microphoneSocket: WebSocket | null = null
-let microphoneSessionId = ''
-let microphoneStopping = false
-let microphoneGeneration = 0
-// Own context for the uplink: the playback one is torn down on hang-up, and a
-// closed context would take the microphone gain node down with it.
+// The microphone uses the raw getUserMedia stream at 100% volume. A separate
+// Web Audio graph is created only when the user explicitly requests gain.
 let microphoneContext: AudioContext | null = null
+let microphoneSource: MediaStreamAudioSourceNode | null = null
 let microphoneGain: GainNode | null = null
 let microphoneOutput: MediaStreamAudioDestinationNode | null = null
 
@@ -129,24 +139,6 @@ function closeText(event: CloseEvent): string {
   if (event.code === 1006) return '语音连接被中断（后端或音乐机器人不可达）'
   if (event.code === 1000) return '语音连接已关闭'
   return `语音连接已关闭（code ${event.code}）`
-}
-
-function waitForSocket(socket: WebSocket): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(() => reject(new Error('语音连接超时')), 10000)
-    socket.addEventListener('open', () => {
-      window.clearTimeout(timeout)
-      resolve()
-    }, { once: true })
-    socket.addEventListener('error', () => {
-      window.clearTimeout(timeout)
-      reject(new Error('语音连接失败'))
-    }, { once: true })
-    socket.addEventListener('close', () => {
-      window.clearTimeout(timeout)
-      reject(new Error('语音连接在建立前已关闭'))
-    }, { once: true })
-  })
 }
 
 function closeDecoders() {
@@ -289,10 +281,6 @@ async function ensureAudioPipeline() {
   // original tap still owns user activation.
   audioContext = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 })
   const resumePromise = audioContext.resume()
-  if (!microphoneContext || microphoneContext.state === 'closed') {
-    microphoneContext = new AudioContext({ latencyHint: 'interactive' })
-  }
-  const microphoneResumePromise = microphoneContext.resume()
 
   const Decoder = globalThis.AudioDecoder
   let webCodecsSupported = false
@@ -338,23 +326,30 @@ async function ensureAudioPipeline() {
   }
   pushAllSpeakerGains()
   await resumePromise
-  // Playback is required; the microphone is best-effort and may stay suspended
-  // until getUserMedia completes on stricter mobile browsers.
-  await microphoneResumePromise.catch(() => {})
   await audioContext.resume()
 }
 
 /** 断线后自动续上；失败原因写进 listenError 并让面板一直显示，不再无声重连。 */
 function scheduleReconnect(generation: number, reason: string) {
   listenState.value = 'reconnecting'
+  if (!connectionsMayRecover()) {
+    listenError.value = `${reason} · 等待网络恢复或页面回到前台`
+    return
+  }
+  if (reconnectTimer) return
   listenError.value = `${reason} · 正在重连（第 ${reconnectAttempt + 1} 次）`
   const delay = Math.min(1000 * 2 ** reconnectAttempt++, 10000)
   reconnectTimer = window.setTimeout(() => {
+    reconnectTimer = null
     void connectDownlink(generation).catch((error) => {
       if (!listening.value || generation !== listenGeneration) return
       void failListening(errorText(error, '频道语音重连失败'))
     })
   }, delay)
+}
+
+function connectionsMayRecover(): boolean {
+  return document.visibilityState === 'visible' && navigator.onLine !== false
 }
 
 async function failListening(message: string) {
@@ -369,6 +364,10 @@ async function failListening(message: string) {
  */
 function connectDownlink(generation: number): Promise<void> {
   if (!voiceBotId.value || generation !== listenGeneration) return Promise.resolve()
+  if (!connectionsMayRecover()) {
+    listenState.value = 'reconnecting'
+    return Promise.resolve()
+  }
   return startVoiceDownlink().then((session) => {
     if (generation !== listenGeneration) return
     return new Promise<void>((resolve, reject) => {
@@ -479,8 +478,7 @@ function pushAllSpeakerGains() {
 }
 
 function chooseMicrophoneMimeType(): string {
-  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
-  return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || ''
+  return chooseSupportedMicrophoneMimeType((type) => MediaRecorder.isTypeSupported(type))
 }
 
 /**
@@ -513,22 +511,89 @@ function setMicrophoneVolume() {
     microphoneGain.gain.setTargetAtTime(
       microphoneVolume.value / 100, microphoneContext.currentTime, 0.015,
     )
+    return
+  }
+  if (microphoneState.value !== 'idle' && microphoneVolume.value !== 100) {
+    void microphoneUplink.restartTransport()
   }
 }
 
-/** Route the raw mic through a gain node so the slider actually changes what is sent. */
-function buildMicrophonePipeline(stream: MediaStream): MediaStream {
-  if (!microphoneContext || microphoneContext.state === 'closed') {
-    microphoneContext = new AudioContext({ latencyHint: 'interactive' })
+/**
+ * The raw stream is the reliable mobile path. Web Audio is only introduced for
+ * an explicit non-100% gain and must prove that its context is actually running.
+ */
+async function prepareMicrophoneStream(stream: MediaStream): Promise<MediaStream> {
+  if (microphoneVolume.value === 100) return stream
+  microphoneContext = new AudioContext({ latencyHint: 'interactive' })
+  await microphoneContext.resume().catch(() => {})
+  if (microphoneContext.state !== 'running') {
+    await releasePreparedMicrophoneStream()
+    microphoneVolume.value = 100
+    ElMessage.warning('当前浏览器无法启用网页麦克风增益，已改用系统麦克风音量')
+    return stream
   }
-  void microphoneContext.resume()
-  const source = microphoneContext.createMediaStreamSource(stream)
+  microphoneSource = microphoneContext.createMediaStreamSource(stream)
   microphoneGain = microphoneContext.createGain()
   microphoneGain.gain.value = microphoneVolume.value / 100
   microphoneOutput = microphoneContext.createMediaStreamDestination()
-  source.connect(microphoneGain).connect(microphoneOutput)
+  microphoneSource.connect(microphoneGain).connect(microphoneOutput)
   return microphoneOutput.stream
 }
+
+async function releasePreparedMicrophoneStream() {
+  microphoneSource?.disconnect()
+  microphoneGain?.disconnect()
+  microphoneOutput?.disconnect()
+  microphoneSource = null
+  microphoneGain = null
+  microphoneOutput = null
+  if (microphoneContext) await microphoneContext.close().catch(() => {})
+  microphoneContext = null
+}
+
+function describeMicrophoneError(error: unknown): string {
+  if (!(error instanceof DOMException)) return errorText(error, '无法开启麦克风')
+  if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
+    return '麦克风权限被拒绝，请在浏览器的网站设置中允许后再重试'
+  }
+  if (error.name === 'NotFoundError') return '没有找到可用的麦克风设备'
+  if (error.name === 'NotReadableError') return '麦克风正被其他应用占用，请关闭占用后重试'
+  if (error.name === 'OverconstrainedError') return '所选麦克风已不可用，请改用系统默认设备'
+  return error.message || '无法开启麦克风'
+}
+
+const microphoneUplink = new MicrophoneUplink({
+  acquireStream: async () => {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+          ...(selectedInput.value ? { deviceId: { exact: selectedInput.value } } : {}),
+        },
+      })
+    } catch (error) {
+      throw new Error(describeMicrophoneError(error))
+    }
+  },
+  prepareStream: prepareMicrophoneStream,
+  releasePreparedStream: releasePreparedMicrophoneStream,
+  chooseMimeType: chooseMicrophoneMimeType,
+  startSession: startVoiceMicrophone,
+  stopSession: stopLiveAudio,
+  createSocket: (path) => new WebSocket(websocketUrl(path)) as unknown as MicrophoneSocket,
+  createRecorder: (stream, mimeType) => new MediaRecorder(
+    stream, { mimeType, audioBitsPerSecond: 64000 },
+  ) as unknown as MicrophoneRecorder,
+  isRecoveryAllowed: connectionsMayRecover,
+  setTimer: (callback, delayMs) => window.setTimeout(callback, delayMs),
+  clearTimer: (timer) => window.clearTimeout(timer),
+  onStateChange: (state) => { microphoneState.value = state },
+  onWarning: (message) => { ElMessage.warning(message) },
+  onError: (message) => { ElMessage.error(message) },
+})
 
 async function applyOutputDevice() {
   if (!canChooseOutput || !audioContext) return
@@ -542,7 +607,7 @@ async function applyOutputDevice() {
 
 // Switching devices mid-call has to rebuild the capture chain to take effect.
 async function onInputDeviceChange() {
-  if (!microphoneLive.value) return
+  if (microphoneState.value === 'idle') return
   await stopMicrophone()
   await startMicrophone()
 }
@@ -553,84 +618,14 @@ async function startMicrophone() {
     ElMessage.error('当前浏览器不支持麦克风实时通话')
     return
   }
-  const generation = ++microphoneGeneration
-  microphoneState.value = 'requesting'
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        channelCount: 1,
-        ...(selectedInput.value ? { deviceId: { exact: selectedInput.value } } : {}),
-      },
-    })
-    if (generation !== microphoneGeneration) {
-      for (const track of stream.getTracks()) track.stop()
-      return
-    }
-    microphone = stream
-    void refreshDevices() // labels only materialise once permission is granted
-    const mimeType = chooseMicrophoneMimeType()
-    if (!mimeType) throw new Error('浏览器没有可用的实时音频编码器')
-    microphoneState.value = 'connecting'
-    const session = await startVoiceMicrophone(mimeType)
-    if (generation !== microphoneGeneration) {
-      await stopLiveAudio(session.sessionId).catch(() => {})
-      return
-    }
-    microphoneSessionId = session.sessionId
-    microphoneSocket = new WebSocket(websocketUrl(session.uploadPath))
-    await waitForSocket(microphoneSocket)
-    if (generation !== microphoneGeneration) return
-    microphoneSocket.addEventListener('close', () => {
-      if (!microphoneStopping && microphoneLive.value) {
-        void stopMicrophone('麦克风连接已中断')
-      }
-    }, { once: true })
-
-    microphoneRecorder = new MediaRecorder(
-      buildMicrophonePipeline(microphone), { mimeType, audioBitsPerSecond: 64000 },
-    )
-    microphoneRecorder.ondataavailable = (event) => {
-      if (event.data.size && microphoneSocket?.readyState === WebSocket.OPEN) {
-        microphoneSocket.send(event.data)
-      }
-    }
-    microphoneRecorder.onerror = () => {
-      if (!microphoneStopping) void stopMicrophone('麦克风编码器已停止')
-    }
-    microphoneRecorder.start(100)
-    microphoneLive.value = true
-    microphoneState.value = 'live'
-  } catch (error) {
-    await stopMicrophone()
-    ElMessage.error(errorText(error, '无法开启麦克风'))
-  }
+    await microphoneUplink.start()
+    void refreshDevices()
+  } catch { /* controller reports a user-actionable error and releases capture */ }
 }
 
 async function stopMicrophone(message?: string) {
-  if (microphoneStopping) return
-  microphoneStopping = true
-  microphoneGeneration++
-  microphoneLive.value = false
-  microphoneState.value = 'idle'
-  if (microphoneRecorder?.state !== 'inactive') microphoneRecorder?.stop()
-  microphoneRecorder = null
-  for (const track of microphone?.getTracks() || []) track.stop()
-  microphone = null
-  microphoneGain?.disconnect()
-  microphoneOutput?.disconnect()
-  microphoneGain = null
-  microphoneOutput = null
-  if (microphoneContext) await microphoneContext.close().catch(() => {})
-  microphoneContext = null
-  microphoneSocket?.close(1000, 'microphone stopped')
-  microphoneSocket = null
-  const sessionId = microphoneSessionId
-  microphoneSessionId = ''
-  if (sessionId) await stopLiveAudio(sessionId).catch(() => {})
-  microphoneStopping = false
+  await microphoneUplink.stop()
   if (message) ElMessage.warning(message)
 }
 
@@ -691,7 +686,7 @@ async function leaveCall() {
 }
 
 async function toggleMicrophone() {
-  if (microphoneLive.value) {
+  if (microphoneState.value !== 'idle') {
     await stopMicrophone()
   } else {
     await startMicrophone()
@@ -699,9 +694,14 @@ async function toggleMicrophone() {
 }
 
 function resumeAudioAfterForeground() {
-  if (document.visibilityState !== 'visible') return
+  if (!connectionsMayRecover()) return
   if (listening.value) void audioContext?.resume()
-  if (microphoneLive.value) void microphoneContext?.resume()
+  if (listening.value && listenState.value === 'reconnecting' && !reconnectTimer && !downlinkSocket) {
+    void connectDownlink(listenGeneration).catch((error) => {
+      if (listening.value) scheduleReconnect(listenGeneration, errorText(error, '频道语音重连失败'))
+    })
+  }
+  void microphoneUplink.recover()
   void refreshDevices()
 }
 
@@ -716,12 +716,14 @@ onMounted(() => {
   navigator.mediaDevices?.addEventListener?.('devicechange', refreshDevices)
   document.addEventListener('visibilitychange', resumeAudioAfterForeground)
   window.addEventListener('pageshow', resumeAudioAfterForeground)
+  window.addEventListener('online', resumeAudioAfterForeground)
 })
 
 onBeforeUnmount(() => {
   navigator.mediaDevices?.removeEventListener?.('devicechange', refreshDevices)
   document.removeEventListener('visibilitychange', resumeAudioAfterForeground)
   window.removeEventListener('pageshow', resumeAudioAfterForeground)
+  window.removeEventListener('online', resumeAudioAfterForeground)
   void leaveCall()
 })
 </script>
@@ -749,7 +751,7 @@ onBeforeUnmount(() => {
       </span>
       <span class="status-pill" :class="{ live: microphoneLive }">
         <i />
-        {{ microphoneLive ? '麦克风已开启' : '麦克风已静音' }}
+        {{ microphoneStatusText }}
       </span>
     </div>
 
@@ -779,7 +781,9 @@ onBeforeUnmount(() => {
         <span v-if="microphoneLive" class="live-ring" />
         <span v-else class="button-icon">●</span>
         {{ microphoneState === 'requesting' ? '等待授权' : microphoneState === 'connecting' ? '连接中'
-          : microphoneLive ? '麦克风开启中 · 点击静音' : '已静音 · 点击说话' }}
+          : microphoneState === 'verifying' ? '正在验证音频 · 点击静音'
+            : microphoneState === 'reconnecting' ? '麦克风重连中 · 点击静音'
+              : microphoneLive ? '麦克风发送中 · 点击静音' : '已静音 · 点击说话' }}
       </button>
     </div>
 
@@ -790,7 +794,7 @@ onBeforeUnmount(() => {
       </label>
       <label class="setting">
         <span class="setting-label">麦克风音量 <b>{{ microphoneVolume }}%</b></span>
-        <input v-model.number="microphoneVolume" type="range" min="0" max="200" @input="setMicrophoneVolume">
+        <input v-model.number="microphoneVolume" type="range" min="0" max="200" @change="setMicrophoneVolume">
       </label>
       <label class="setting">
         <span class="setting-label">麦克风设备</span>

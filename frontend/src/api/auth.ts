@@ -26,6 +26,19 @@ export interface SessionResponse {
   error?: string
 }
 
+export interface RegisterOptions {
+  code?: string
+  ip?: string
+  inviteToken?: string
+  qqNumber?: string
+}
+
+export interface InvitationInspection {
+  valid: boolean
+  inviter_nickname?: string
+  expires_at?: string
+}
+
 /** 登录（TS 昵称 + 密码） */
 export async function login(tsNickname: string, password: string, ip: string = 'unknown'): Promise<LoginResponse> {
   const { data } = await apiClient.post('/auth/login', {
@@ -42,14 +55,30 @@ export async function createGuestSession(): Promise<GuestSessionResponse> {
   return data
 }
 
-/** 注册（TS 昵称 + 密码 + 验证码；需先 sendCode 在 TS 私聊收码） */
-export async function register(tsNickname: string, password: string, code: string, ip: string = 'unknown') {
-  const { data } = await apiClient.post('/auth/register', {
+/** 注册。普通注册使用 TS 验证码，邀请注册改用 inviteToken + qqNumber。 */
+export async function register(
+  tsNickname: string,
+  password: string,
+  options: RegisterOptions,
+) {
+  const payload: Record<string, string> = {
     ts_nickname: tsNickname,
     password,
-    code,
-    ip,
+    ip: options.ip ?? 'unknown',
+  }
+  if (options.code) payload.code = options.code
+  if (options.inviteToken) payload.invite_token = options.inviteToken
+  if (options.qqNumber) payload.qq_number = options.qqNumber
+
+  const { data } = await apiClient.post('/auth/register', {
+    ...payload,
   })
+  return data
+}
+
+/** 在提交注册前检查邀请是否仍有效；token 仅放在请求体，避免进入访问日志。 */
+export async function inspectInvitation(token: string): Promise<InvitationInspection> {
+  const { data } = await apiClient.post('/auth/invitations/inspect', { token })
   return data
 }
 

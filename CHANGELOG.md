@@ -1,3 +1,9 @@
+## v0.12.7 (2026-08-20)
+
+### Feat
+
+- add invitation onboarding, entry sounds, and resilient mobile voice
+
 ## v0.12.6 (2026-08-15)
 
 ### Feat

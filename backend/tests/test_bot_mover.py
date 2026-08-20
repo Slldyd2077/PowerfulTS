@@ -93,6 +93,37 @@ class BotMoverTests(unittest.TestCase):
         self.assertEqual(result["reason"], "moved")
         self.assertIn(("clientmove", {"clid": 42, "cid": 9}), query.commands)
 
+    def test_invited_account_cannot_claim_a_ts_client_by_nickname(self) -> None:
+        """An invite identity has not proved ownership of its chosen display name."""
+        query = FakeQuery(
+            [
+                {
+                    "client_type": "0",
+                    "clid": "42",
+                    "cid": "3",
+                    "client_nickname": "MusicBot",
+                    "client_unique_identifier": "bot-uid",
+                },
+                {
+                    "client_type": "0",
+                    "clid": "7",
+                    "cid": "9",
+                    "client_nickname": "Alice",
+                    "client_unique_identifier": "real-ts-owner",
+                },
+            ]
+        )
+        invited_user = SimpleNamespace(
+            unique_identifier="invite:server-generated-identity",
+            ts_nickname="Alice",
+        )
+
+        with patch("app.services.bot_mover.TS3QueryClient", return_value=query):
+            result = move_bot_to_user(_settings(), 42, "MusicBot", invited_user)
+
+        self.assertEqual(result["reason"], "user_offline")
+        self.assertNotIn(("clientmove", {"clid": 42, "cid": 9}), query.commands)
+
 
 class FollowBeforePlaybackTests(unittest.IsolatedAsyncioTestCase):
     async def test_reconnects_auto_disconnected_bot_before_resolving_clid(self) -> None:

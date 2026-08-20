@@ -64,6 +64,9 @@ def move_bot_to_user(
 
         user_uid = (user.unique_identifier or "").strip()
         user_nick = (user.ts_nickname or "").strip()
+        # 邀请/游客账号没有证明其展示昵称对应某个真实 TS 客户端。
+        # 这类账号绝不能仅凭可自填昵称认领频道，否则可跟随同名用户。
+        nickname_fallback_allowed = not user_uid.startswith(("invite:", "guest:"))
 
         # 一次遍历同时定位 user（cid）与 bot（clid/cid）
         user_found = False
@@ -77,7 +80,9 @@ def move_bot_to_user(
             # 定位用户：优先 unique_identifier（不可伪造），回退昵称
             if not user_found:
                 uid = str(cl.get("client_unique_identifier", ""))
-                if (user_uid and uid == user_uid) or (user_nick and nick == user_nick):
+                if (user_uid and uid == user_uid) or (
+                    nickname_fallback_allowed and user_nick and nick == user_nick
+                ):
                     user_found = True
                     user_cid = _int_or_none(cl.get("cid"))
             # bot 播放时会把昵称改成歌名，网页通话还会追加标记；优先使用本次
