@@ -2,10 +2,20 @@
 from __future__ import annotations
 
 from ..core.database import Base
-from .account import Account, BotOwnership, BotShare, ServerMember, Session, VerifyCode, VoiceBot
+from .account import (
+    Account,
+    BotOwnership,
+    BotShare,
+    FriendInvitation,
+    ServerMember,
+    Session,
+    VerifyCode,
+    VoiceBot,
+)
 from .app_setting import AppSetting
 from .bot_player_state import BotPlayerState
 from .community import ChannelRental, Friend, FriendRequest, PendingNotification
+from .entry_sound import EntrySound
 from .stats import VisitStat
 from .ts_playlist import TsPlaylist, TsPlaylistSong
 
@@ -18,12 +28,14 @@ __all__ = [
     "VoiceBot",
     "Session",
     "VerifyCode",
+    "FriendInvitation",
     "AppSetting",
     "BotPlayerState",
     "ChannelRental",
     "Friend",
     "FriendRequest",
     "PendingNotification",
+    "EntrySound",
     "VisitStat",
     "TsPlaylist",
     "TsPlaylistSong",

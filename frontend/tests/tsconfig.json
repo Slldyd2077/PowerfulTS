@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "rootDir": "..",
+    "outDir": "../dist/.voice-tests",
+    "types": ["node"],
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "skipLibCheck": true,
+    "ignoreDeprecations": "6.0",
+    "noEmit": false
+  },
+  "include": [
+    "../src/services/microphone-uplink.ts",
+    "./microphone-uplink.test.ts"
+  ]
+}

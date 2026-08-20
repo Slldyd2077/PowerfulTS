@@ -11,11 +11,12 @@ import asyncio
 import logging
 import re
 from datetime import datetime
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, Response, WebSocket, WebSocketDisconnect
 from websockets.exceptions import InvalidHandshake
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,9 +24,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.config import get_settings
 from ..core.database import get_db
 from ..deps import AccountDep, AdminDep, TsmusicDep, VoiceAccountDep, get_current_account
-from ..models import Account, BotOwnership, BotShare, Friend
+from ..models import Account, BotOwnership, BotShare, EntrySound, Friend
 from ..services import bot_mover
 from ..services.auth_service import AuthService
+from ..services.entry_sound import (
+    EntrySoundValidationError,
+    inspect_audio,
+    read_limited_upload,
+)
 from ..services.tsmusic_client import TSMusicClient, TSMusicUnavailable
 from ..services.voice_bot import VoiceBotError
 
@@ -33,6 +39,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/music", tags=["music"])
 settings = get_settings()
 VOICE_DIAGNOSTICS_UPSTREAM_TIMEOUT_SECONDS = 0.8
+ENTRY_SOUND_EFFECT_TIMEOUT_SECONDS = 3.0
 
 
 # ───────────────────────── 依赖 ─────────────────────────
@@ -583,6 +590,235 @@ class VoiceChannelRequest(BaseModel):
     password: str = Field(default="", max_length=128)
 
 
+def _entry_sound_response(row: EntrySound | None) -> dict:
+    if row is None:
+        return {"enabled": False}
+    return {
+        "enabled": True,
+        "filename": row.original_filename,
+        "mimeType": row.mime_type,
+        "sizeBytes": row.size_bytes,
+        "durationMs": row.duration_ms,
+        "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+@router.get("/voice/entry-sound")
+async def get_entry_sound(
+    _account: AccountDep,
+    db: AsyncSession = Depends(get_db),
+):
+    row = await db.get(EntrySound, _account.id)
+    return _entry_sound_response(row)
+
+
+@router.put("/voice/entry-sound")
+async def put_entry_sound(
+    request: Request,
+    account: AccountDep,
+    filename: str = Query(min_length=1, max_length=255),
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace the member's entry sound from a raw browser request body."""
+    allowed = await request.app.state.entry_sound_upload_limiter.allow(
+        f"account:{account.id}"
+    )
+    if not allowed:
+        raise HTTPException(status_code=429, detail="入场音效上传过于频繁，请稍后再试")
+    content = await read_limited_upload(request)
+    try:
+        inspected = await asyncio.to_thread(inspect_audio, content, filename)
+    except EntrySoundValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    storage = request.app.state.entry_sound_storage
+    new_storage_filename = await asyncio.to_thread(
+        storage.write_atomic, content, inspected.extension
+    )
+    old_row = await db.get(EntrySound, account.id)
+    old_storage_filename = old_row.storage_filename if old_row else None
+    if old_row is None:
+        row = EntrySound(
+            account_id=account.id,
+            storage_filename=new_storage_filename,
+            original_filename=inspected.original_filename,
+            mime_type=inspected.mime_type,
+            size_bytes=len(content),
+            duration_ms=inspected.duration_ms,
+        )
+        db.add(row)
+    else:
+        old_row.storage_filename = new_storage_filename
+        old_row.original_filename = inspected.original_filename
+        old_row.mime_type = inspected.mime_type
+        old_row.size_bytes = len(content)
+        old_row.duration_ms = inspected.duration_ms
+        row = old_row
+    try:
+        await db.commit()
+        await db.refresh(row)
+    except Exception:
+        await db.rollback()
+        await asyncio.to_thread(storage.delete, new_storage_filename)
+        raise
+    if old_storage_filename:
+        try:
+            await asyncio.to_thread(storage.delete, old_storage_filename)
+        except OSError:
+            logger.warning("清理旧入场音效失败", exc_info=True)
+    return _entry_sound_response(row)
+
+
+@router.delete("/voice/entry-sound")
+async def delete_entry_sound(
+    request: Request,
+    account: AccountDep,
+    db: AsyncSession = Depends(get_db),
+):
+    row = await db.get(EntrySound, account.id)
+    if row is None:
+        return {"enabled": False}
+    storage_filename = row.storage_filename
+    await db.delete(row)
+    await db.commit()
+    try:
+        await asyncio.to_thread(
+            request.app.state.entry_sound_storage.delete, storage_filename
+        )
+    except OSError:
+        logger.warning("删除入场音效文件失败", exc_info=True)
+    return {"enabled": False}
+
+
+@router.get("/voice/entry-sound/stream/{token}")
+async def stream_entry_sound(request: Request, token: str):
+    """Bearer-capability stream for TSMusicBot; intentionally has no account auth."""
+    capability = request.app.state.entry_sound_capabilities.resolve(token)
+    if capability is None:
+        raise HTTPException(status_code=404, detail="音效链接无效或已过期")
+    try:
+        path = request.app.state.entry_sound_storage.path_for(
+            capability.storage_filename
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="音效不存在") from exc
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="音效不存在")
+    return FileResponse(
+        path,
+        media_type=capability.mime_type,
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+def _entry_sound_public_base(request: Request) -> str:
+    configured = settings.live_audio_public_url.strip().rstrip("/")
+    if configured:
+        parsed = urlsplit(configured)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise RuntimeError("LIVE_AUDIO_PUBLIC_URL is not a safe absolute http(s) URL")
+        return configured
+    inferred = urlsplit(str(request.url))
+    hostname = inferred.hostname
+    loopback_hosts = {"localhost", "127.0.0.1", "::1"}
+    client_host = request.client.host if request.client is not None else ""
+    came_through_proxy = any(
+        request.headers.get(name)
+        for name in (
+            "forwarded",
+            "x-forwarded-for",
+            "x-forwarded-host",
+            "x-forwarded-proto",
+            "x-real-ip",
+        )
+    )
+    if (
+        hostname in loopback_hosts
+        and client_host in loopback_hosts
+        and not came_through_proxy
+    ):
+        if inferred.scheme not in {"http", "https"}:
+            raise RuntimeError("local entry-sound URL must use http(s)")
+        return f"{inferred.scheme}://{inferred.netloc}".rstrip("/")
+    raise RuntimeError(
+        "LIVE_AUDIO_PUBLIC_URL must be configured for non-loopback entry-sound playback"
+    )
+
+
+async def _deliver_entry_sound(
+    tsmusic: TSMusicClient,
+    url: str,
+    *,
+    account_id: int,
+    bot_id: str,
+) -> None:
+    try:
+        await asyncio.wait_for(
+            tsmusic.play_sound_effect(url, bot_id=bot_id),
+            timeout=ENTRY_SOUND_EFFECT_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        logger.warning(
+            "播放入场音效失败，不影响频道切换 (account_id=%s, bot_id=%s)",
+            account_id,
+            bot_id,
+            exc_info=True,
+        )
+
+
+async def _trigger_entry_sound(
+    request: Request,
+    tsmusic: TSMusicClient,
+    account: Account,
+    bot_id: str,
+    db: AsyncSession,
+) -> None:
+    """Best effort only: a playback problem must never undo a successful TS move."""
+    if account.role == "guest":
+        return
+    try:
+        row = await db.get(EntrySound, account.id)
+        if row is None:
+            return
+        public_base = _entry_sound_public_base(request)
+        token = request.app.state.entry_sound_capabilities.create(
+            row.storage_filename, row.mime_type
+        )
+        url = (
+            f"{public_base}"
+            f"/api/music/voice/entry-sound/stream/{token}"
+        )
+        task = asyncio.create_task(
+            _deliver_entry_sound(
+                tsmusic,
+                url,
+                account_id=account.id,
+                bot_id=bot_id,
+            )
+        )
+        tasks = getattr(request.app.state, "entry_sound_tasks", None)
+        if tasks is None:
+            tasks = set()
+            request.app.state.entry_sound_tasks = tasks
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+    except Exception:
+        logger.warning(
+            "准备入场音效失败，不影响频道切换 (account_id=%s, bot_id=%s)",
+            account.id,
+            bot_id,
+            exc_info=True,
+        )
+
+
 @router.get("/voice/channels")
 async def voice_channels(
     request: Request,
@@ -623,6 +859,7 @@ async def move_voice_channel(
         # 密码错误是用户能自己纠正的输入问题，其余归为上游/权限问题。
         status = 403 if result.get("invalid_password") else 502
         raise HTTPException(status_code=status, detail=result["detail"])
+    await _trigger_entry_sound(request, tsmusic, account, bid, db)
     # 人已经过去了，快照得跟上：否则前端紧接着的刷新会把你「弹回」原频道。
     await _sync_ts3_snapshot(request)
     return {"ok": True, "cid": body.cid}

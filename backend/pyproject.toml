@@ -8,6 +8,7 @@ dependencies = [
     "uvicorn>=0.30.0",
     "websockets>=13.0",
     "httpx>=0.27.0",
+    "mutagen>=1.47.0",
     "python-dotenv>=1.2.2",
     "sqlalchemy[asyncio]>=2.0.0",
     "aiosqlite>=0.20.0",

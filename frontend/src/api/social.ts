@@ -15,9 +15,22 @@ export interface FriendsResponse {
   friends: Friend[]
 }
 
+export interface FriendInvitationResponse {
+  success: boolean
+  token: string
+  expires_at: string
+  error?: string
+}
+
 /** 获取好友列表（含在线状态） */
 export async function getFriends(): Promise<FriendsResponse> {
   const { data } = await apiClient.get('/friends')
+  return data
+}
+
+/** 生成一条 7 天内、单次有效的好友邀请；新邀请会使旧邀请失效。 */
+export async function generateFriendInvitation(): Promise<FriendInvitationResponse> {
+  const { data } = await apiClient.post('/friends/invitations')
   return data
 }
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -18,6 +19,7 @@ from ..core.config import get_settings
 from ..core.database import get_db
 from ..services import ts3_auth
 from ..services.auth_service import AuthService, GUEST_SESSION_TTL
+from ..services.invitation_service import InvitationService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -36,9 +38,11 @@ class VerifyCodeRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    ts_nickname: str
+    ts_nickname: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=8, max_length=128)
-    code: str
+    code: str | None = None
+    invite_token: str | None = Field(default=None, max_length=256)
+    qq_number: str | None = None
     ip: str = "unknown"
 
 
@@ -50,6 +54,10 @@ class LoginRequest(BaseModel):
 
 class TokenRequest(BaseModel):
     token: str
+
+
+class InvitationInspectRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=256)
 
 
 def _monitor(request: Request):
@@ -92,12 +100,45 @@ async def verify_code(body: VerifyCodeRequest, db: AsyncSession = Depends(get_db
 @router.post("/register")
 async def register(body: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """注册：验证码校验 + uid 一致性校验 + 建账号。"""
+    invite_token = body.invite_token.strip() if body.invite_token is not None else None
+    if invite_token:
+        ts_nickname = body.ts_nickname.strip()
+        if not ts_nickname:
+            return {"success": False, "error": "TS 昵称不能为空"}
+        qq_number = body.qq_number.strip() if body.qq_number is not None else None
+        if not qq_number:
+            return {"success": False, "error": "邀请注册必须填写 QQ 号"}
+        if re.fullmatch(r"[1-9][0-9]{4,15}", qq_number) is None:
+            return {
+                "success": False,
+                "error": "QQ 号格式错误，请填写 5-16 位且首位非 0 的数字",
+            }
+
+        peer = request.client.host if request.client else "unknown"
+        limiter = getattr(request.app.state, "invite_registration_limiter", None)
+        if limiter is not None and not await limiter.allow(peer):
+            raise HTTPException(status_code=429, detail="邀请注册过于频繁，请稍后再试")
+
+        try:
+            account = await InvitationService(db).redeem(
+                token=invite_token,
+                ts_nickname=ts_nickname,
+                qq_number=qq_number,
+                password=body.password,
+            )
+        except IntegrityError:
+            await db.rollback()
+            return {"success": False, "error": "该昵称或 TS 客户端已被注册"}
+        if account is None:
+            return {"success": False, "error": "邀请链接无效、已过期或已被使用"}
+        return {"success": True, "message": "注册成功，已与邀请者成为好友"}
+
     svc = AuthService(db)
     # 先取 expected_uid（码还在），再消费验证码（会删除）
     expected_uid = await svc.get_expected_uid(body.ts_nickname)
     if not expected_uid:
         return {"success": False, "error": "请先获取验证码"}
-    if not await svc.consume_code(body.ts_nickname, body.code):
+    if not await svc.consume_code(body.ts_nickname, body.code or ""):
         return {"success": False, "error": "验证码错误、已失效或尝试次数过多"}
     current_uid = ts3_auth.get_online_uid(_monitor(request), body.ts_nickname)
     if not current_uid or current_uid != expected_uid:
@@ -109,6 +150,22 @@ async def register(body: RegisterRequest, request: Request, db: AsyncSession = D
         await db.rollback()
         return {"success": False, "error": "该昵称或 TS 客户端已被注册"}
     return {"success": True, "message": "注册成功"}
+
+
+@router.post("/invitations/inspect")
+async def inspect_invitation(
+    body: InvitationInspectRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Publicly inspect an invitation without putting its bearer token in the URL."""
+    invitation = await InvitationService(db).inspect(body.token)
+    if invitation is None:
+        raise HTTPException(status_code=404, detail="邀请链接无效、已过期或已被使用")
+    return {
+        "valid": True,
+        "inviter_nickname": invitation.inviter_nickname,
+        "expires_at": invitation.expires_at.isoformat(),
+    }
 
 
 @router.post("/login")

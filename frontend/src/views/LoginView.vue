@@ -1,8 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import axios from 'axios'
 import { useAuthStore } from '@/stores/auth'
-import { login as apiLogin, register as apiRegister, getClientIp, sendCode, checkBinding } from '@/api/auth'
+import {
+  login as apiLogin,
+  register as apiRegister,
+  getClientIp,
+  sendCode,
+  checkBinding,
+  inspectInvitation,
+} from '@/api/auth'
 import { getIntroTracks, introStreamUrl, type IntroTrack } from '@/api/introMusic'
 import { ElMessage } from 'element-plus'
 import { View } from '@element-plus/icons-vue'
@@ -10,9 +18,66 @@ import { View } from '@element-plus/icons-vue'
 const router = useRouter()
 const auth = useAuthStore()
 
-const mode = ref<'login' | 'register'>('login')
+const INVITE_SESSION_KEY = 'friend_invite_token'
+
+/**
+ * 邀请 token 只通过 URL fragment 交付（fragment 不随 HTTP 请求发送）。
+ * setup 阶段同步捕获并清理地址栏，避免首屏闪回普通登录态或 secret 被后续复制。
+ */
+function captureInvitationToken(): string {
+  let token = ''
+  const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+  const fragmentToken = fragment.get('invite')?.trim() ?? ''
+
+  if (fragmentToken) {
+    token = fragmentToken
+    try {
+      sessionStorage.setItem(INVITE_SESSION_KEY, token)
+    } catch {
+      // sessionStorage 在隐私模式下可能不可用；当前内存仍可完成本次注册。
+    }
+
+    fragment.delete('invite')
+    const remainingFragment = fragment.toString()
+    const cleanUrl = `${window.location.pathname}${window.location.search}${remainingFragment ? `#${remainingFragment}` : ''}`
+    window.history.replaceState(window.history.state, document.title, cleanUrl)
+  } else {
+    try {
+      token = sessionStorage.getItem(INVITE_SESSION_KEY)?.trim() ?? ''
+    } catch {
+      token = ''
+    }
+  }
+  return token
+}
+
+function clearStoredInvitation() {
+  try {
+    sessionStorage.removeItem(INVITE_SESSION_KEY)
+  } catch {
+    // ignore
+  }
+}
+
+function exitInvitationFlow() {
+  clearStoredInvitation()
+  inviteToken.value = ''
+  inviteStatus.value = 'idle'
+  inviterNickname.value = ''
+  inviteError.value = ''
+  mode.value = 'register'
+}
+
+const initialInviteToken = captureInvitationToken()
+const mode = ref<'login' | 'register'>(initialInviteToken ? 'register' : 'login')
 const loading = ref(false)
 const formVisible = ref(false)
+const inviteToken = ref(initialInviteToken)
+const inviteStatus = ref<'idle' | 'validating' | 'valid' | 'invalid'>(
+  initialInviteToken ? 'validating' : 'idle',
+)
+const inviterNickname = ref('')
+const inviteError = ref('')
 
 // 登录表单
 const loginForm = ref({ tsNickname: '', password: '' })
@@ -23,6 +88,7 @@ const registerForm = ref({
   password: '',
   confirmPassword: '',
   code: '',
+  qqNumber: '',
 })
 const codeSent = ref(false)
 const codeCountdown = ref(0)
@@ -35,12 +101,44 @@ const passwordTooShort = computed(
     registerForm.value.password.length > 0 &&
     registerForm.value.password.length < MIN_PASSWORD_LENGTH,
 )
-const canRegister = computed(() =>
-  registerForm.value.tsNickname.trim() &&
-  registerForm.value.password.length >= MIN_PASSWORD_LENGTH &&
-  registerForm.value.password === registerForm.value.confirmPassword &&
-  registerForm.value.code.trim(),
-)
+const hasInvitation = computed(() => Boolean(inviteToken.value))
+const qqIsValid = computed(() => /^[1-9]\d{4,15}$/.test(registerForm.value.qqNumber.trim()))
+const canRegister = computed(() => {
+  const baseValid = Boolean(
+    registerForm.value.tsNickname.trim() &&
+      registerForm.value.password.length >= MIN_PASSWORD_LENGTH &&
+      registerForm.value.password === registerForm.value.confirmPassword,
+  )
+  if (!baseValid) return false
+  if (hasInvitation.value) return inviteStatus.value === 'valid' && qqIsValid.value
+  return Boolean(registerForm.value.code.trim())
+})
+
+function apiErrorMessage(error: unknown, fallback: string): string {
+  if (!axios.isAxiosError<{ detail?: string; error?: string }>(error)) {
+    return error instanceof Error ? error.message : fallback
+  }
+  return error.response?.data?.detail || error.response?.data?.error || fallback
+}
+
+async function validateInvitation() {
+  if (!inviteToken.value) return
+  mode.value = 'register'
+  inviteStatus.value = 'validating'
+  inviteError.value = ''
+  try {
+    const inspection = await inspectInvitation(inviteToken.value)
+    if (!inspection.valid || !inspection.inviter_nickname) {
+      throw new Error('邀请链接无效、已过期或已被使用')
+    }
+    inviterNickname.value = inspection.inviter_nickname
+    inviteStatus.value = 'valid'
+  } catch (error) {
+    inviteStatus.value = 'invalid'
+    inviteError.value = apiErrorMessage(error, '邀请链接无效、已过期或已被使用')
+    clearStoredInvitation()
+  }
+}
 
 // ── 音频频谱可视化 ──
 // 真实音频驱动（AnalyserNode）；无音乐或 AudioContext 尚未 running 时回退模拟律动。
@@ -320,6 +418,10 @@ onMounted(async () => {
   })
   initVisualizer()
 
+  if (hasInvitation.value) {
+    await validateInvitation()
+  }
+
   // 加载曲目（失败 / 为空 → 频谱保持模拟律动）
   try {
     tracks.value = await getIntroTracks()
@@ -369,6 +471,9 @@ async function handleGuest() {
   loading.value = true
   try {
     await auth.enterAsGuest()
+    clearStoredInvitation()
+    inviteToken.value = ''
+    inviteStatus.value = 'idle'
     ElMessage.success(`已分配临时身份：${auth.nickname}`)
     router.push('/')
   } catch (error) {
@@ -386,6 +491,9 @@ async function handleLogin() {
     const ip = await getClientIp()
     const result = await apiLogin(loginForm.value.tsNickname, loginForm.value.password, ip)
     if (result.success && result.token) {
+      clearStoredInvitation()
+      inviteToken.value = ''
+      inviteStatus.value = 'idle'
       auth.setToken(result.token)
       auth.setUser({
         ts_nickname: result.ts_nickname || '',
@@ -445,20 +553,39 @@ async function handleRegister() {
     ElMessage.warning('密码至少需要 8 位')
     return
   }
+  if (hasInvitation.value && inviteStatus.value !== 'valid') {
+    ElMessage.error(inviteError.value || '邀请链接仍在校验或已失效')
+    return
+  }
+  if (hasInvitation.value && !qqIsValid.value) {
+    ElMessage.warning('请填写 5–16 位且首位非 0 的 QQ 号')
+    return
+  }
   if (!canRegister.value) return
   loading.value = true
   try {
     const ip = await getClientIp()
+    const tsNickname = registerForm.value.tsNickname.trim()
     const res = await apiRegister(
-      registerForm.value.tsNickname,
+      tsNickname,
       registerForm.value.password,
-      registerForm.value.code,
-      ip,
+      {
+        code: hasInvitation.value ? undefined : registerForm.value.code.trim(),
+        ip,
+        inviteToken: hasInvitation.value ? inviteToken.value : undefined,
+        qqNumber: hasInvitation.value ? registerForm.value.qqNumber.trim() : undefined,
+      },
     )
     if (res.success) {
-      ElMessage.success('注册成功，请登录')
+      const successMessage = hasInvitation.value
+        ? res.message || `注册成功，已与 ${inviterNickname.value} 成为好友`
+        : '注册成功，请登录'
+      ElMessage.success(successMessage)
+      clearStoredInvitation()
+      inviteToken.value = ''
+      inviteStatus.value = 'idle'
       mode.value = 'login'
-      loginForm.value.tsNickname = registerForm.value.tsNickname
+      loginForm.value.tsNickname = tsNickname
     } else {
       ElMessage.error(res.error || '注册失败')
     }
@@ -600,7 +727,38 @@ async function handleRegister() {
           <div v-else key="register" class="form-body">
             <div class="form-header">
               <h2 class="form-title">创建账号</h2>
-              <p class="form-desc">使用 TS 昵称注册，验证码通过 TS 私聊发送</p>
+              <p class="form-desc">
+                {{
+                  hasInvitation
+                    ? '通过好友邀请注册，无需接收 TS 验证码'
+                    : '使用 TS 昵称注册，验证码通过 TS 私聊发送'
+                }}
+              </p>
+            </div>
+
+            <div
+              v-if="hasInvitation"
+              class="invite-notice"
+              :class="`invite-notice--${inviteStatus}`"
+              role="status"
+              aria-live="polite"
+            >
+              <span class="invite-notice-icon" aria-hidden="true"></span>
+              <div>
+                <strong v-if="inviteStatus === 'validating'">正在校验邀请链接</strong>
+                <strong v-else-if="inviteStatus === 'valid'">
+                  {{ inviterNickname }} 邀请你加入
+                </strong>
+                <strong v-else>无法使用此邀请链接</strong>
+                <p v-if="inviteStatus === 'valid'">注册完成后，你们会自动成为双向好友。</p>
+                <template v-else-if="inviteStatus === 'invalid'">
+                  <p>{{ inviteError }}</p>
+                  <button class="invite-fallback" type="button" @click="exitInvitationFlow">
+                    改用普通注册
+                  </button>
+                </template>
+                <p v-else>正在确认链接是否过期或已被使用…</p>
+              </div>
             </div>
 
             <el-form @submit.prevent="handleRegister" label-position="top" class="styled-form">
@@ -635,7 +793,30 @@ async function handleRegister() {
                   show-password
                 />
               </div>
-              <div class="field-group field-5">
+              <div v-if="hasInvitation" class="field-group field-5">
+                <label class="field-label">QQ 号（用于身份联系）</label>
+                <el-input
+                  v-model="registerForm.qqNumber"
+                  placeholder="请输入 QQ 号"
+                  size="large"
+                  maxlength="16"
+                  inputmode="numeric"
+                />
+                <p
+                  class="field-hint"
+                  :class="{
+                    'field-hint--error':
+                      registerForm.qqNumber.length > 0 && !qqIsValid,
+                  }"
+                >
+                  {{
+                    registerForm.qqNumber.length > 0 && !qqIsValid
+                      ? '请填写 5–16 位且首位非 0 的数字'
+                      : '邀请注册以 QQ 号替代 TS 验证码'
+                  }}
+                </p>
+              </div>
+              <div v-else class="field-group field-5">
                 <label class="field-label">验证码（发送到 TS 私聊）</label>
                 <div class="code-row">
                   <el-input v-model="registerForm.code" placeholder="6 位验证码" size="large" maxlength="6" />
@@ -656,7 +837,9 @@ async function handleRegister() {
                   :disabled="!canRegister || loading"
                   @click.prevent="handleRegister"
                 >
-                  <span class="btn-text">{{ loading ? '正在注册...' : '注 册' }}</span>
+                  <span class="btn-text">
+                    {{ loading ? '正在注册...' : hasInvitation ? '接受邀请并注册' : '注 册' }}
+                  </span>
                   <span class="btn-shimmer"></span>
                 </button>
               </div>
@@ -1042,6 +1225,97 @@ async function handleRegister() {
   color: var(--text-muted);
 }
 
+/* ── 邀请注册状态：像一次经过签名的语音握手，而不是普通营销提示 ── */
+.invite-notice {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 11px;
+  margin: -10px 0 18px;
+  padding: 12px 13px;
+  border: 1px solid rgba(82, 147, 226, 0.22);
+  border-left-width: 3px;
+  border-radius: 7px;
+  background:
+    linear-gradient(90deg, rgba(17, 108, 224, 0.09), transparent 72%),
+    rgba(1, 8, 20, 0.26);
+}
+
+.invite-notice-icon {
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border: 2px solid var(--color-primary);
+  border-radius: 50%;
+  box-shadow: 0 0 9px rgba(82, 147, 226, 0.5);
+}
+
+.invite-notice strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 0.82em;
+  font-weight: 650;
+}
+
+.invite-notice p {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 0.72em;
+  line-height: 1.5;
+}
+
+.invite-notice--valid {
+  border-color: rgba(34, 197, 94, 0.34);
+  background:
+    linear-gradient(90deg, rgba(34, 197, 94, 0.075), transparent 72%),
+    rgba(1, 8, 20, 0.26);
+}
+
+.invite-notice--valid .invite-notice-icon {
+  border-color: var(--color-success);
+  background: var(--color-success);
+  box-shadow: 0 0 9px rgba(34, 197, 94, 0.52);
+}
+
+.invite-notice--invalid {
+  border-color: rgba(248, 113, 113, 0.42);
+  background:
+    linear-gradient(90deg, rgba(248, 113, 113, 0.09), transparent 72%),
+    rgba(1, 8, 20, 0.26);
+}
+
+.invite-notice--invalid .invite-notice-icon {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 9px rgba(248, 113, 113, 0.48);
+}
+
+.invite-notice--invalid p {
+  color: rgba(248, 163, 163, 0.9);
+}
+
+.invite-fallback {
+  margin-top: 8px;
+  padding: 0;
+  color: var(--color-primary);
+  font-family: inherit;
+  font-size: 0.72em;
+  cursor: pointer;
+  border: 0;
+  border-bottom: 1px solid rgba(82, 147, 226, 0.38);
+  background: transparent;
+}
+
+.invite-fallback:hover {
+  color: #78aef0;
+}
+
+.invite-notice--validating .invite-notice-icon {
+  animation: invite-pulse 1s ease-in-out infinite alternate;
+}
+
+@keyframes invite-pulse {
+  to { transform: scale(0.68); opacity: 0.45; }
+}
+
 /* ── 表单字段 ── */
 .styled-form {
   display: flex;
@@ -1374,7 +1648,12 @@ async function handleRegister() {
 
   .mode-indicator { margin-bottom: 28px; }
   .form-header { margin-bottom: 22px; }
+  .invite-notice { margin-top: -6px; }
   .code-row { align-items: stretch; }
   .code-btn { min-height: 44px; padding: 0 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .invite-notice--validating .invite-notice-icon { animation: none; }
 }
 </style>
