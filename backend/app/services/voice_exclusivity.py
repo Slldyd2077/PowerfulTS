@@ -1,8 +1,8 @@
 """Mutual exclusion between a real TS client and an account's web voice bot."""
 from __future__ import annotations
 
-import logging
 import asyncio
+import logging
 from typing import Protocol
 
 from sqlalchemy import select

@@ -17,6 +17,7 @@ from app.services.online_notifier import OnlineNotifier
 from app.services.ts3_monitor import TS3Monitor, strip_web_voice_marker
 from app.services.voice_exclusivity import (
     VoiceExclusivityError,
+    is_ts_client_connection_present,
     kick_real_ts_client_for_account,
 )
 
@@ -290,6 +291,65 @@ class VoiceExclusivityKickTests(unittest.TestCase):
                     account,
                     exclude_clid=None,
                 )
+
+
+class VoiceExclusivityPresenceTests(unittest.TestCase):
+    def test_revalidation_matches_the_exact_uid_and_connection(self) -> None:
+        conn = Mock()
+        conn.send.side_effect = [
+            [],
+            [],
+            [_client_with_uid("Alice", 11, "real-uid")],
+        ]
+
+        with patch("app.services.voice_exclusivity.TS3QueryClient", return_value=conn):
+            self.assertTrue(
+                is_ts_client_connection_present(
+                    _SETTINGS,  # type: ignore[arg-type]
+                    "real-uid",
+                    11,
+                )
+            )
+
+        conn.close.assert_called_once()
+
+    def test_revalidation_ignores_query_clients_and_other_identities(self) -> None:
+        query_client = _client_with_uid("server-query", 1, "real-uid")
+        query_client["client_type"] = "1"
+        conn = Mock()
+        conn.send.side_effect = [
+            [],
+            [],
+            [
+                query_client,
+                _client_with_uid("Mallory", 12, "other-uid"),
+            ],
+        ]
+
+        with patch("app.services.voice_exclusivity.TS3QueryClient", return_value=conn):
+            self.assertFalse(
+                is_ts_client_connection_present(
+                    _SETTINGS,  # type: ignore[arg-type]
+                    "real-uid",
+                    11,
+                )
+            )
+
+        conn.close.assert_called_once()
+
+    def test_revalidation_fails_closed_when_server_query_is_unavailable(self) -> None:
+        conn = Mock()
+        conn.connect.side_effect = OSError("query unavailable")
+
+        with patch("app.services.voice_exclusivity.TS3QueryClient", return_value=conn):
+            with self.assertRaisesRegex(VoiceExclusivityError, "无法复核"):
+                is_ts_client_connection_present(
+                    _SETTINGS,  # type: ignore[arg-type]
+                    "real-uid",
+                    11,
+                )
+
+        conn.close.assert_called_once()
 
 
 class ForcedRefreshTests(unittest.TestCase):
