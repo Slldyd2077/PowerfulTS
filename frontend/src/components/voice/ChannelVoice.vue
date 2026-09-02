@@ -19,6 +19,9 @@ import {
   type MicrophoneSocket,
   type MicrophoneUplinkState,
 } from '@/services/microphone-uplink'
+import {
+  resolveVoiceDownlinkCloseAction,
+} from '@/services/voice-downlink-policy'
 
 const emit = defineEmits<{ (e: 'session-change'): void }>()
 
@@ -98,7 +101,6 @@ const microphoneStatusText = computed(() => {
 
 // 4502 = TSMusicBot 没有下行接口（版本过旧），重连多少次都一样，直接收手。
 // 4503（连不上）和 1011（流中途断）交给下面的有限次退避重连。
-const PERMANENT_CLOSE_CODES = new Set([4502])
 const MAX_RECONNECT_ATTEMPTS = 5
 
 let audioContext: AudioContext | null = null
@@ -358,6 +360,16 @@ async function failListening(message: string) {
   ElMessage.error(message)
 }
 
+async function handleNativeTsPreemption(message: string) {
+  await stopMicrophone()
+  await stopListening()
+  voiceBotId.value = ''
+  clearPendingChannel()
+  emit('session-change')
+  listenError.value = message
+  ElMessage.warning(message)
+}
+
 /**
  * 后端是先 accept 再去连 TSMusicBot 的，所以 open 只代表「PowerfulTS 收下了」；
  * 上游不可用会在 open 之后紧接着以 4502 关闭 —— 这条路径必须报错而不是重连。
@@ -399,11 +411,18 @@ function connectDownlink(generation: number): Promise<void> {
           return
         }
         const reason = closeText(event)
+        const closeAction = resolveVoiceDownlinkCloseAction(
+          event.code, reconnectAttempt, MAX_RECONNECT_ATTEMPTS,
+        )
+        if (closeAction === 'native-preempted') {
+          void handleNativeTsPreemption(reason).finally(resolve)
+          return
+        }
         if (!opened) {
           reject(new Error(reason))
           return
         }
-        if (PERMANENT_CLOSE_CODES.has(event.code) || reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
+        if (closeAction === 'stop') {
           void failListening(reason)
           return
         }

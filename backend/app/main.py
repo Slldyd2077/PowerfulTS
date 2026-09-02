@@ -31,6 +31,7 @@ from .services.guest_access import GuestSessionRateLimiter
 from .services.entry_sound import EntrySoundCapabilities, EntrySoundStorage
 from .services.voice_bot import VoiceBotManager
 from .services.voice_downlink import VoiceDownlinkTickets
+from .services.voice_exclusivity import VoiceExclusivityCoordinator
 from .services.online_notifier import OnlineNotifier
 from .services.tsmusic_client import TSMusicClient
 from .services.ts3_monitor import TS3Monitor
@@ -134,7 +135,6 @@ async def lifespan(app: FastAPI):
     app.state.ts3_monitor = TS3Monitor(settings)
     app.state.ts3_monitor.set_loop(asyncio.get_running_loop())
     app.state.ts3_monitor.set_notifier(app.state.online_notifier)
-    app.state.ts3_monitor.start()
     # Steam 集成（OpenID 绑定 + 游戏查询；未配置 API Key 则功能降级）
     app.state.steam = SteamClient(
         settings.steam_api_key,
@@ -177,8 +177,17 @@ async def lifespan(app: FastAPI):
     app.state.voice_downlink = VoiceDownlinkTickets()
     # 同样解析 tsmusic：admin 热重载会换掉 app.state.tsmusic。
     app.state.voice_bots = VoiceBotManager(
-        lambda: app.state.tsmusic, AsyncSessionLocal
+        lambda: app.state.tsmusic, AsyncSessionLocal, settings=settings
     )
+    app.state.voice_exclusivity = VoiceExclusivityCoordinator(
+        AsyncSessionLocal,
+        lambda: app.state.voice_bots,
+        lambda: app.state.tsmusic,
+        lambda: app.state.voice_downlink,
+        settings,
+    )
+    app.state.ts3_monitor.set_voice_exclusivity(app.state.voice_exclusivity)
+    app.state.ts3_monitor.start()
     guest_cleanup_task = asyncio.create_task(_cleanup_expired_guests_loop(app))
     # Resolve the client lazily: admin hot reload replaces app.state.tsmusic.
     # Capturing the object here would leave the idle manager using a closed client.

@@ -14,6 +14,9 @@
   },
   "include": [
     "../src/services/microphone-uplink.ts",
-    "./microphone-uplink.test.ts"
+    "../src/services/voice-downlink-policy.ts",
+    "./microphone-uplink.test.ts",
+    "./login-mobile-layout.test.ts",
+    "./voice-downlink-policy.test.ts"
   ]
 }

@@ -1563,10 +1563,12 @@ async function handleRegister() {
 @media (max-width: 900px) {
   .login-page {
     flex-direction: column;
-    height: auto;
+    height: 100dvh;
     min-height: 100dvh;
     overflow-x: hidden;
     overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .panel-visual {
@@ -1599,7 +1601,7 @@ async function handleRegister() {
     flex: none;
     min-height: 65dvh;
     justify-content: flex-start;
-    padding: 24px;
+    padding: 24px 24px calc(24px + env(safe-area-inset-bottom));
   }
 
   .panel-form::before {
@@ -1643,7 +1645,7 @@ async function handleRegister() {
 
   .panel-form {
     min-height: 72dvh;
-    padding: 20px 16px 24px;
+    padding: 20px 16px calc(24px + env(safe-area-inset-bottom));
   }
 
   .mode-indicator { margin-bottom: 28px; }

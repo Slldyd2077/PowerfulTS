@@ -1,3 +1,9 @@
+## v0.12.8 (2026-09-03)
+
+### Fix
+
+- enforce voice exclusivity and mobile login scroll
+
 ## v0.12.7 (2026-08-20)
 
 ### Feat

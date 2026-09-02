@@ -5,6 +5,7 @@ import asyncio
 import secrets
 import time
 from dataclasses import dataclass
+from typing import Awaitable, Callable
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,9 @@ class VoiceDownlinkTickets:
         self._ttl = ttl_seconds
         self._tickets: dict[str, VoiceDownlinkTicket] = {}
         self._active_accounts: frozenset[int] = frozenset()
+        self._active_closers: dict[
+            int, tuple[str, Callable[[int, str], Awaitable[None]]]
+        ] = {}
         self._lock = asyncio.Lock()
 
     async def create(
@@ -72,6 +76,32 @@ class VoiceDownlinkTickets:
         """Release the per-account stream lease after the socket closes."""
         async with self._lock:
             self._active_accounts = self._active_accounts - {ticket.account_id}
+            registered = self._active_closers.get(ticket.account_id)
+            if registered is not None and registered[0] == ticket.id:
+                self._active_closers.pop(ticket.account_id, None)
+
+    async def register_active(
+        self,
+        ticket: VoiceDownlinkTicket,
+        closer: Callable[[int, str], Awaitable[None]],
+    ) -> None:
+        """Attach the claimed browser socket so a native TS login can close it."""
+        async with self._lock:
+            if ticket.account_id not in self._active_accounts:
+                return
+            self._active_closers = {
+                **self._active_closers,
+                ticket.account_id: (ticket.id, closer),
+            }
+
+    async def close_active(self, account_id: int, *, code: int, reason: str) -> bool:
+        """Close one active browser downlink without exposing its capability."""
+        async with self._lock:
+            registered = self._active_closers.pop(account_id, None)
+        if registered is None:
+            return False
+        await registered[1](code, reason)
+        return True
 
     def _prune_unlocked(self) -> None:
         now = time.monotonic()
