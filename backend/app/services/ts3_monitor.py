@@ -176,6 +176,12 @@ class TS3Monitor:
         self._notifier = None
         # Steam 当前游戏查询回调（由 app 注入；TS 在线时优先显示 Steam 游戏）
         self._steam_lookup = None
+        self._voice_exclusivity = None
+        # Last raw clientlist visibility, separate from ONLINE_WINDOW presence.
+        # A kicked real TS client can reconnect inside ONLINE_WINDOW; the online
+        # snapshot still has its uid, but the visibility transition must release
+        # that account's web voice bot immediately.
+        self._visible_connections: dict[str, tuple[int | None, str]] = {}
 
     # ─────────────────────── 上线提醒注入 ───────────────────────
 
@@ -186,6 +192,10 @@ class TS3Monitor:
     def set_notifier(self, notifier) -> None:
         """注入上线提醒编排器（OnlineNotifier）。"""
         self._notifier = notifier
+
+    def set_voice_exclusivity(self, coordinator) -> None:
+        """Inject the web-vs-real voice presence coordinator."""
+        self._voice_exclusivity = coordinator
 
     def set_steam_lookup(self, lookup) -> None:
         """注入 Steam 当前游戏查询回调：lookup(nickname) -> game_name | None。
@@ -245,9 +255,15 @@ class TS3Monitor:
             self.channel_tree = new_tree
             self.channel_password = new_password
 
-    def _refresh_clients(self) -> tuple[list[tuple[str, str, bool]], list[str]]:
+    def _refresh_clients(
+        self,
+    ) -> tuple[
+        list[tuple[str, str, bool]],
+        list[str],
+        list[tuple[str, str, bool, int | None]],
+    ]:
         now = time.time()
-        resp = self._conn.send("clientlist", uid=True)
+        resp = self._conn.send("clientlist", uid=True, times=True)
         # 锁外完成解析（resp 已是纯数据）
         updates: dict[str, dict] = {}
         seen_uids: set[str] = set()
@@ -267,13 +283,30 @@ class TS3Monitor:
                 "identity": strip_web_voice_marker(nickname),
                 "clid": _safe_int(cl.get("clid")),
                 "cid": _safe_int(cl.get("cid")),
+                "last_connected": str(cl.get("client_lastconnected", "")),
             }
         # 锁内一次性应用写 + 清理（短临界区，整个写原子）；同时收集上线/离线事件。
         # 上线事件带 identity（账号昵称）而不是原样昵称，网页身份才认得出是谁。
         new_online: list[tuple[str, str, bool]] = []
         went_offline: list[str] = []
+        became_visible: list[tuple[str, str, bool, int | None]] = []
         with self._lock:
+            visible_before = self._visible_connections
+            self._visible_connections = {
+                uid: (u["clid"], u["last_connected"])
+                for uid, u in updates.items()
+            }
             for uid, u in updates.items():
+                connection_fingerprint = (u["clid"], u["last_connected"])
+                if visible_before.get(uid) != connection_fingerprint:
+                    became_visible.append(
+                        (
+                            u["identity"],
+                            uid,
+                            u["identity"] != u["nickname"],
+                            u["clid"],
+                        )
+                    )
                 entry = self.client_data.get(uid)
                 if entry is None:
                     self.client_data[uid] = {
@@ -298,18 +331,20 @@ class TS3Monitor:
                 if uid not in seen_uids and now - self.client_data[uid]["last_seen"] > ONLINE_WINDOW:
                     went_offline.append(self.client_data[uid]["identity"])
                     del self.client_data[uid]
-        return new_online, went_offline
+        return new_online, went_offline, became_visible
 
     def _poll_once(self) -> None:
         assert self._conn is not None
         try:
             self._refresh_channels()
-            new_online, went_offline = self._refresh_clients()
+            new_online, went_offline, became_visible = self._refresh_clients()
             # 锁外把上线/离线事件投递到主 loop（fire-and-forget，不阻塞轮询）
             if new_online:
                 self._dispatch_online(new_online)
             if went_offline:
                 self._dispatch_offline(went_offline)
+            if became_visible:
+                self._dispatch_voice_visibility(became_visible)
         except (TS3QueryError, ConnectionError, OSError) as exc:
             # 连接/协议异常 → 标记断开，主循环走重连退避
             logger.warning("TS3 轮询失败，将重连: %s", exc)
@@ -330,6 +365,24 @@ class TS3Monitor:
             return
         for nick in nicknames:
             asyncio.run_coroutine_threadsafe(self._notifier.on_offline(nick), self._loop)
+
+    def _dispatch_voice_visibility(
+        self, clients: list[tuple[str, str, bool, int | None]]
+    ) -> None:
+        if (
+            self._loop is None
+            or self._voice_exclusivity is None
+            or self._loop.is_closed()
+        ):
+            return
+        for nick, uid, web_voice, clid in clients:
+            fut = asyncio.run_coroutine_threadsafe(
+                self._voice_exclusivity.on_visible(
+                    nick, uid, clid=clid, web_voice=web_voice
+                ),
+                self._loop,
+            )
+            fut.add_done_callback(self._on_dispatch_done)
 
     @staticmethod
     def _on_dispatch_done(fut) -> None:

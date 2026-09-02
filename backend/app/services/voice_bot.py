@@ -18,6 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Account, BotOwnership, Session, VoiceBot
 from .tsmusic_client import TSMusicClient
+from .voice_exclusivity import (
+    VoiceExclusivityError,
+    kick_real_ts_client_for_account,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,13 +66,15 @@ async def _resolve_server_target(tsmusic: TSMusicClient, db: AsyncSession) -> _B
 class VoiceBotManager:
     """按账号维护通话 bot 的创建、连接与延迟回收。"""
 
-    def __init__(self, tsmusic_provider, session_factory=None) -> None:
+    def __init__(self, tsmusic_provider, session_factory=None, *, settings=None) -> None:
         self._tsmusic_provider = tsmusic_provider
         self._session_factory = session_factory
+        self._settings = settings
         self._locks: dict[int, asyncio.Lock] = {}
         self._guest_capacity_lock = asyncio.Lock()
         self._release_tasks: dict[int, asyncio.Task] = {}
         self._release_specs: dict[int, tuple[str, bool]] = {}
+        self._native_preempted_accounts: set[int] = set()
 
     def _lock_for(self, account_id: int) -> asyncio.Lock:
         lock = self._locks.get(account_id)
@@ -82,6 +88,30 @@ class VoiceBotManager:
         tsmusic = self._tsmusic_provider()
         async with self._lock_for(account.id):
             self._cancel_release(account.id)
+            if self._settings is not None:
+                recorded_bot_id = await self.current_bot_id(db, account.id)
+                recorded_bot_clid = None
+                if recorded_bot_id:
+                    try:
+                        recorded_bot_clid = await tsmusic.get_bot_client_id(
+                            recorded_bot_id
+                        )
+                    except Exception:
+                        # _ensure_bot below owns stale-record recovery. A missing
+                        # upstream bot must not prevent the pre-connect UID check.
+                        logger.info(
+                            "旧网页通话 bot 无法解析 clid，将按离线记录恢复: %s",
+                            recorded_bot_id,
+                        )
+                try:
+                    await asyncio.to_thread(
+                        kick_real_ts_client_for_account,
+                        self._settings,
+                        account,
+                        exclude_clid=recorded_bot_clid,
+                    )
+                except VoiceExclusivityError as exc:
+                    raise VoiceBotError(str(exc)) from exc
             if account.role == "guest":
                 # Production runs a single backend process; serialize the global
                 # capacity check and reservation so burst joins cannot overshoot.
@@ -91,6 +121,19 @@ class VoiceBotManager:
             else:
                 bot_id = await self._ensure_bot(db, tsmusic, account)
             await self._ensure_connected(tsmusic, bot_id)
+            if self._settings is not None:
+                bot_clid = await tsmusic.get_bot_client_id(bot_id)
+                try:
+                    await asyncio.to_thread(
+                        kick_real_ts_client_for_account,
+                        self._settings,
+                        account,
+                        exclude_clid=bot_clid,
+                    )
+                except VoiceExclusivityError as exc:
+                    await self._discard_web_bot(account.id, bot_id)
+                    raise VoiceBotError(str(exc)) from exc
+            self._native_preempted_accounts.discard(account.id)
             return {"botId": bot_id, "nickname": account.ts_nickname}
 
     async def current_bot_id(self, db: AsyncSession, account_id: int) -> str | None:
@@ -106,6 +149,8 @@ class VoiceBotManager:
     ) -> str:
         """Return the account's existing voice bot after proving it is usable."""
         async with self._lock_for(account_id):
+            if account_id in self._native_preempted_accounts:
+                raise VoiceBotError("TeamSpeak 客户端已上线，网页通话已断开")
             release_spec = self._release_specs.get(account_id)
             bot_id = await self.current_bot_id(db, account_id)
             if not bot_id:
@@ -122,6 +167,8 @@ class VoiceBotManager:
         self, account_id: int, bot_id: str, *, destroy: bool = False
     ) -> None:
         """浏览器断开后延迟停机；宽限期内重新 acquire 会取消这次停机。"""
+        if account_id in self._native_preempted_accounts:
+            return
         self._cancel_release(account_id)
         self._release_specs[account_id] = (bot_id, destroy)
         self._release_tasks[account_id] = asyncio.create_task(
@@ -131,6 +178,8 @@ class VoiceBotManager:
     async def keep_alive(self, account_id: int) -> None:
         """Claim the account lease before a browser starts consuming voice."""
         async with self._lock_for(account_id):
+            if account_id in self._native_preempted_accounts:
+                raise VoiceBotError("TeamSpeak 客户端已上线，网页通话已断开")
             self._cancel_release(account_id)
 
     async def release_now(
@@ -140,6 +189,51 @@ class VoiceBotManager:
         async with self._lock_for(account_id):
             self._cancel_release(account_id)
             await self._retire(account_id, bot_id, destroy=destroy)
+
+    async def preempt_if_native_present(
+        self,
+        account_id: int,
+        bot_id: str,
+        *,
+        is_present,
+        close_downlink,
+    ) -> bool:
+        """Atomically revalidate the native winner and retire the web identity."""
+        async with self._lock_for(account_id):
+            if not await is_present():
+                return False
+            self._native_preempted_accounts.add(account_id)
+            self._cancel_release(account_id)
+            try:
+                await close_downlink()
+            except Exception:
+                logger.warning(
+                    "真实 TS 接管时关闭网页下行失败: %s",
+                    bot_id,
+                    exc_info=True,
+                )
+            await self._remove_and_disconnect_web_bot(account_id, bot_id)
+            return True
+
+    async def _discard_web_bot(self, account_id: int, bot_id: str) -> None:
+        """Fail a web acquire closed without marking it as native-preempted."""
+        await self._remove_and_disconnect_web_bot(account_id, bot_id)
+
+    async def _remove_and_disconnect_web_bot(
+        self, account_id: int, bot_id: str
+    ) -> None:
+        # Remove the local capability first: even if upstream cleanup fails,
+        # /voice/start and microphone recovery can no longer resurrect it.
+        await self._delete_voice_bot_record(account_id, bot_id)
+        try:
+            await self._tsmusic_provider().delete_bot(bot_id)
+        except Exception:
+            logger.warning(
+                "网页通话互斥失败后删除 bot 失败: %s",
+                bot_id,
+                exc_info=True,
+            )
+            await self._stop(bot_id)
 
     def _cancel_release(self, account_id: int) -> None:
         task = self._release_tasks.pop(account_id, None)

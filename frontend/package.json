@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "test:unit": "tsc -p tests/tsconfig.json && node --experimental-test-coverage --test dist/.voice-tests/tests/microphone-uplink.test.js",
+    "test:unit": "tsc -p tests/tsconfig.json && node --experimental-test-coverage --test dist/.voice-tests/tests/microphone-uplink.test.js dist/.voice-tests/tests/login-mobile-layout.test.js dist/.voice-tests/tests/voice-downlink-policy.test.js",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview"
   },

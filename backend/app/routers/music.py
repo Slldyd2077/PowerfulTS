@@ -34,6 +34,7 @@ from ..services.entry_sound import (
 )
 from ..services.tsmusic_client import TSMusicClient, TSMusicUnavailable
 from ..services.voice_bot import VoiceBotError
+from ..services.voice_exclusivity import NATIVE_TS_PREEMPTED_CLOSE_CODE
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/music", tags=["music"])
@@ -871,6 +872,7 @@ VOICE_CLOSE_GUEST_EXPIRED = 4401
 VOICE_CLOSE_UPSTREAM_UNSUPPORTED = 4502
 VOICE_CLOSE_UPSTREAM_UNREACHABLE = 4503
 VOICE_CLOSE_UPSTREAM_ERROR = 1011
+VOICE_CLOSE_NATIVE_TS_PREEMPTED = NATIVE_TS_PREEMPTED_CLOSE_CODE
 
 
 def voice_close_for(error: BaseException) -> tuple[int, str]:
@@ -914,8 +916,35 @@ async def stream_voice_downlink(websocket: WebSocket, ticket_id: str):
         await websocket.close(code=VOICE_CLOSE_TICKET_INVALID, reason="语音订阅不存在或已过期")
         return
     try:
-        await websocket.app.state.voice_bots.keep_alive(ticket.account_id)
+        try:
+            await websocket.app.state.voice_bots.keep_alive(ticket.account_id)
+        except VoiceBotError:
+            await websocket.close(
+                code=VOICE_CLOSE_NATIVE_TS_PREEMPTED,
+                reason="TeamSpeak 客户端已上线，网页通话已断开",
+            )
+            return
         await websocket.accept()
+
+        async def close_for_preemption(code: int, reason: str) -> None:
+            try:
+                await websocket.close(code=code, reason=reason)
+            except RuntimeError:
+                pass
+
+        await websocket.app.state.voice_downlink.register_active(
+            ticket, close_for_preemption
+        )
+        try:
+            # Close the claim/register race: if native TS won between the first
+            # lease check and socket registration, return the permanent code now.
+            await websocket.app.state.voice_bots.keep_alive(ticket.account_id)
+        except VoiceBotError:
+            await close_for_preemption(
+                VOICE_CLOSE_NATIVE_TS_PREEMPTED,
+                "TeamSpeak 客户端已上线，网页通话已断开",
+            )
+            return
 
         pump = asyncio.create_task(_pump_voice_downlink(websocket, ticket.bot_id))
         watchdog = asyncio.create_task(_await_client_gone(websocket))

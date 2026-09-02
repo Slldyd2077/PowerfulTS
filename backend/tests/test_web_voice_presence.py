@@ -10,11 +10,15 @@ import time
 import unittest
 from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
 from app.services import ts3_auth
 from app.services.online_notifier import OnlineNotifier
 from app.services.ts3_monitor import TS3Monitor, strip_web_voice_marker
+from app.services.voice_exclusivity import (
+    VoiceExclusivityError,
+    kick_real_ts_client_for_account,
+)
 
 _SETTINGS = SimpleNamespace(
     ts3_host="127.0.0.1",
@@ -25,20 +29,33 @@ _SETTINGS = SimpleNamespace(
 )
 
 
-def _client(nickname: str, clid: int, cid: int = 1) -> dict:
+def _client(
+    nickname: str,
+    clid: int,
+    cid: int = 1,
+    *,
+    last_connected: int | None = None,
+) -> dict:
     return {
         "clid": clid,
         "cid": cid,
         "client_type": "0",
         "client_nickname": nickname,
         "client_unique_identifier": f"uid-{clid}",
+        "client_lastconnected": last_connected if last_connected is not None else clid,
     }
+
+
+def _client_with_uid(nickname: str, clid: int, uid: str, cid: int = 1) -> dict:
+    client = _client(nickname, clid, cid)
+    client["client_unique_identifier"] = uid
+    return client
 
 
 def _monitor_seeing(clients: list[dict]) -> tuple[TS3Monitor, list, list]:
     monitor = TS3Monitor(_SETTINGS)  # type: ignore[arg-type]
     monitor._conn = SimpleNamespace(send=lambda command, **_kw: clients if command == "clientlist" else [])
-    new_online, went_offline = monitor._refresh_clients()
+    new_online, went_offline, _visible = monitor._refresh_clients()
     return monitor, new_online, went_offline
 
 
@@ -86,11 +103,47 @@ class WebVoiceNicknameTests(unittest.TestCase):
         monitor._refresh_clients()
 
         clients[0]["client_nickname"] = "<WEB通讯> Alice"
-        new_online, went_offline = monitor._refresh_clients()
+        new_online, went_offline, _visible = monitor._refresh_clients()
 
         self.assertEqual(new_online, [])
         self.assertEqual(went_offline, [])
+        self.assertEqual(_visible, [])
         self.assertEqual(monitor.client_data["uid-11"]["identity"], "Alice")
+
+    def test_reappearing_real_client_is_reported_even_inside_online_window(self) -> None:
+        """网页踢掉 TS 后，用户很快重连也必须触发“真实 TS 后上线”处理。"""
+        clients = [_client_with_uid("Alice", 11, "real-uid")]
+        monitor = TS3Monitor(_SETTINGS)  # type: ignore[arg-type]
+        monitor._conn = SimpleNamespace(
+            send=lambda command, **_kw: clients if command == "clientlist" else []
+        )
+        _new_online, _went_offline, visible = monitor._refresh_clients()
+        self.assertEqual(visible, [("Alice", "real-uid", False, 11)])
+
+        clients.clear()
+        monitor._refresh_clients()
+        self.assertIn("real-uid", monitor.client_data)
+
+        clients.append(_client_with_uid("Alice", 12, "real-uid"))
+        new_online, went_offline, visible = monitor._refresh_clients()
+
+        self.assertEqual(new_online, [])
+        self.assertEqual(went_offline, [])
+        self.assertEqual(visible, [("Alice", "real-uid", False, 12)])
+
+    def test_same_clid_with_new_connection_timestamp_is_an_arrival(self) -> None:
+        clients = [_client_with_uid("Alice", 11, "real-uid")]
+        clients[0]["client_lastconnected"] = 100
+        monitor = TS3Monitor(_SETTINGS)  # type: ignore[arg-type]
+        monitor._conn = SimpleNamespace(
+            send=lambda command, **_kw: clients if command == "clientlist" else []
+        )
+        monitor._refresh_clients()
+
+        clients[0]["client_lastconnected"] = 200
+        _new_online, _went_offline, arrivals = monitor._refresh_clients()
+
+        self.assertEqual(arrivals, [("Alice", "real-uid", False, 11)])
 
 
 class WebVoiceNotificationTests(IsolatedAsyncioTestCase):
@@ -128,6 +181,115 @@ class WebVoiceNotificationTests(IsolatedAsyncioTestCase):
         await notifier.on_online("Alice", "uid-11")
 
         notifier._mark_first_seen.assert_awaited_once_with("uid-11", "Alice")
+
+
+class VoiceExclusivityKickTests(unittest.TestCase):
+    def test_web_session_kicks_the_registered_real_ts_identity(self) -> None:
+        account = SimpleNamespace(
+            ts_nickname="Alice",
+            unique_identifier="real-uid",
+            role="member",
+        )
+        conn = Mock()
+        conn.send.side_effect = [
+            [],
+            [],
+            [
+                _client_with_uid("Alice", 11, "real-uid"),
+                _client_with_uid("<WEB通讯> Alice", 12, "web-uid"),
+            ],
+            [],
+        ]
+
+        with patch("app.services.voice_exclusivity.TS3QueryClient", return_value=conn):
+            self.assertTrue(
+                kick_real_ts_client_for_account(
+                    _SETTINGS,  # type: ignore[arg-type]
+                    account,
+                    exclude_clid=12,
+                    reason="网页通话已接管，同一账号只能保留一个语音端",
+                )
+            )
+
+        conn.send.assert_any_call(
+            "clientkick",
+            clid=11,
+            reasonid=5,
+            reasonmsg="网页通话已接管，同一账号只能保留一个语音端",
+        )
+
+    def test_web_session_does_not_kick_a_spoofed_matching_nickname(self) -> None:
+        account = SimpleNamespace(
+            ts_nickname="Alice",
+            unique_identifier="real-uid",
+            role="member",
+        )
+        conn = Mock()
+        conn.send.side_effect = [
+            [],
+            [],
+            [_client_with_uid("Alice", 11, "someone-else")],
+        ]
+
+        with patch("app.services.voice_exclusivity.TS3QueryClient", return_value=conn):
+            self.assertFalse(
+                kick_real_ts_client_for_account(
+                    _SETTINGS,  # type: ignore[arg-type]
+                    account,
+                    exclude_clid=None,
+                    reason="网页通话已接管，同一账号只能保留一个语音端",
+                )
+            )
+
+        self.assertNotIn(
+            "clientkick",
+            [call.args[0] for call in conn.send.call_args_list],
+        )
+
+    def test_unverified_invitation_account_never_kicks_by_nickname(self) -> None:
+        account = SimpleNamespace(
+            ts_nickname="Alice",
+            unique_identifier="invite:internal",
+            role="member",
+        )
+        conn = Mock()
+        conn.send.side_effect = [
+            [],
+            [],
+            [_client_with_uid("Alice", 11, "someone-else")],
+        ]
+
+        with patch("app.services.voice_exclusivity.TS3QueryClient", return_value=conn):
+            with self.assertRaisesRegex(VoiceExclusivityError, "尚未绑定"):
+                kick_real_ts_client_for_account(
+                    _SETTINGS,  # type: ignore[arg-type]
+                    account,
+                    exclude_clid=None,
+                    reason="网页通话已接管，同一账号只能保留一个语音端",
+                )
+
+        self.assertNotIn(
+            "clientkick",
+            [call.args[0] for call in conn.send.call_args_list],
+        )
+
+    def test_query_failure_blocks_web_join_instead_of_allowing_overlap(self) -> None:
+        account = SimpleNamespace(
+            id=7,
+            ts_nickname="Alice",
+            unique_identifier="real-uid",
+            role="member",
+        )
+        conn = Mock()
+        conn.connect.side_effect = OSError("query unavailable")
+
+        with patch("app.services.voice_exclusivity.TS3QueryClient", return_value=conn):
+            with self.assertRaisesRegex(VoiceExclusivityError, "无法确认"):
+                kick_real_ts_client_for_account(
+                    _SETTINGS,  # type: ignore[arg-type]
+                    account,
+                    exclude_clid=None,
+                )
 
 
 class ForcedRefreshTests(unittest.TestCase):

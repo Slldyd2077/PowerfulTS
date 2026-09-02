@@ -1,5 +1,5 @@
 import asyncio
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from fastapi import FastAPI, WebSocketDisconnect
@@ -127,7 +127,9 @@ def test_browser_disconnect_closes_the_upstream_voice_socket():
         # The browser leaving must also hand the caller's voice bot back, or it
         # would sit in the channel until something else happened to evict it.
         assert app.state.voice_bots.released == [(7, "bot-a", False)]
-        assert app.state.voice_bots.kept_alive == [7]
+        # Before accept and again after registration: the second fence closes
+        # the race where native TS wins while the browser socket is being wired.
+        assert app.state.voice_bots.kept_alive == [7, 7]
 
     asyncio.run(scenario())
 
@@ -162,6 +164,31 @@ def test_only_one_claimed_downlink_can_be_active_per_account():
     asyncio.run(scenario())
 
 
+def test_native_ts_preemption_closes_the_active_browser_socket():
+    async def scenario():
+        tickets = VoiceDownlinkTickets()
+        ticket = await tickets.create(7, "bot-a")
+        claimed = await tickets.claim(ticket.id)
+        assert claimed == ticket
+        closer = AsyncMock()
+        await tickets.register_active(ticket, closer)
+
+        assert await tickets.close_active(
+            7,
+            code=music.VOICE_CLOSE_NATIVE_TS_PREEMPTED,
+            reason="TeamSpeak 客户端已上线，网页通话已断开",
+        )
+        closer.assert_awaited_once_with(
+            music.VOICE_CLOSE_NATIVE_TS_PREEMPTED,
+            "TeamSpeak 客户端已上线，网页通话已断开",
+        )
+
+        await tickets.release(ticket)
+        assert not await tickets.close_active(7, code=4412, reason="again")
+
+    asyncio.run(scenario())
+
+
 def test_guest_browser_disconnect_destroys_its_temporary_voice_identity():
     app = _voice_downlink_app([b"\x01\x04\x00\x09\x03\xc0opus"])
 
@@ -190,7 +217,7 @@ def test_guest_browser_disconnect_destroys_its_temporary_voice_identity():
         await asyncio.wait_for(handler, timeout=5)
 
         assert app.state.voice_bots.released == [(7, "guest-bot", True)]
-        assert app.state.voice_bots.kept_alive == [7]
+        assert app.state.voice_bots.kept_alive == [7, 7]
 
     asyncio.run(scenario())
 
