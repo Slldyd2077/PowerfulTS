@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from sqlalchemy import delete, exists, func, select
@@ -37,10 +37,11 @@ class VoiceBotError(RuntimeError):
     """开通话机器人失败，且原因可以直接展示给用户。"""
 
 
-@dataclass
+@dataclass(frozen=True)
 class _BotTarget:
     server_address: str
     server_port: int
+    server_password: str = field(default="", repr=False)
 
 
 async def _resolve_server_target(tsmusic: TSMusicClient, db: AsyncSession) -> _BotTarget:
@@ -59,7 +60,13 @@ async def _resolve_server_target(tsmusic: TSMusicClient, db: AsyncSession) -> _B
                 port = int(config.get("serverPort") or 9987)
             except (TypeError, ValueError):
                 port = 9987
-            return _BotTarget(address, port)
+            # The pinned fork exposes serverPassword in its internal config API.
+            # Keep it byte-for-byte (spaces can be part of a password), and never
+            # include it in logs, the target repr, or the public voice response.
+            password = config.get("serverPassword", "")
+            if not isinstance(password, str):
+                raise VoiceBotError("无法读取参照机器人的服务器密码，请检查 TSMusicBot 配置接口")
+            return _BotTarget(address, port, password)
     raise VoiceBotError("还没有任何机器人配置可参照，请先在「音乐控制」里创建一个机器人")
 
 
@@ -367,7 +374,7 @@ class VoiceBotManager:
                 "serverPort": target.server_port,
                 "defaultChannel": "",
                 "channelPassword": "",
-                "serverPassword": "",
+                "serverPassword": target.server_password,
             })
         except Exception as exc:
             raise VoiceBotError("创建通话机器人失败，请确认 TSMusicBot 正在运行") from exc

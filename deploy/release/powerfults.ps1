@@ -5,7 +5,7 @@ $env:POWERFULTS_VERSION = (Get-Content -LiteralPath '.release-version' -Raw).Tri
 $createdConfig = $false
 if (-not (Test-Path -LiteralPath 'backend.env')) {
     Copy-Item -LiteralPath 'backend.env.example' -Destination 'backend.env'
-    Write-Host 'Created backend.env. Set TS3 / TSMusicBot connection settings, then restart.'
+    Write-Host 'Created backend.env. Set TS3 / TS6 and TSMusicBot connection settings, then restart.'
     $createdConfig = $true
 }
 New-Item -ItemType Directory -Path 'data' -Force | Out-Null

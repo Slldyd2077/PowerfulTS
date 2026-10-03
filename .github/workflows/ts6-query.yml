@@ -1,0 +1,81 @@
+name: Native TS6 Query compatibility
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  query:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install locked backend and run tests
+        run: |
+          python -m pip install --require-hashes -r backend/requirements.lock.txt
+          python -m pip install pytest pytest-asyncio pytest-cov
+          python -m pytest -q --cov=app.services.ts3_query --cov-fail-under=80
+      - name: Start isolated official TS6 server
+        run: |
+          mkdir -p .release
+          python - <<'PY'
+          import secrets
+          from pathlib import Path
+          password = secrets.token_urlsafe(32)
+          Path('.release/ts6.env').write_text('TSSERVER_LICENSE_ACCEPTED=accept\nTSSERVER_QUERY_SSH_ENABLED=true\nTSSERVER_QUERY_SSH_ALLOW_GUEST=false\nTSSERVER_QUERY_ADMIN_PASSWORD=' + password + '\n')
+          Path('.release/ts6.env').chmod(0o600)
+          with open('.release/query.env', 'w') as file:
+              file.write('TS3_QUERY_PASSWORD=' + password + '\n')
+          Path('.release/query.env').chmod(0o600)
+          PY
+          docker run -d --name powerfults-ts6-check --env-file .release/ts6.env -p 127.0.0.1:19022:10022 teamspeaksystems/teamspeak6-server:6.0.0-beta13.1
+          for attempt in $(seq 1 40); do
+            if docker exec powerfults-ts6-check test -f /var/tsserver/ssh_host_rsa_key; then break; fi
+            sleep 1
+          done
+          sleep 2
+          docker cp powerfults-ts6-check:/var/tsserver/ssh_host_rsa_key .release/test-server-key
+          python - <<'PY'
+          from pathlib import Path
+          from cryptography.hazmat.primitives import serialization
+          key = serialization.load_pem_private_key(Path('.release/test-server-key').read_bytes(), password=None)
+          public = key.public_key().public_bytes(serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH).decode()
+          Path('.release/known_hosts').write_text('[127.0.0.1]:19022 ' + public + '\n')
+          Path('.release/test-server-key').unlink()
+          PY
+      - name: Native SSH monitor and channel contract checks
+        env:
+          TS3_HOST: 127.0.0.1
+          TS3_QUERY_PORT: '19022'
+          TS3_QUERY_TRANSPORT: ssh
+          TS3_QUERY_USER: serveradmin
+          TS3_QUERY_SSH_KNOWN_HOSTS: .release/known_hosts
+          TS6_SMOKE_ALLOW_WRITES: '1'
+        run: |
+          set -a
+          source .release/query.env
+          set +a
+          python scripts/check_ts6.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Frontend regression and build
+        working-directory: frontend
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm test:unit
+          pnpm build
+      - name: Remove test server and test credentials
+        if: always()
+        run: |
+          docker rm -f powerfults-ts6-check 2>/dev/null || true
+          rm -f .release/ts6.env .release/query.env .release/test-server-key

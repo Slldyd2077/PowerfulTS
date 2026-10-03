@@ -50,14 +50,15 @@ def send_verify_code(settings: Settings, nickname: str, code: str) -> str | None
 
     返回发码目标的 unique_identifier（在线）；不在线返回 None。
     """
-    conn = TS3QueryClient(settings.ts3_host, settings.ts3_query_port)
+    conn = TS3QueryClient(
+        settings.ts3_host, settings.ts3_query_port,
+        transport=getattr(settings, "ts3_query_transport", "raw"),
+        username=settings.ts3_query_user, password=settings.ts3_query_password,
+        ssh_known_hosts=getattr(settings, "ts3_query_ssh_known_hosts", "") or None,
+    )
     try:
         conn.connect()
-        conn.send(
-            "login",
-            client_login_name=settings.ts3_query_user,
-            client_login_password=settings.ts3_query_password,
-        )
+        conn.authenticate(settings.ts3_query_user, settings.ts3_query_password)
         conn.send("use", sid=settings.ts3_sid)
         clients = conn.send("clientlist", uid=True)
         for cl in clients:
@@ -80,14 +81,15 @@ def send_verify_code(settings: Settings, nickname: str, code: str) -> str | None
 
 def send_private_message(settings: Settings, nickname: str, message: str) -> bool:
     """使用与验证码相同的 ServerQuery 私聊通道向在线 TS 成员发送消息。"""
-    conn = TS3QueryClient(settings.ts3_host, settings.ts3_query_port)
+    conn = TS3QueryClient(
+        settings.ts3_host, settings.ts3_query_port,
+        transport=getattr(settings, "ts3_query_transport", "raw"),
+        username=settings.ts3_query_user, password=settings.ts3_query_password,
+        ssh_known_hosts=getattr(settings, "ts3_query_ssh_known_hosts", "") or None,
+    )
     try:
         conn.connect()
-        conn.send(
-            "login",
-            client_login_name=settings.ts3_query_user,
-            client_login_password=settings.ts3_query_password,
-        )
+        conn.authenticate(settings.ts3_query_user, settings.ts3_query_password)
         conn.send("use", sid=settings.ts3_sid)
         for client in conn.send("clientlist", uid=True):
             if str(client.get("client_type", "0")) == "1":

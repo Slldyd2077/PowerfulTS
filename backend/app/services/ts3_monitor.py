@@ -1,6 +1,6 @@
-"""原生 TS3 ServerQuery 监控。
+"""TeamSpeak 3/6 ServerQuery 监控。
 
-后台线程维持一条 ServerQuery 长连接（自写 socket 客户端，无 telnetlib 依赖），
+后台线程维持一条 ServerQuery raw/SSH 长连接（无 telnetlib 依赖），
 轮询 clientlist / channellist，在内存维护在线用户与频道映射。
 /api/stats、/api/channels 从此读取快照。
 
@@ -142,7 +142,7 @@ def _build_channel_tree(raw_channels: list[dict]) -> list[dict]:
 
 
 class TS3Monitor:
-    """TS3 ServerQuery 监控器（单例，由 app.state 持有）。"""
+    """TeamSpeak ServerQuery 监控器（单例，由 app.state 持有）。"""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -217,18 +217,24 @@ class TS3Monitor:
     # ─────────────────────── 连接 ───────────────────────
 
     def _connect(self) -> None:
-        conn = TS3QueryClient(self.host, self.port)
-        conn.connect()
-        conn.send(
-            "login",
-            client_login_name=self.settings.ts3_query_user,
-            client_login_password=self.settings.ts3_query_password,
+        conn = TS3QueryClient(
+            self.host, self.port,
+            transport=getattr(self.settings, "ts3_query_transport", "raw"),
+            username=self.settings.ts3_query_user,
+            password=self.settings.ts3_query_password,
+            ssh_known_hosts=getattr(self.settings, "ts3_query_ssh_known_hosts", "") or None,
         )
-        conn.send("use", sid=self.settings.ts3_sid)
+        try:
+            conn.connect()
+            conn.authenticate(self.settings.ts3_query_user, self.settings.ts3_query_password)
+            conn.send("use", sid=self.settings.ts3_sid)
+        except Exception:
+            conn.close()
+            raise
         self._conn = conn
         self.running = True
         logger.info(
-            "TS3 ServerQuery 已连接 %s:%s sid=%s",
+            "TeamSpeak ServerQuery 已连接 %s:%s sid=%s",
             self.host, self.port, self.settings.ts3_sid,
         )
 
@@ -520,6 +526,7 @@ class TS3Monitor:
             "online_list": online_list,
             "server_host": self.host,
             "server_port": self.port,
+            "serverquery_transport": getattr(self.settings, "ts3_query_transport", "raw"),
             "last_update": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "monitor_running": self.running,
             "mining_users": [],

@@ -3,7 +3,7 @@
 从环境变量读取配置：
   - TSMusicBot 音乐引擎 (网易云 / QQ / B 站 多平台)
   - 原生数据层 (SQLite + SQLAlchemy async)
-  - 原生 TS3 ServerQuery 直连 (监控 / 认证 / 好友)
+  - 原生 TS3 raw / TS3、TS6 SSH ServerQuery (监控 / 认证 / 好友)
   - 网易云音乐 API (本地 NeteaseCloudMusicApi 服务, 账号/歌单)
 
 复制 .env.example 为 .env 并填入实际值。
@@ -35,9 +35,9 @@ class Settings:
     # ── 网易云音乐 API (本地 NeteaseCloudMusicApi 服务) ──
     netease_api_url: str
 
-    # ── 原生 TS3 ServerQuery 直连 (监控 / 认证 / 好友) ──
+    # ── 原生 TS3 / TS6 ServerQuery (保留 TS3_* 配置兼容) ──
     ts3_host: str
-    ts3_query_port: int           # ServerQuery 端口 (默认 10011)
+    ts3_query_port: int           # raw 默认 10011，SSH 默认 10022
     ts3_query_user: str           # ServerQuery 账号
     ts3_query_password: str       # ServerQuery 密码
     ts3_sid: int                  # 虚拟服务器 ID (默认 1)
@@ -70,16 +70,27 @@ class Settings:
     # ── CORS 允许的前端来源 (逗号分隔; 生产改为实际域名) ──
     cors_origins: list[str]
 
+    # Keep TS3_* names for existing installations. SSH is the native TS6 Query transport.
+    ts3_query_transport: str = "raw"
+    ts3_query_ssh_known_hosts: str = ""
+
 
 def get_settings() -> Settings:
     """从环境变量构造配置。"""
+    transport = os.environ.get("TS3_QUERY_TRANSPORT", "raw").strip().lower()
+    if transport not in {"raw", "ssh"}:
+        raise ValueError("TS3_QUERY_TRANSPORT must be raw or ssh")
+    default_port = "10022" if transport == "ssh" else "10011"
+    query_port = int(os.environ.get("TS3_QUERY_PORT", default_port))
+    if not 1 <= query_port <= 65535:
+        raise ValueError("TS3_QUERY_PORT must be between 1 and 65535")
     return Settings(
         database_url=os.environ.get(
             "DATABASE_URL", "sqlite+aiosqlite:///./data/powerfults.db"
         ),
         netease_api_url=os.environ.get("NETEASE_API_URL", "http://127.0.0.1:3000"),
         ts3_host=os.environ.get("TS3_HOST", "127.0.0.1"),
-        ts3_query_port=int(os.environ.get("TS3_QUERY_PORT", "10011")),
+        ts3_query_port=query_port,
         ts3_query_user=os.environ.get("TS3_QUERY_USER", ""),
         ts3_query_password=os.environ.get("TS3_QUERY_PASSWORD", ""),
         ts3_sid=int(os.environ.get("TS3_SID", "1")),
@@ -99,4 +110,6 @@ def get_settings() -> Settings:
         cors_origins=_parse_origins(
             os.environ.get("CORS_ORIGINS", "http://localhost:5173")
         ),
+        ts3_query_transport=transport,
+        ts3_query_ssh_known_hosts=os.environ.get("TS3_QUERY_SSH_KNOWN_HOSTS", "").strip(),
     )

@@ -323,8 +323,9 @@ onMounted(() => {
         <input v-model="form.serverAddress" :class="{ err: errors.serverAddress }" placeholder="host.docker.internal" />
       </div>
       <div class="field">
-        <label>端口</label>
+        <label>语音端口（UDP）</label>
         <input v-model.number="form.serverPort" type="number" />
+        <small class="field-hint">TS3 / TS6 默认 9987；请填写服务器语音端口</small>
       </div>
       <div class="field">
         <label>默认频道</label>
@@ -393,7 +394,11 @@ onMounted(() => {
         <div class="field"><label>Bot 名称</label><input v-model="editForm.name" /></div>
         <div class="field"><label>TS 昵称</label><input v-model="editForm.nickname" /></div>
         <div class="field"><label>TS 服务器地址</label><input v-model="editForm.serverAddress" placeholder="host.docker.internal" /></div>
-        <div class="field"><label>端口</label><input v-model.number="editForm.serverPort" type="number" /></div>
+        <div class="field">
+          <label>语音端口（UDP）</label>
+          <input v-model.number="editForm.serverPort" type="number" />
+          <small class="field-hint">TS3 / TS6 默认 9987；请填写服务器语音端口</small>
+        </div>
         <div class="field"><label>默认频道</label><input v-model="editForm.defaultChannel" placeholder="留空进根频道" /></div>
         <div class="field"><label>频道密码</label><input v-model="editForm.channelPassword" type="password" placeholder="留空不改" /></div>
         <div class="field"><label>服务器密码</label><input v-model="editForm.serverPassword" type="password" placeholder="留空不改" /></div>
@@ -620,6 +625,7 @@ onMounted(() => {
 }
 .field { display: flex; flex-direction: column; gap: 2px; }
 .field label { font-size: 0.64em; color: var(--text-muted); }
+.field-hint { font-size: 0.62em; color: var(--text-muted); line-height: 1.5; }
 .field input {
   background: var(--bg-card);
   border: 1px solid var(--border-default);
