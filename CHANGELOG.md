@@ -1,3 +1,29 @@
+## v0.13.2 (2026-10-03)
+
+### Fix
+
+- 发布阶段只收集 Docker 安装包 artifacts，排除 Buildx 构建记录，防止下载动作失败。v0.13.0 / v0.13.1 均仅保留源码 tag，没有公开安装包。
+
+## v0.13.1 (2026-10-03)
+
+### Fix
+
+- 修复 GitHub Actions 默认排除 `.release/` 隐藏目录导致安装包无法上传；包含 v0.13.0 的全部适配和安装功能。v0.13.0 仅保留源码 tag，没有公开 Release 安装包。
+
+## v0.13.0 (2026-10-03)
+
+### Feat
+
+- 跨平台 Docker Release：amd64 / arm64 预构建 ZIP 与 tar.gz，Windows、Linux、macOS 启动和停止入口，保留配置与数据，提供 SHA256SUMS 和源码备用包。
+- tag 自动构建、安装烟测与 GitHub Release 发布；记录 TSMusicBot 专用 fork 的兼容边界和升级路线。
+
+### Fix
+
+- 修复每引擎 Origin、会话过期恢复、默认 botId、混合平台歌单与入队业务失败计数。
+- 锁定后端发布依赖并校验哈希，更新 Axios / AnyIO 安全修复版本，固定 pnpm 和支持的 Node.js 版本。
+- 修复 Linux 容器宿主机寻址与 nginx 图片 API 优先级，添加健康检查和服务就绪依赖。
+- 前端轮询避免重叠，在隐藏 / 离线时暂停；导航和 favicon 使用轻量 SVG，移除外部字体请求。
+
 ## v0.12.8 (2026-09-03)
 
 ### Fix

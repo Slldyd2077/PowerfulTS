@@ -1,0 +1,198 @@
+name: Release Docker installers
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Version and release packaging tests
+        run: |
+          python scripts/check_versions.py
+          python -m pip install coverage
+          coverage run --include='*/scripts/build_release.py' -m unittest discover -s scripts/tests -v
+          coverage report --fail-under=80
+      - name: Backend unit and integration tests
+        run: |
+          python -m pip install --require-hashes -r backend/requirements.lock.txt
+          python -m pip install pytest pytest-asyncio
+          python -m pytest backend/tests -q
+      - name: Check exported backend dependency lock
+        run: |
+          python -m pip install uv
+          uv export --project backend --locked --no-dev --no-emit-project --output-file /tmp/requirements.lock.txt
+          python - <<'PY'
+          from pathlib import Path
+          def normalized(path):
+              return [line.strip() for line in Path(path).read_text().splitlines() if line.strip() and not line.lstrip().startswith('#')]
+          assert normalized('/tmp/requirements.lock.txt') == normalized('backend/requirements.lock.txt'), 'requirements.lock.txt is out of sync with backend/uv.lock'
+          PY
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Frontend tests and production build
+        working-directory: frontend
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm test:unit
+          pnpm build
+      - name: Build source fallback archives
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          args=()
+          if [ -n "$RELEASE_TAG" ]; then args+=(--tag "$RELEASE_TAG"); fi
+          python scripts/build_release.py --output .release "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-source
+          include-hidden-files: true
+          path: |
+            .release/*.zip
+            .release/*.tar.gz
+          if-no-files-found: error
+
+  images:
+    needs: validate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Set version
+        run: |
+          python scripts/check_versions.py
+          python -c 'import tomllib; print("POWERFULTS_VERSION=" + tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])' >> "$GITHUB_ENV"
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          platforms: linux/${{ matrix.arch }}
+          tags: powerfults-backend:${{ env.POWERFULTS_VERSION }}
+          outputs: type=docker,dest=/tmp/backend.tar
+          cache-from: type=gha,scope=backend-${{ matrix.arch }}
+          cache-to: type=gha,scope=backend-${{ matrix.arch }},mode=max
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          platforms: linux/${{ matrix.arch }}
+          tags: powerfults-frontend:${{ env.POWERFULTS_VERSION }}
+          outputs: type=docker,dest=/tmp/frontend.tar
+          cache-from: type=gha,scope=frontend-${{ matrix.arch }}
+          cache-to: type=gha,scope=frontend-${{ matrix.arch }},mode=max
+      - name: Export offline image archive
+        run: |
+          docker load --input /tmp/backend.tar
+          docker load --input /tmp/frontend.tar
+          docker save --output /tmp/images.tar "powerfults-backend:$POWERFULTS_VERSION" "powerfults-frontend:$POWERFULTS_VERSION"
+      - name: Build installers
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          args=()
+          if [ -n "$RELEASE_TAG" ]; then args+=(--tag "$RELEASE_TAG"); fi
+          python scripts/build_release.py --images /tmp/images.tar --arch '${{ matrix.arch }}' --output .release "${args[@]}"
+      - name: Smoke test extracted installer (ARM64 uses QEMU)
+        run: |
+          mkdir /tmp/installer
+          tar -xzf ".release/powerfults-v${POWERFULTS_VERSION}-docker-${{ matrix.arch }}.tar.gz" -C /tmp/installer
+          cd "/tmp/installer/powerfults-${POWERFULTS_VERSION}"
+          sh powerfults.sh init
+          docker compose up -d --no-build --pull never --wait --wait-timeout 180
+          curl --fail --retry 3 http://127.0.0.1:8080/ > /dev/null
+          curl --fail http://127.0.0.1:8001/health
+          curl --fail http://127.0.0.1:8080/health
+          docker compose down
+          test -f backend.env
+          test -d data
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          cd "/tmp/installer/powerfults-${POWERFULTS_VERSION}" 2>/dev/null || exit 0
+          docker compose logs --tail 100
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-${{ matrix.arch }}
+          include-hidden-files: true
+          path: |
+            .release/*.zip
+            .release/*.tar.gz
+          if-no-files-found: error
+
+  platform-launchers:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test archives and platform launcher initialization
+        run: python -m unittest discover -s scripts/tests -v
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: [validate, images, platform-launchers]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: docker-*
+          path: release-assets
+          merge-multiple: true
+      - name: Calculate checksums
+        working-directory: release-assets
+        run: sha256sum *.zip *.tar.gz > SHA256SUMS
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_REPO: ${{ github.repository }}
+        run: |
+          cat > /tmp/release-notes.md <<'NOTES'
+          下载 CPU 对应的 Docker 安装包：amd64 适用于 Intel/AMD x64，arm64 适用于 Apple Silicon/ARM64。Windows 选 zip，Linux/macOS 选 tar.gz。需要 Docker + Compose v2.20 以上、Linux 容器；无需安装 Git、Node.js 或 Python。docker-source 是联网构建备用包。
+
+          解压后运行 start.cmd（Windows）或 sh start.sh（Linux/macOS）。首次生成 backend.env 后停止，填入连接配置，再次启动。data/ 与 backend.env 需保留和备份。
+
+          TS3 服务端和 TSMusicBot 需另行部署。网页语音等能力依赖 README 指定的 TSMusicBot 定制分支及固定兼容提交。请先核对 SHA256SUMS；默认只允许本机访问面板。
+          NOTES
+          printf '\n[详细安装与升级](https://github.com/%s/blob/%s/docs/release-guide.md)\n' "$RELEASE_REPO" "$RELEASE_TAG" >> /tmp/release-notes.md
+          if gh release view "$RELEASE_TAG" --repo "$RELEASE_REPO" > /dev/null 2>&1; then
+            draft=$(gh release view "$RELEASE_TAG" --repo "$RELEASE_REPO" --json isDraft --jq '.isDraft')
+            if [ "$draft" != true ]; then
+              echo 'Release is already public; use a new version tag instead of replacing published assets.' >&2
+              exit 1
+            fi
+            gh release edit "$RELEASE_TAG" --repo "$RELEASE_REPO" --notes-file /tmp/release-notes.md
+          else
+            gh release create "$RELEASE_TAG" --repo "$RELEASE_REPO" --verify-tag --draft --notes-file /tmp/release-notes.md --title "PowerfulTS $RELEASE_TAG"
+          fi
+          gh release upload "$RELEASE_TAG" release-assets/* --repo "$RELEASE_REPO" --clobber
+          gh release edit "$RELEASE_TAG" --repo "$RELEASE_REPO" --draft=false

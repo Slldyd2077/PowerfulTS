@@ -19,10 +19,12 @@ services:
       - ./backend/.env
     environment:
       TZ: Asia/Shanghai
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - powerfults-data:/app/data   # SQLite 持久化
     ports:
-      - "8001:8001"                 # 后端直接暴露（健康检查/调试；仅前端访问可删除此行）
+      - "127.0.0.1:8001:8001"       # 健康检查/调试；上游反连使用面板 :8080
     networks:
       - powerfults
 
@@ -32,7 +34,8 @@ services:
     container_name: powerfults-frontend
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "8080:80"                   # 面板入口 → http://localhost:8080
     networks:

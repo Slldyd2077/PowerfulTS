@@ -1,8 +1,5 @@
 @import './variables.css';
 
-/* ── Google Fonts：JetBrains Mono（数据）+ Noto Sans SC（正文）── */
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
-
 *,
 *::before,
 *::after {
