@@ -3,6 +3,8 @@
 > 校验日期：2026-07-28
 > 对照源码：PowerfulTS `dev@11ea88f`、本地 TSMusicBot `0.3.3@9df519f`
 
+> TS6 适配补充（2026-10-03）：本文保留上述历史校验记录；当前部署应使用 [Release 指南指定的 fork](release-guide.md#上游引擎)。PowerfulTS 已增加 SSH ServerQuery 接入 TS6 的管理数据层，配置见 [TS6 指南](ts6-server.md)。`ts3_monitor` 是兼容保留的模块名，使用 raw / SSH transport；语音仍由 TSMusicBot 经 UDP 连接服务器，默认 9987，与 SSH Query 的 TCP 10022 分开。通话实例继承源音乐 bot 的服务器连接密码，频道密码另行校验。TS6 音乐和网页双向语音尚需目标服务器实机验收，Query 烟测不能替代声音验收。
+
 ## 1. 目标与当前结论
 
 用户无需同时打开 TeamSpeak 桌面客户端，即可在 PowerfulTS 网页中：

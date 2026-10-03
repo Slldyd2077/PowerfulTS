@@ -34,6 +34,9 @@ class FakeQuery:
     def close(self) -> None:
         pass
 
+    def authenticate(self, username: str, password: str) -> None:
+        self.send("login", client_login_name=username, client_login_password=password)
+
     def send(self, command: str, **params):
         self.commands.append((command, params))
         if command == "clientlist":

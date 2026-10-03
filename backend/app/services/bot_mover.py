@@ -1,9 +1,9 @@
 """播放跟随：把 TSMusicBot 的 bot client 移动到当前用户所在 TS 频道。
 
 独立临时 ServerQuery 连接（不共享 monitor 长连接，避免并发污染其命令流），
-照搬 ts3_auth.send_verify_code 的 connect→login→use→clientlist→操作→close 范式。
+使用 connect→authenticate→use→clientlist→操作→close 范式，支持 raw/SSH。
 
-背景：TSMusicBot 是 real TS3 client（client_type=0），上游 REST API 无「移动 bot」
+背景：TSMusicBot 是普通 TeamSpeak 语音客户端（client_type=0），上游 REST API 无「移动 bot」
 端点（其 joinChannel/clientMove 仅内部方法 + TS 聊天命令）。故由 PowerfulTS 用
 ServerQuery ``clientmove`` 自行把 bot 移到点播用户所在频道，用户才能听到。
 """
@@ -51,14 +51,15 @@ def move_bot_to_user(
     reason 取值：``user_offline`` / ``user_no_channel`` / ``bot_not_found`` /
     ``already_together`` / ``moved`` / ``move_failed`` / ``connect_failed``。
     """
-    conn = TS3QueryClient(settings.ts3_host, settings.ts3_query_port)
+    conn = TS3QueryClient(
+        settings.ts3_host, settings.ts3_query_port,
+        transport=getattr(settings, "ts3_query_transport", "raw"),
+        username=settings.ts3_query_user, password=settings.ts3_query_password,
+        ssh_known_hosts=getattr(settings, "ts3_query_ssh_known_hosts", "") or None,
+    )
     try:
         conn.connect()
-        conn.send(
-            "login",
-            client_login_name=settings.ts3_query_user,
-            client_login_password=settings.ts3_query_password,
-        )
+        conn.authenticate(settings.ts3_query_user, settings.ts3_query_password)
         conn.send("use", sid=settings.ts3_sid)
         clients = conn.send("clientlist", uid=True)
 

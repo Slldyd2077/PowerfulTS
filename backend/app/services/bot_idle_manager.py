@@ -1,7 +1,7 @@
 """PowerfulTS-side bot idle enforcement.
 
 TSMusicBot exposes idle settings, but keeping the actual channel occupancy check
-here lets us use the native TS3 ServerQuery monitor rules and handle multi-bot
+here lets us use the TeamSpeak ServerQuery monitor rules and handle multi-bot
 channels consistently: bots do not count as listeners for each other.
 """
 from __future__ import annotations
@@ -97,15 +97,16 @@ def bot_channel_map_by_client_id(
 
 
 def fetch_ts_clients(settings: Settings) -> list[dict]:
-    """Fetch raw TS3 clientlist with a short-lived ServerQuery connection."""
-    conn = TS3QueryClient(settings.ts3_host, settings.ts3_query_port)
+    """Fetch clientlist over the configured raw/SSH ServerQuery transport."""
+    conn = TS3QueryClient(
+        settings.ts3_host, settings.ts3_query_port,
+        transport=getattr(settings, "ts3_query_transport", "raw"),
+        username=settings.ts3_query_user, password=settings.ts3_query_password,
+        ssh_known_hosts=getattr(settings, "ts3_query_ssh_known_hosts", "") or None,
+    )
     try:
         conn.connect()
-        conn.send(
-            "login",
-            client_login_name=settings.ts3_query_user,
-            client_login_password=settings.ts3_query_password,
-        )
+        conn.authenticate(settings.ts3_query_user, settings.ts3_query_password)
         conn.send("use", sid=settings.ts3_sid)
         return conn.send("clientlist", uid=True)
     finally:

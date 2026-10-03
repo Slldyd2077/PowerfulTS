@@ -1,5 +1,7 @@
 # 安装、升级与 TSMusicBot 适配
 
+> TS6 原生 SSH ServerQuery 从 v1.0.0 起支持，请升级到该版本或更新版本的源码 / 安装包。旧 v0.13.2 安装包不支持 `TS3_QUERY_TRANSPORT=ssh`，不能只修改配置获得该能力。接入步骤与验证边界见 [TS6 服务端指南](ts6-server.md)。
+
 ## 下载安装
 
 在 [GitHub Releases](https://github.com/Slldyd2077/PowerfulTS/releases) 选择预构建包。`amd64` 对应 Intel / AMD x64，`arm64` 对应 Apple Silicon / ARM64 Linux / ARM64 NAS；ZIP 适合 Windows，tar.gz 适合 Linux / macOS。所有包都运行 Linux 容器，必须先安装 Docker Desktop 或 Docker Engine + Compose v2.20 以上。32 位 ARM / x86 不在发布矩阵内。
@@ -8,17 +10,17 @@
 
 1. 用 `SHA256SUMS` 校验下载文件。Windows 使用 `Get-FileHash 文件名 -Algorithm SHA256`；Linux 使用 `sha256sum -c SHA256SUMS`；macOS 使用 `shasum -a 256 文件名`。
 2. 解压到固定目录，执行 `powerfults.ps1 init`（Windows 可用 `powershell -NoProfile -ExecutionPolicy Bypass -File .\powerfults.ps1 init`），或 `sh powerfults.sh init`。已有 `backend.env` 不会被覆盖。
-3. 编辑 `backend.env`，填写 TS3 ServerQuery 地址、凭据和虚拟服务器 ID，以及 TSMusicBot 地址、账号、密码、默认 bot ID。不要上传这个文件。特殊字符请按 dotenv 语法加引号。
+3. 编辑 `backend.env`，填写 TS3 / TS6 ServerQuery 地址、凭据和虚拟服务器 ID，以及 TSMusicBot 地址、账号、密码、默认 bot ID。TS3 raw Query 通常 TCP 10011；TS6 配置 `TS3_QUERY_TRANSPORT=ssh`、`TS3_QUERY_PORT=10022`、`TS3_QUERY_SSH_KNOWN_HOSTS=/app/data/known_hosts`，先核验并保存可信公钥到 `data/known_hosts`。不要上传凭据文件。特殊字符请按 dotenv 语法加引号。
 4. Windows 双击 `start.cmd`；Linux / macOS 执行 `sh start.sh`。脚本检查 Docker、CPU 架构，导入镜像并等待服务启动。浏览器打开 `http://localhost:8080`。
-5. 先登录 TS3，用网页的 TS 在线验证码注册自己的账号。首个成功注册的账号自动成为管理员；完成初始化后再开放远程访问。
+5. 先登录目标 TeamSpeak 服务器，用网页的 TS 在线验证码注册自己的账号。首个成功注册的账号自动成为管理员；完成初始化后再开放远程访问。
 
 默认只绑定本机。服务器管理员可通过 SSH 转发访问远端的首次安装：`ssh -L 8080:127.0.0.1:8080 用户@服务器`，随后浏览器访问 localhost。NAS 可从 SSH 执行启动脚本或用 Container Manager / Container Station 导入镜像和 Compose 文件。
 
 ## 上游引擎
 
-PowerfulTS 的安装包不捆绑 TS3 服务端或 TSMusicBot。需预先部署：
+PowerfulTS 的安装包不捆绑 TS3 / TS6 服务端或 TSMusicBot。需预先部署：
 
-- TS3：开启 ServerQuery，配置读取频道 / 客户端以及所需频道写操作权限。限制 Query 端口访问范围。
+- TS3 / TS6：开启 ServerQuery，配置读取频道 / 客户端、验证码私聊以及所需频道写操作权限。TS3 raw TCP 通常 10011，TS6 SSH 通常 10022，TS6 官方配置默认关闭 SSH Query，需要 `TSSERVER_QUERY_SSH_ENABLED=true`。限制 Query 端口访问范围；SSH 模式需核验可信主机公钥。完整步骤见 [TS6 指南](ts6-server.md)。
 - TSMusicBot：[专用 fork v1.12.2](https://github.com/Slldyd2077/teamspeak-music-bot/tree/2c1fc74fce812caaaa79b5e8566a7dd617c1e9ad)。核对提交 `2c1fc74fce812caaaa79b5e8566a7dd617c1e9ad`，使用该源码构建，不依赖分支名称永远不变。
 
 2026-10-03 对照的 [原版上游](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot/tree/87fca6d8b7b770e1e01f8891059c99d53705cc08) 已有 v1.14.0 更新记录，但其音乐 API 使用全局 provider。PowerfulTS 使用 fork 的 per-bot 音源、多实例、网页通话中继与语音闪避，不能直接替换为原版镜像。fork 的 `/api/health` 版本字段尚为 1.12.1，包版本为 1.12.2，因此应核对源码提交和接口，而非只看健康端点的版本字符串。
@@ -32,6 +34,8 @@ PowerfulTS 的安装包不捆绑 TS3 服务端或 TSMusicBot。需预先部署�
 | 入场音效 | 引擎可访问 PowerfulTS 的回调 origin，并设置 `POWERFUL_TS_ORIGIN` |
 
 本次适配包括每客户端 Origin、REST / WebSocket 的单次 401 续期、并发续期去重、默认 botId 回退和混合平台歌单按歌曲保留音源。网络超时不会自动重放入队等写请求，避免重复操作。
+
+TS6 的 Query 与语音是两条连接：PowerfulTS 直接使用 SSH Query；TSMusicBot 的音乐和网页通话实例连接目标虚拟服务器的 UDP 语音端口（通常 9987），沿用指定 fork 的 TeamSpeak 客户端。不要把 Query 的 10022 填入 bot 的语音 port，也不要向 fork API 添加未定义的 `serverProtocol` 字段。网页通话实例会继承音乐 bot 的服务器连接密码；频道密码由加入频道流程单独校验。Query 连通不代表音乐或网页语音已验收。
 
 ## 容器网络与远程访问
 
@@ -58,7 +62,7 @@ POWERFULTS_PORT=8080
 - 升级：停止旧版本，备份旧目录 `backend.env` 和 `data/`，解压新版到新目录，复制这两个项目后启动。Compose 默认项目名为 `powerfults`，同一 Docker 主机默认只运行一个实例。
 - 回退：停止新版，恢复升级前的数据库与音效备份，再启动旧版；不要假设旧代码能读取已迁移的新数据库。
 
-容器 healthy 和 `/health` 表示面板进程已完成本地初始化，**不表示 TS3、音乐平台或真实音频链路已经连通**。安装后必须验证 TS 身份注册、频道列表、点歌，以及需要使用的网页通话。查看日志时不要把账号、cookie、token 或完整配置公开发到 Issue。
+容器 healthy 和 `/health` 表示面板进程已完成本地初始化，**不表示 TS3 / TS6、音乐平台或真实音频链路已经连通**。安装后必须验证 TS 身份注册、频道列表、点歌，以及需要使用的网页通话。查看日志时不要把账号、cookie、token 或完整配置公开发到 Issue。
 
 ## 发布维护者
 
