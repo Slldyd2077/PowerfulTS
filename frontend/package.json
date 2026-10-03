@@ -1,18 +1,22 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "0.12.8",
+  "version": "0.13.0",
   "type": "module",
+  "packageManager": "pnpm@10.27.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev": "vite",
-    "test:unit": "tsc -p tests/tsconfig.json && node --experimental-test-coverage --test dist/.voice-tests/tests/microphone-uplink.test.js dist/.voice-tests/tests/login-mobile-layout.test.js dist/.voice-tests/tests/voice-downlink-policy.test.js",
+    "test:unit": "tsc -p tests/tsconfig.json && node --experimental-test-coverage --test dist/.voice-tests/tests/microphone-uplink.test.js dist/.voice-tests/tests/login-mobile-layout.test.js dist/.voice-tests/tests/voice-downlink-policy.test.js dist/.voice-tests/tests/polling-scheduler.test.js",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
     "@types/qrcode": "^1.5.6",
-    "axios": "^1.19.0",
+    "axios": "^1.20.0",
     "element-plus": "^2.14.1",
     "opus-decoder": "^0.7.11",
     "pinia": "^3.0.4",

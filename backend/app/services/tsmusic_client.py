@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-import os
 import re
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
@@ -17,6 +16,7 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from websockets.asyncio.client import connect as websocket_connect
+from websockets.exceptions import InvalidStatus
 
 from . import app_setting
 
@@ -24,16 +24,6 @@ if TYPE_CHECKING:
     from .bot_player_state import BotPlayerStateStore
 
 logger = logging.getLogger(__name__)
-
-# TSMusicBot 需要 Origin header 才允许 API 调用（CSRF 防护）
-# 设置容器header兼容性
-_HEADERS = {
-    "Origin": os.environ.get(
-        "TSMUSIC_URL",
-        "http://127.0.0.1:3000"
-    ),
-    "Content-Type": "application/json",
-}
 
 def _nonnegative_metric(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -95,6 +85,8 @@ _QUALITY_POLICY: dict[str, dict[str, bool]] = {
     "qq": {"128": False, "320": False, "flac": True},
     "bilibili": {"high": False},
     "kugou": {"128": False, "320": False, "flac": True, "high": True},
+    "spotify": {"96": False, "160": False, "320": False},
+    "jellyfin": {"direct": False, "128": False, "192": False, "320": False},
 }
 
 _QUALITY_ALIASES: dict[str, dict[str, str]] = {
@@ -165,11 +157,18 @@ class TSMusicClient:
         self._state_locks: dict[str, asyncio.Lock] = {}
         self._startup_locks: dict[str, asyncio.Lock] = {}
         self._restored_bot_ids: set[str] = set()
+        self._login_lock = asyncio.Lock()
+        self._login_generation = 0
+        self._login_cookies = httpx.Cookies()
+        # 上游 CSRF 检查 Origin host 必须匹配请求 Host；per-user 容器地址
+        # 可能不同于进程级 TSMUSIC_URL，因此从本实例的 base_url 推导。
+        url = httpx.URL(base_url)
+        origin = str(httpx.URL(scheme=url.scheme, host=url.host, port=url.port)).rstrip("/")
         # 启用 cookie 跟踪，以维持登录 session
         self._http = httpx.AsyncClient(
             base_url=self._base,
             timeout=httpx.Timeout(15.0),
-            headers=_HEADERS,
+            headers={"Origin": origin, "Content-Type": "application/json"},
             cookies=httpx.Cookies(),  # 启用 cookie 支持
         )
         self._logged_in = False
@@ -186,18 +185,47 @@ class TSMusicClient:
         """确保已登录（幂等）。"""
         if self._logged_in:
             return
-        try:
-            resp = await self._http.post(
-                "/api/session/login",
-                json={"username": self._user, "password": self._pass},
-            )
-            if resp.status_code == 200:
-                self._logged_in = True
-                logger.info("TSMusicBot 登录成功: %s", self._user)
-            else:
-                logger.warning("TSMusicBot 登录失败: %s", resp.text[:100])
-        except httpx.HTTPError as exc:
-            logger.warning("TSMusicBot 连接失败: %s", exc)
+        async with self._login_lock:
+            if self._logged_in:
+                return
+            try:
+                resp = await self._http.post(
+                    "/api/session/login",
+                    json={"username": self._user, "password": self._pass},
+                )
+                if resp.status_code == 200:
+                    self._logged_in = True
+                    self._login_generation += 1
+                    self._login_cookies = httpx.Cookies(self._http.cookies)
+                    logger.info("TSMusicBot 登录成功: %s", self._user)
+                else:
+                    logger.warning("TSMusicBot 登录失败: HTTP %s", resp.status_code)
+            except httpx.HTTPError as exc:
+                logger.warning("TSMusicBot 连接失败: %s", exc)
+
+    async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
+        """上游 session 失效后重新登录，最多重放一次请求。
+
+        fork 的 401 由 requireAuth 在路由执行前返回，因此可以安全重放写操作；
+        403 权限错误和网络异常不重试，避免重复播放/入队。
+        """
+        generation = self._login_generation
+        resp = await self._http.request(method, path, **kwargs)
+        if resp.status_code != 401:
+            return resp
+        if generation == self._login_generation:
+            self._logged_in = False
+            self._http.cookies.clear()
+        await self._ensure_login()
+        if not self._logged_in:
+            return resp
+        # 较晚返回的旧 401 会执行上游 clearCookie，不能让它擦掉新 session。
+        self._http.cookies.update(self._login_cookies)
+        await resp.aclose()
+        resp = await self._http.request(method, path, **kwargs)
+        if resp.status_code == 401:
+            self._logged_in = False
+        return resp
 
     async def close(self) -> None:
         await self._http.aclose()
@@ -298,13 +326,13 @@ class TSMusicClient:
 
     async def _checked_player_snapshot(self, bot_id: str) -> tuple[int, list[dict]]:
         """严格读取音量和队列；任一请求失败都不覆盖已有快照。"""
-        status_resp = await self._http.get(f"/api/bot/{bot_id}")
+        status_resp = await self._request("GET", f"/api/bot/{bot_id}")
         status_resp.raise_for_status()
         status = self._json(status_resp)
         if not status.get("id") or "volume" not in status:
             raise ValueError("invalid bot status response")
 
-        queue_resp = await self._http.get(f"/api/player/{bot_id}/queue")
+        queue_resp = await self._request("GET", f"/api/player/{bot_id}/queue")
         queue_resp.raise_for_status()
         data = self._json(queue_resp)
         raw_queue = data.get("queue", data.get("data", {}).get("queue"))
@@ -344,13 +372,13 @@ class TSMusicClient:
         lock = self._startup_locks.setdefault(bid, asyncio.Lock())
         async with lock:
             try:
-                status_resp = await self._http.get(f"/api/bot/{bid}")
+                status_resp = await self._request("GET", f"/api/bot/{bid}")
                 status_resp.raise_for_status()
                 status = self._json(status_resp)
                 connected = bool(status.get("connected") or status.get("online"))
                 if not connected:
                     self.mark_player_disconnected(bid)
-                    start_resp = await self._http.post(f"/api/bot/{bid}/start")
+                    start_resp = await self._request("POST", f"/api/bot/{bid}/start")
                     start_resp.raise_for_status()
                     if self._json(start_resp).get("error"):
                         return
@@ -381,7 +409,7 @@ class TSMusicClient:
             async with lock:
                 # start API 可能在 TS client 完全就绪前返回，最多等待约 5 秒。
                 for attempt in range(10):
-                    resp = await self._http.get(f"/api/bot/{bid}")
+                    resp = await self._request("GET", f"/api/bot/{bid}")
                     resp.raise_for_status()
                     bot = self._json(resp)
                     if bot.get("connected") or bot.get("online"):
@@ -391,7 +419,7 @@ class TSMusicClient:
                 else:
                     return {"restored": False, "reason": "bot_not_connected"}
 
-                queue_resp = await self._http.get(f"/api/player/{bid}/queue")
+                queue_resp = await self._request("GET", f"/api/player/{bid}/queue")
                 queue_resp.raise_for_status()
                 queue_data = self._json(queue_resp)
                 current_queue = queue_data.get(
@@ -400,7 +428,8 @@ class TSMusicClient:
                 if not isinstance(current_queue, list):
                     raise ValueError("invalid bot queue response")
 
-                volume_resp = await self._http.post(
+                volume_resp = await self._request(
+                    "POST",
                     f"/api/player/{bid}/volume", json={"volume": saved["volume"]}
                 )
                 volume_resp.raise_for_status()
@@ -415,7 +444,8 @@ class TSMusicClient:
                         platform = str(song.get("platform") or "").strip()
                         if platform:
                             payload["platform"] = platform
-                        add_resp = await self._http.post(
+                        add_resp = await self._request(
+                            "POST",
                             f"/api/player/{bid}/add", json=payload
                         )
                         add_resp.raise_for_status()
@@ -468,9 +498,8 @@ class TSMusicClient:
             params: dict[str, str] = {"q": q}
             if platform:
                 params["platform"] = platform
-            if bot_id:
-                params["botId"] = bot_id
-            resp = await self._http.get("/api/music/search", params=params)
+            params["botId"] = self._bid(bot_id)
+            resp = await self._request("GET", "/api/music/search", params=params)
             data = resp.json()
             songs = data.get("data", {}).get("songs", data.get("songs", []))
             if isinstance(songs, list):
@@ -493,7 +522,8 @@ class TSMusicClient:
         payload: dict = {"query": query}
         if platform:
             payload["platform"] = platform
-        resp = await self._http.post(
+        resp = await self._request(
+            "POST",
             f"/api/player/{bid}/play", json=payload
         )
         if meta:
@@ -508,7 +538,8 @@ class TSMusicClient:
         payload: dict = {"query": query}
         if platform:
             payload["platform"] = platform
-        resp = await self._http.post(
+        resp = await self._request(
+            "POST",
             f"/api/player/{bid}/add", json=payload
         )
         if meta:
@@ -526,7 +557,8 @@ class TSMusicClient:
         await self._ensure_login()
         bid = self._bid(bot_id)
         await self.ensure_player_ready(bid)
-        resp = await self._http.post(
+        resp = await self._request(
+            "POST",
             f"/api/player/{bid}/live",
             json={"url": stream_url, "mimeType": mime_type, "title": title},
         )
@@ -547,52 +579,66 @@ class TSMusicClient:
         ws_url = urlunsplit(
             (scheme, parsed.netloc, f"{base_path}/api/voice/downlink/{bid}", "", "")
         )
-        cookie_header = "; ".join(
-            f"{cookie.name}={cookie.value}" for cookie in self._http.cookies.jar
-        )
-        if not cookie_header:
-            raise TSMusicUnavailable("TSMusicBot login did not yield a session cookie")
-
-        async with websocket_connect(
-            ws_url,
-            additional_headers={"Cookie": cookie_header},
-            open_timeout=10,
-            close_timeout=3,
-            ping_interval=20,
-            max_size=64 * 1024,
-        ) as websocket:
-            async for message in websocket:
-                if isinstance(message, bytes) and message:
-                    yield message
+        for attempt in range(2):
+            generation = self._login_generation
+            cookie_header = self._http.build_request(
+                "GET", f"/api/voice/downlink/{bid}"
+            ).headers.get("Cookie", "")
+            if not cookie_header:
+                raise TSMusicUnavailable("TSMusicBot login did not yield a session cookie")
+            try:
+                async with websocket_connect(
+                    ws_url,
+                    additional_headers={"Cookie": cookie_header},
+                    open_timeout=10,
+                    close_timeout=3,
+                    ping_interval=20,
+                    max_size=64 * 1024,
+                ) as websocket:
+                    async for message in websocket:
+                        if isinstance(message, bytes) and message:
+                            yield message
+                return
+            except InvalidStatus as exc:
+                if exc.response.status_code != 401 or attempt:
+                    raise
+                if generation == self._login_generation:
+                    self._logged_in = False
+                    self._http.cookies.clear()
+                await self._ensure_login()
+                if not self._logged_in:
+                    raise TSMusicUnavailable("TSMusicBot session renewal failed") from exc
+                self._http.cookies.update(self._login_cookies)
 
     async def pause(self, bot_id: str | None = None) -> dict:
         await self._ensure_login()
-        resp = await self._http.post(f"/api/player/{self._bid(bot_id)}/pause")
+        resp = await self._request("POST", f"/api/player/{self._bid(bot_id)}/pause")
         return self._json(resp)
 
     async def resume(self, bot_id: str | None = None) -> dict:
         await self._ensure_login()
         bid = self._bid(bot_id)
         await self.ensure_player_ready(bid)
-        resp = await self._http.post(f"/api/player/{bid}/resume")
+        resp = await self._request("POST", f"/api/player/{bid}/resume")
         return self._json(resp)
 
     async def next(self, bot_id: str | None = None) -> dict:
         await self._ensure_login()
         bid = self._bid(bot_id)
         await self.ensure_player_ready(bid)
-        resp = await self._http.post(f"/api/player/{bid}/next")
+        resp = await self._request("POST", f"/api/player/{bid}/next")
         return await self._persist_after(self._json(resp), bid)
 
     async def stop(self, bot_id: str | None = None) -> dict:
         await self._ensure_login()
         bid = self._bid(bot_id)
-        resp = await self._http.post(f"/api/player/{bid}/stop")
+        resp = await self._request("POST", f"/api/player/{bid}/stop")
         return await self._persist_after(self._json(resp), bid)
 
     async def seek(self, position: int, bot_id: str | None = None) -> dict:
         await self._ensure_login()
-        resp = await self._http.post(
+        resp = await self._request(
+            "POST",
             f"/api/player/{self._bid(bot_id)}/seek", json={"position": position}
         )
         return self._json(resp)
@@ -600,7 +646,8 @@ class TSMusicClient:
     async def set_volume(self, volume: int, bot_id: str | None = None) -> dict:
         await self._ensure_login()
         bid = self._bid(bot_id)
-        resp = await self._http.post(
+        resp = await self._request(
+            "POST",
             f"/api/player/{bid}/volume", json={"volume": volume}
         )
         return await self._persist_after(self._json(resp), bid)
@@ -608,7 +655,8 @@ class TSMusicClient:
     async def set_mode(self, mode: str, bot_id: str | None = None) -> dict:
         """mode: seq | loop | random | rloop。"""
         await self._ensure_login()
-        resp = await self._http.post(
+        resp = await self._request(
+            "POST",
             f"/api/player/{self._bid(bot_id)}/mode", json={"mode": mode}
         )
         return self._json(resp)
@@ -616,14 +664,14 @@ class TSMusicClient:
     async def clear(self, bot_id: str | None = None) -> dict:
         await self._ensure_login()
         bid = self._bid(bot_id)
-        resp = await self._http.post(f"/api/player/{bid}/clear")
+        resp = await self._request("POST", f"/api/player/{bid}/clear")
         return await self._persist_after(self._json(resp), bid)
 
     async def remove_from_queue(self, index: int, bot_id: str | None = None) -> dict:
         """按队列索引移除单曲。前端传 0-based 数组索引；上游 !remove 为 1-based（N=1 即第一首），故 +1。"""
         await self._ensure_login()
         bid = self._bid(bot_id)
-        resp = await self._http.delete(f"/api/player/{bid}/queue/{index + 1}")
+        resp = await self._request("DELETE", f"/api/player/{bid}/queue/{index + 1}")
         return await self._persist_after(self._json(resp), bid)
 
     async def play_at(self, index: int, bot_id: str | None = None) -> dict:
@@ -631,14 +679,15 @@ class TSMusicClient:
         await self._ensure_login()
         bid = self._bid(bot_id)
         await self.ensure_player_ready(bid)
-        resp = await self._http.post(f"/api/player/{bid}/play-at", json={"index": index})
+        resp = await self._request("POST", f"/api/player/{bid}/play-at", json={"index": index})
         return await self._persist_after(self._json(resp), bid)
 
     async def move_queue_item(self, from_idx: int, to_idx: int, bot_id: str | None = None) -> dict:
         """拖动调序：移动队列项到新位置（上游 POST /queue/:from/move {to}）。"""
         await self._ensure_login()
         bid = self._bid(bot_id)
-        resp = await self._http.post(
+        resp = await self._request(
+            "POST",
             f"/api/player/{bid}/queue/{from_idx}/move", json={"to": to_idx}
         )
         return await self._persist_after(self._json(resp), bid)
@@ -654,7 +703,7 @@ class TSMusicClient:
         await self._ensure_login()
         try:
             bid = self._bid(bot_id)
-            resp = await self._http.get(f"/api/bot/{bid}")
+            resp = await self._request("GET", f"/api/bot/{bid}")
             bot = resp.json()
             if not isinstance(bot, dict) or not bot.get("id"):
                 return {}
@@ -690,7 +739,7 @@ class TSMusicClient:
         """获取播放队列。"""
         await self._ensure_login()
         try:
-            resp = await self._http.get(f"/api/player/{self._bid(bot_id)}/queue")
+            resp = await self._request("GET", f"/api/player/{self._bid(bot_id)}/queue")
             data = resp.json()
             q = data.get("queue", data.get("data", {}).get("queue", []))
             if isinstance(q, list):
@@ -717,7 +766,7 @@ class TSMusicClient:
         """GET /api/bot → 归一化为 BotInfo 列表。"""
         await self._ensure_login()
         try:
-            resp = await self._http.get("/api/bot")
+            resp = await self._request("GET", "/api/bot")
             data = resp.json()
             raw = data.get("bots", data.get("data", {}).get("bots", []))
             return [self._map_bot(b) for b in raw if isinstance(b, dict)]
@@ -733,7 +782,7 @@ class TSMusicClient:
         在线 bot，并清空所有正在进行的空闲计时。
         """
         await self._ensure_login()
-        resp = await self._http.get("/api/bot")
+        resp = await self._request("GET", "/api/bot")
         resp.raise_for_status()
         data = resp.json()
         if not isinstance(data, dict):
@@ -746,13 +795,13 @@ class TSMusicClient:
     async def create_bot(self, payload: dict) -> dict:
         """POST /api/bot → 创建 bot（identity 自动生成，不自动连接）。"""
         await self._ensure_login()
-        resp = await self._http.post("/api/bot", json=payload)
+        resp = await self._request("POST", "/api/bot", json=payload)
         return self._json(resp)
 
     async def update_bot(self, bot_id: str, payload: dict) -> dict:
         """PUT /api/bot/:id → 更新 bot 配置（连接类字段需先停止 bot 再改才生效）。"""
         await self._ensure_login()
-        resp = await self._http.put(f"/api/bot/{bot_id}", json=payload)
+        resp = await self._request("PUT", f"/api/bot/{bot_id}", json=payload)
         if "nickname" in payload:
             self._bot_nickname_cache.pop(bot_id, None)
         return self._json(resp)
@@ -760,7 +809,7 @@ class TSMusicClient:
     async def start_bot(self, bot_id: str) -> dict:
         """POST /api/bot/:id/start → 连接 TS（首次生成并持久化 identity）。"""
         await self._ensure_login()
-        resp = await self._http.post(f"/api/bot/{bot_id}/start")
+        resp = await self._request("POST", f"/api/bot/{bot_id}/start")
         result = self._json(resp)
         if not result.get("error"):
             self.mark_player_disconnected(bot_id)
@@ -770,7 +819,7 @@ class TSMusicClient:
     async def stop_bot(self, bot_id: str) -> dict:
         await self._ensure_login()
         await self.persist_player_state(bot_id)
-        resp = await self._http.post(f"/api/bot/{bot_id}/stop")
+        resp = await self._request("POST", f"/api/bot/{bot_id}/stop")
         result = self._json(resp)
         if not result.get("error"):
             self.mark_player_disconnected(bot_id)
@@ -780,7 +829,7 @@ class TSMusicClient:
         """停止 bot，且将上游非 2xx 响应视为失败。"""
         await self._ensure_login()
         await self.persist_player_state(bot_id)
-        resp = await self._http.post(f"/api/bot/{bot_id}/stop")
+        resp = await self._request("POST", f"/api/bot/{bot_id}/stop")
         resp.raise_for_status()
         result = self._json(resp)
         self.mark_player_disconnected(bot_id)
@@ -788,7 +837,7 @@ class TSMusicClient:
 
     async def delete_bot(self, bot_id: str) -> dict:
         await self._ensure_login()
-        resp = await self._http.delete(f"/api/bot/{bot_id}")
+        resp = await self._request("DELETE", f"/api/bot/{bot_id}")
         if resp.status_code == 404:
             if self._state_store is not None:
                 await self._state_store.delete(bot_id)
@@ -816,7 +865,7 @@ class TSMusicClient:
         """
         await self._ensure_login()
         try:
-            data = self._json(await self._http.get("/api/bot/settings"))
+            data = self._json(await self._request("GET", "/api/bot/settings"))
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("TSMusicBot 读取 bot 设置失败: %s", exc)
             return {"idleTimeoutMinutes": 0, "autoPauseOnEmpty": False, "voiceDucking": {"enabled": False, "volumePercent": 30}}
@@ -829,7 +878,7 @@ class TSMusicClient:
     async def get_bot_settings_checked(self) -> dict:
         """严格读取空闲设置，避免读取失败被静默降级为“功能已关闭”。"""
         await self._ensure_login()
-        resp = await self._http.get("/api/bot/settings")
+        resp = await self._request("GET", "/api/bot/settings")
         resp.raise_for_status()
         data = resp.json()
         if not isinstance(data, dict):
@@ -864,7 +913,7 @@ class TSMusicClient:
                 payload["voiceDucking"] = block
         if not payload:
             return await self.get_bot_settings()
-        data = self._json(await self._http.post("/api/bot/settings", json=payload))
+        data = self._json(await self._request("POST", "/api/bot/settings", json=payload))
         return {
             "idleTimeoutMinutes": data.get("idleTimeoutMinutes", 0),
             "autoPauseOnEmpty": bool(data.get("autoPauseOnEmpty", False)),
@@ -876,7 +925,7 @@ class TSMusicClient:
         await self._ensure_login()
         bid = self._bid(bot_id)
         try:
-            data = self._json(await self._http.get(f"/api/bot/{bid}/profile"))
+            data = self._json(await self._request("GET", f"/api/bot/{bid}/profile"))
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("TSMusicBot 读取 profile 失败: %s", exc)
             return {k: True for k in self._PROFILE_KEYS}
@@ -891,13 +940,13 @@ class TSMusicClient:
             for k in self._PROFILE_KEYS
             if isinstance(partial.get(k), bool)
         }
-        data = self._json(await self._http.put(f"/api/bot/{bid}/profile", json=payload))
+        data = self._json(await self._request("PUT", f"/api/bot/{bid}/profile", json=payload))
         return {k: bool(data.get(k, True)) for k in self._PROFILE_KEYS}
 
     async def get_bot_avatar(self, bot_id: str | None = None) -> httpx.Response:
         """获取 bot 固定头像（二进制）。返回原始 Response 供 router 透传字节与 Content-Type。"""
         await self._ensure_login()
-        return await self._http.get(f"/api/bot/{self._bid(bot_id)}/avatar")
+        return await self._request("GET", f"/api/bot/{self._bid(bot_id)}/avatar")
 
     async def set_bot_avatar(self, data_url: str, bot_id: str | None = None) -> dict:
         """上传/替换 bot 固定头像（data:image/(png|jpeg|webp);base64,...）。
@@ -906,7 +955,8 @@ class TSMusicClient:
         供 router 转成对应 HTTPException。
         """
         await self._ensure_login()
-        resp = await self._http.put(
+        resp = await self._request(
+            "PUT",
             f"/api/bot/{self._bid(bot_id)}/avatar", json={"dataUrl": data_url}
         )
         data = self._json(resp)
@@ -917,7 +967,7 @@ class TSMusicClient:
     async def delete_bot_avatar(self, bot_id: str | None = None) -> None:
         """移除 bot 固定头像。"""
         await self._ensure_login()
-        await self._http.delete(f"/api/bot/{self._bid(bot_id)}/avatar")
+        await self._request("DELETE", f"/api/bot/{self._bid(bot_id)}/avatar")
 
     # ───────────────────────── 平台账号登录 ─────────────────────────
 
@@ -925,9 +975,8 @@ class TSMusicClient:
         await self._ensure_login()
         try:
             params: dict[str, str] = {"platform": platform}
-            if bot_id:
-                params["botId"] = bot_id
-            resp = await self._http.get("/api/auth/status", params=params)
+            params["botId"] = self._bid(bot_id)
+            resp = await self._request("GET", "/api/auth/status", params=params)
             return resp.json()
         except (httpx.HTTPError, ValueError):
             return {"platform": platform, "loggedIn": False}
@@ -938,9 +987,8 @@ class TSMusicClient:
         await self._ensure_login()
         try:
             params: dict[str, str] = {"key": key, "platform": platform}
-            if bot_id:
-                params["botId"] = bot_id
-            resp = await self._http.get("/api/auth/qrcode/status", params=params)
+            params["botId"] = self._bid(bot_id)
+            resp = await self._request("GET", "/api/auth/qrcode/status", params=params)
             return resp.json()
         except (httpx.HTTPError, ValueError):
             return {"status": "waiting"}
@@ -948,26 +996,23 @@ class TSMusicClient:
     async def get_qrcode(self, platform: str, bot_id: str | None = None) -> dict:
         await self._ensure_login()
         payload: dict = {"platform": platform}
-        if bot_id:
-            payload["botId"] = bot_id
-        resp = await self._http.post("/api/auth/qrcode", json=payload)
+        payload["botId"] = self._bid(bot_id)
+        resp = await self._request("POST", "/api/auth/qrcode", json=payload)
         return self._json(resp)
 
     async def set_cookie(self, platform: str, cookie: str, bot_id: str | None = None) -> dict:
         await self._ensure_login()
         payload: dict = {"platform": platform, "cookie": cookie}
-        if bot_id:
-            payload["botId"] = bot_id
-        resp = await self._http.post("/api/auth/cookie", json=payload)
+        payload["botId"] = self._bid(bot_id)
+        resp = await self._request("POST", "/api/auth/cookie", json=payload)
         return self._json(resp)
 
     async def delete_cookie(self, platform: str, bot_id: str | None = None) -> dict:
         """退出某平台登录：清除该 bot 的平台 cookie。"""
         await self._ensure_login()
         params: dict[str, str] = {"platform": platform}
-        if bot_id:
-            params["botId"] = bot_id
-        resp = await self._http.delete("/api/auth/cookie", params=params)
+        params["botId"] = self._bid(bot_id)
+        resp = await self._request("DELETE", "/api/auth/cookie", params=params)
         return self._json(resp)
 
     # ───────────────────────── 音源开关 / Jellyfin ─────────────────────────
@@ -980,7 +1025,7 @@ class TSMusicClient:
         """
         await self._ensure_login()
         try:
-            resp = await self._http.get("/api/music/providers")
+            resp = await self._request("GET", "/api/music/providers")
             return self._json(resp)
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("获取音源开关失败: %s", exc)
@@ -990,18 +1035,16 @@ class TSMusicClient:
         """测试该 bot 的 Jellyfin 连接（空凭据字段回落该 bot 已存值）。"""
         await self._ensure_login()
         payload: dict = dict(form)
-        if bot_id:
-            payload["botId"] = bot_id
-        resp = await self._http.post("/api/auth/jellyfin/test", json=payload)
+        payload["botId"] = self._bid(bot_id)
+        resp = await self._request("POST", "/api/auth/jellyfin/test", json=payload)
         return self._json(resp)
 
     async def jellyfin_login(self, form: dict, bot_id: str | None = None) -> dict:
         """保存该 bot 的 Jellyfin 凭据并热重配 + 验证连接。"""
         await self._ensure_login()
         payload: dict = dict(form)
-        if bot_id:
-            payload["botId"] = bot_id
-        resp = await self._http.post("/api/auth/jellyfin/login", json=payload)
+        payload["botId"] = self._bid(bot_id)
+        resp = await self._request("POST", "/api/auth/jellyfin/login", json=payload)
         return self._json(resp)
 
     # ───────────────────────── 我的音乐 / 歌单 ─────────────────────────
@@ -1027,9 +1070,8 @@ class TSMusicClient:
             q: dict[str, str] = dict(params or {})
             if platform:
                 q["platform"] = platform
-            if bot_id:
-                q["botId"] = bot_id
-            resp = await self._http.get(path, params=q)
+            q["botId"] = self._bid(bot_id)
+            resp = await self._request("GET", path, params=q)
             if resp.status_code == 501:
                 return {"ok": False, "unsupported": True, "data": [], "error": "not supported"}
             if resp.status_code >= 400:
@@ -1085,21 +1127,25 @@ class TSMusicClient:
         sem = asyncio.Semaphore(4)  # 并发上限，避免打爆上游
 
         async def _one(song: dict) -> bool:
+            if not isinstance(song, dict):
+                return False
             sid = str(song.get("id") or "")
             if not sid:
                 return False
             payload: dict = {"query": f"id:{sid}"}
-            if platform:
-                payload["platform"] = platform
+            song_platform = self._norm_platform(song.get("platform") or platform)
+            if song_platform:
+                payload["platform"] = song_platform
             async with sem:
                 try:
                     # 直接判定上游状态码（self.add 不抛异常，无法靠 except 判定业务失败）
-                    resp = await self._http.post(
+                    resp = await self._request(
+                        "POST",
                         f"/api/player/{bid}/add", json=payload
                     )
-                    if resp.status_code >= 400:
+                    if resp.status_code >= 400 or self._json(resp).get("error"):
                         return False
-                    self._cache_meta(song, platform)
+                    self._cache_meta(song, song_platform)
                     return True
                 except (httpx.HTTPError, ValueError):
                     return False
@@ -1131,7 +1177,7 @@ class TSMusicClient:
     async def get_bot_config(self, bot_id: str) -> dict:
         """GET /api/bot/:id/config → bot 配置（编辑表单预填用；上游已排除 identity/apiKey）。"""
         await self._ensure_login()
-        resp = await self._http.get(f"/api/bot/{bot_id}/config")
+        resp = await self._request("GET", f"/api/bot/{bot_id}/config")
         return self._json(resp)
 
     async def get_bot_nickname(self, bot_id: str | None = None, *, refresh: bool = False) -> str | None:
@@ -1146,7 +1192,7 @@ class TSMusicClient:
             return cached
         await self._ensure_login()
         try:
-            resp = await self._http.get(f"/api/bot/{bid}/config")
+            resp = await self._request("GET", f"/api/bot/{bid}/config")
             if resp.status_code >= 400:
                 logger.warning("获取 bot 昵称失败: 上游 %s", resp.status_code)
                 return None
@@ -1166,7 +1212,7 @@ class TSMusicClient:
         """
         await self._ensure_login()
         try:
-            resp = await self._http.get(f"/api/bot/{self._bid(bot_id)}")
+            resp = await self._request("GET", f"/api/bot/{self._bid(bot_id)}")
             if resp.status_code >= 400:
                 logger.warning("获取 bot clid 失败: 上游 %s", resp.status_code)
                 return None
@@ -1193,7 +1239,8 @@ class TSMusicClient:
         """
         await self._ensure_login()
         try:
-            resp = await self._http.post(
+            resp = await self._request(
+                "POST",
                 f"/api/bot/{self._bid(bot_id)}/channel",
                 json={"cid": cid, "password": password},
             )
@@ -1215,7 +1262,8 @@ class TSMusicClient:
     ) -> dict:
         """Ask TSMusicBot to overlay a short effect fetched from a capability URL."""
         await self._ensure_login()
-        resp = await self._http.post(
+        resp = await self._request(
+            "POST",
             f"/api/player/{self._bid(bot_id)}/sound-effect",
             json={"url": url},
         )
@@ -1228,7 +1276,8 @@ class TSMusicClient:
         """获取指定 bot 的当前音质配置。"""
         await self._ensure_login()
         try:
-            resp = await self._http.get(
+            resp = await self._request(
+                "GET",
                 "/api/music/quality",
                 params={"botId": self._bid(bot_id)},
             )
@@ -1243,19 +1292,21 @@ class TSMusicClient:
         platform: str | None = None,
         bot_id: str | None = None,
     ) -> dict:
-        """设置指定 bot 的音质（platform 指定平台，未传则所有平台）。
+        """设置指定 bot 和平台的音质。
 
         Args:
             quality: 音质级别，如 standard/higher/exhigh/lossless/hires 等
-            platform: 平台标识（netease/qq/bilibili/kugou），None 表示全局设置
+            platform: 平台标识（netease/qq/bilibili/kugou/spotify/jellyfin），必填
             bot_id: bot 实例 ID
         """
         await self._ensure_login()
         try:
             # 各平台使用自己的原生音质值。保留旧版 UI 曾发送的通用别名，
             # 但转发给上游时必须归一化，否则 QQ 会静默回退 128k。
-            if platform not in _QUALITY_POLICY:
+            if not isinstance(platform, str) or platform not in _QUALITY_POLICY:
                 return {"error": "unsupported platform", "_status": 400}
+            if not isinstance(quality, str):
+                return {"error": "quality must be a string", "_status": 400}
             normalized = _QUALITY_ALIASES.get(platform, {}).get(quality, quality)
             if normalized not in _QUALITY_POLICY[platform]:
                 return {
@@ -1271,7 +1322,7 @@ class TSMusicClient:
                         "_status": 403,
                     }
             payload = {"quality": normalized, "botId": bid, "platform": platform}
-            resp = await self._http.post("/api/music/quality", json=payload)
+            resp = await self._request("POST", "/api/music/quality", json=payload)
             data = self._json(resp)
             if resp.status_code >= 400:
                 data["_status"] = resp.status_code
