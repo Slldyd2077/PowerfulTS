@@ -13,6 +13,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  native-ts6:
+    uses: ./.github/workflows/ts6-query.yml
+
   validate:
     runs-on: ubuntu-latest
     steps:
@@ -157,7 +160,7 @@ jobs:
 
   publish:
     if: github.ref_type == 'tag'
-    needs: [validate, images, platform-launchers]
+    needs: [validate, images, platform-launchers, native-ts6]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -181,7 +184,7 @@ jobs:
 
           解压后运行 start.cmd（Windows）或 sh start.sh（Linux/macOS）。首次生成 backend.env 后停止，填入连接配置，再次启动。data/ 与 backend.env 需保留和备份。
 
-          TS3 服务端和 TSMusicBot 需另行部署。网页语音等能力依赖 README 指定的 TSMusicBot 定制分支及固定兼容提交。请先核对 SHA256SUMS；默认只允许本机访问面板。
+          TS3 / TS6 服务端和 TSMusicBot 需另行部署。TS6 使用原生 SSH Query，需启用服务端 Query、配置 TCP 10022 及核验过的 known_hosts；机器人使用 UDP 语音端口，通常为 9987。网页语音等能力依赖 README 指定的 TSMusicBot 定制分支及固定兼容提交。请先核对 SHA256SUMS；默认只允许本机访问面板。
           NOTES
           printf '\n[详细安装与升级](https://github.com/%s/blob/%s/docs/release-guide.md)\n' "$RELEASE_REPO" "$RELEASE_TAG" >> /tmp/release-notes.md
           if gh release view "$RELEASE_TAG" --repo "$RELEASE_REPO" > /dev/null 2>&1; then

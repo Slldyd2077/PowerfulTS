@@ -8,7 +8,7 @@ POWERFULTS_VERSION=$(cat .release-version)
 created_config=false
 if [ ! -f backend.env ]; then
   (umask 077; cp backend.env.example backend.env)
-  echo "Created backend.env. Set TS3 / TSMusicBot connection settings, then restart."
+  echo "Created backend.env. Set TS3 / TS6 and TSMusicBot connection settings, then restart."
   created_config=true
 fi
 mkdir -p data
