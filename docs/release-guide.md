@@ -64,4 +64,4 @@ POWERFULTS_PORT=8080
 
 所有版本文件同步为同一版本后，推送 `vX.Y.Z` tag。`.github/workflows/release.yml` 验证版本、测试、严格构建 amd64 / arm64 镜像，解压安装包启动验证后再上传 ZIP、tar.gz 与 `SHA256SUMS`。workflow_dispatch 只产 CI artifacts，tag 才发布 GitHub Release。版本号不一致、镜像构建或安装烟测失败时应修复后再发布。
 
-本地打包：`python scripts/build_release.py --tag v0.13.0 --output .release` 产源码备用包；预构建包额外指定 `--images images.tar --arch amd64` 或 `arm64`，其中 images.tar 必须来自同时包含 `powerfults-backend:0.13.0` 与 `powerfults-frontend:0.13.0` 的 docker save。打包采用白名单，不包含工作区数据库、真实环境变量、venv 或缓存。
+本地打包：`python scripts/build_release.py --tag v0.13.1 --output .release` 产源码备用包；预构建包额外指定 `--images images.tar --arch amd64` 或 `arm64`，其中 images.tar 必须来自同时包含 `powerfults-backend:0.13.1` 与 `powerfults-frontend:0.13.1` 的 docker save。打包采用白名单，不包含工作区数据库、真实环境变量、venv 或缓存。

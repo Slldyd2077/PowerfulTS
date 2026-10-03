@@ -61,6 +61,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: docker-source
+          include-hidden-files: true
           path: |
             .release/*.zip
             .release/*.tar.gz
@@ -135,6 +136,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: docker-${{ matrix.arch }}
+          include-hidden-files: true
           path: |
             .release/*.zip
             .release/*.tar.gz
