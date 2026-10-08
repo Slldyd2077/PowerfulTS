@@ -20,6 +20,12 @@
 
 ---
 
+## 🎬 宣传视频
+
+[▶ 在 Bilibili 观看 PowerfulTS 项目宣传视频](https://www.bilibili.com/video/BV1f3He6EEZS/)
+
+---
+
 ## 📖 简介
 
 **PowerfulTS** 是一个面向 TeamSpeak（TS3 / TS6）服务器的 Web 管理面板，采用**前后端分离**架构。
