@@ -22,7 +22,9 @@
 
 ## 🎬 宣传视频
 
-[▶ 在 Bilibili 观看 PowerfulTS 项目宣传视频](https://www.bilibili.com/video/BV1f3He6EEZS/)
+https://github.com/user-attachments/assets/3761cb43-a68d-4768-b6d0-dd5860de7902
+
+[▶ 在 Bilibili 观看高清版宣传视频与部署教程](https://www.bilibili.com/video/BV1f3He6EEZS/)
 
 ---
 
