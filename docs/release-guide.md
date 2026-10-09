@@ -21,7 +21,15 @@
 PowerfulTS 的安装包不捆绑 TS3 / TS6 服务端或 TSMusicBot。需预先部署：
 
 - TS3 / TS6：开启 ServerQuery，配置读取频道 / 客户端、验证码私聊以及所需频道写操作权限。TS3 raw TCP 通常 10011，TS6 SSH 通常 10022，TS6 官方配置默认关闭 SSH Query，需要 `TSSERVER_QUERY_SSH_ENABLED=true`。限制 Query 端口访问范围；SSH 模式需核验可信主机公钥。完整步骤见 [TS6 指南](ts6-server.md)。
-- TSMusicBot：[专用 fork v1.12.2](https://github.com/Slldyd2077/teamspeak-music-bot/tree/2c1fc74fce812caaaa79b5e8566a7dd617c1e9ad)。核对提交 `2c1fc74fce812caaaa79b5e8566a7dd617c1e9ad`，使用该源码构建，不依赖分支名称永远不变。
+- TSMusicBot：[专用 fork（同步上游 v1.15.2）](https://github.com/Slldyd2077/teamspeak-music-bot/tree/453d2d124b9995034fe9cd46ebf2cad597382d42)。核对提交 `453d2d124b9995034fe9cd46ebf2cad597382d42`，使用该源码构建，不依赖分支名称永远不变。
+
+该固定提交已于 2026-10-09 合并原版主干 `28c128d`（更新日志 v1.15.2），保留
+PowerfulTS 的 per-bot 音源及平台账号隔离、网页双向语音、语音闪避与入场音效接口。
+分支名中的 `v1.12` 是历史名称。引擎 README 中的部署示例也指向定制分支。
+
+Issue #15 的昵称长度校验和 identity 连接前持久化已包含在该引擎提交中，无需再应用
+旧版补丁。PowerfulTS 注册及通话入口校验昵称需为 3–30 个字符；已有不合规昵称需
+调整账号及对应 bot 配置。[问题原因及旧版补丁](../deploy/tsmusicbot/README.md)。
 
 2026-10-03 对照的 [原版上游](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot/tree/87fca6d8b7b770e1e01f8891059c99d53705cc08) 已有 v1.14.0 更新记录，但其音乐 API 使用全局 provider。PowerfulTS 使用 fork 的 per-bot 音源、多实例、网页通话中继与语音闪避，不能直接替换为原版镜像。fork 的 `/api/health` 版本字段尚为 1.12.1，包版本为 1.12.2，因此应核对源码提交和接口，而非只看健康端点的版本字符串。
 

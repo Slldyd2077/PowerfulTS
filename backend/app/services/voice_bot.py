@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Account, BotOwnership, Session, VoiceBot
 from .tsmusic_client import TSMusicClient
+from .ts_nickname import ts_nickname_error
 from .voice_exclusivity import (
     VoiceExclusivityError,
     kick_real_ts_client_for_account,
@@ -92,6 +93,9 @@ class VoiceBotManager:
 
     async def acquire(self, db: AsyncSession, account: Account) -> dict:
         """拿到（必要时创建并连接）该账号的通话 bot，返回 {botId, nickname}。"""
+        nickname_error = ts_nickname_error(account.ts_nickname)
+        if nickname_error:
+            raise VoiceBotError(f"{nickname_error}，请调整账号昵称后再加入通话")
         tsmusic = self._tsmusic_provider()
         async with self._lock_for(account.id):
             self._cancel_release(account.id)
@@ -353,7 +357,10 @@ class VoiceBotManager:
         self, db: AsyncSession, tsmusic: TSMusicClient, account: Account
     ) -> str:
         recorded = await self.current_bot_id(db, account.id)
-        upstream_ids = {b.get("id") for b in await tsmusic.list_bots()}
+        try:
+            upstream_ids = {b.get("id") for b in await tsmusic.list_bots_checked()}
+        except Exception as exc:
+            raise VoiceBotError("无法读取通话机器人列表，请稍后重试") from exc
         if recorded and recorded in upstream_ids:
             return recorded
 
@@ -388,20 +395,22 @@ class VoiceBotManager:
         return bot_id
 
     async def _ensure_connected(self, tsmusic: TSMusicClient, bot_id: str) -> None:
-        if await self._is_connected(tsmusic, bot_id):
-            return
         try:
-            await tsmusic.start_bot(bot_id)
+            # 包含状态查询和上游 /start 的耗时，避免先等 15 秒再额外轮询 25 秒。
+            async with asyncio.timeout(CONNECT_TIMEOUT_SECONDS):
+                if await self._is_connected(tsmusic, bot_id):
+                    return
+                started = await tsmusic.start_bot(bot_id)
+                if started.get("error"):
+                    raise VoiceBotError("通话机器人未能连接 TS 服务器")
+                while True:
+                    await asyncio.sleep(_CONNECT_POLL_SECONDS)
+                    if await self._is_connected(tsmusic, bot_id):
+                        return
+        except TimeoutError as exc:
+            raise VoiceBotError("通话机器人连接 TS 超时，请稍后重试") from exc
         except Exception as exc:
             raise VoiceBotError("通话机器人未能连接 TS 服务器") from exc
-
-        waited = 0.0
-        while waited < CONNECT_TIMEOUT_SECONDS:
-            await asyncio.sleep(_CONNECT_POLL_SECONDS)
-            waited += _CONNECT_POLL_SECONDS
-            if await self._is_connected(tsmusic, bot_id):
-                return
-        raise VoiceBotError("通话机器人连接 TS 超时，请稍后重试")
 
     @staticmethod
     async def _is_connected(tsmusic: TSMusicClient, bot_id: str) -> bool:

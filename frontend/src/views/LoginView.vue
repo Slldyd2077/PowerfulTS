@@ -14,6 +14,7 @@ import {
 import { getIntroTracks, introStreamUrl, type IntroTrack } from '@/api/introMusic'
 import { ElMessage } from 'element-plus'
 import { View } from '@element-plus/icons-vue'
+import { tsNicknameError } from '@/services/ts-nickname'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -102,10 +103,11 @@ const passwordTooShort = computed(
     registerForm.value.password.length < MIN_PASSWORD_LENGTH,
 )
 const hasInvitation = computed(() => Boolean(inviteToken.value))
+const nicknameError = computed(() => tsNicknameError(registerForm.value.tsNickname))
 const qqIsValid = computed(() => /^[1-9]\d{4,15}$/.test(registerForm.value.qqNumber.trim()))
 const canRegister = computed(() => {
   const baseValid = Boolean(
-    registerForm.value.tsNickname.trim() &&
+    !nicknameError.value &&
       registerForm.value.password.length >= MIN_PASSWORD_LENGTH &&
       registerForm.value.password === registerForm.value.confirmPassword,
   )
@@ -515,21 +517,22 @@ async function handleLogin() {
 
 /** 发送验证码 */
 async function handleSendCode() {
-  if (!registerForm.value.tsNickname.trim()) {
-    ElMessage.warning('请先填写 TS 昵称')
+  if (nicknameError.value) {
+    ElMessage.warning(nicknameError.value)
     return
   }
 
   try {
-    const bind = await checkBinding(registerForm.value.tsNickname)
+    const tsNickname = registerForm.value.tsNickname.trim()
+    const bind = await checkBinding(tsNickname)
     if (bind.bound) {
       ElMessage.info('该昵称已注册，请直接登录')
       mode.value = 'login'
-      loginForm.value.tsNickname = registerForm.value.tsNickname
+      loginForm.value.tsNickname = tsNickname
       return
     }
 
-    const codeRes = await sendCode(registerForm.value.tsNickname)
+    const codeRes = await sendCode(tsNickname)
     if (codeRes.success) {
       ElMessage.success('验证码已通过 TS 私聊发送')
     } else {
@@ -550,6 +553,10 @@ async function handleSendCode() {
 
 /** 注册 */
 async function handleRegister() {
+  if (nicknameError.value) {
+    ElMessage.warning(nicknameError.value)
+    return
+  }
   if (registerForm.value.password.length < MIN_PASSWORD_LENGTH) {
     ElMessage.warning('密码至少需要 8 位')
     return
@@ -766,6 +773,12 @@ async function handleRegister() {
               <div class="field-group field-1">
                 <label class="field-label">TS 昵称</label>
                 <el-input v-model="registerForm.tsNickname" placeholder="TS 服务器中的昵称" size="large" />
+                <p
+                  class="field-hint"
+                  :class="{ 'field-hint--error': registerForm.tsNickname.length > 0 && nicknameError }"
+                >
+                  {{ registerForm.tsNickname.length > 0 && nicknameError ? nicknameError : '3–30 个字符，中文也按字符计数' }}
+                </p>
               </div>
               <div class="field-group field-3">
                 <label class="field-label">密码</label>
@@ -823,7 +836,7 @@ async function handleRegister() {
                   <el-input v-model="registerForm.code" placeholder="6 位验证码" size="large" maxlength="6" />
                   <button
                     class="code-btn"
-                    :disabled="codeCountdown > 0 || !registerForm.tsNickname.trim()"
+                    :disabled="codeCountdown > 0 || Boolean(nicknameError)"
                     @click="handleSendCode"
                   >
                     {{ codeCountdown > 0 ? `${codeCountdown}s` : '获取验证码' }}

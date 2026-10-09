@@ -1,5 +1,5 @@
 import axios from 'axios'
-import apiClient from './client'
+import apiClient from './client.js'
 
 export interface VoiceDownlinkSession {
   ok: boolean
@@ -21,6 +21,9 @@ function describeFailure(error: unknown, fallback: string): string {
   }
   if (status === 401) return '登录态已失效，请重新登录'
   if (detail) return detail
+  if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+    return '通话请求超时，请稍后重试；机器人可能仍在连接 TS 服务器'
+  }
   if (!error.response) return '连不上 PowerfulTS 后端，请确认后端已启动'
   return `${fallback}（HTTP ${status}）`
 }
@@ -35,7 +38,8 @@ export interface VoiceSession {
 /** 开通本账号的通话身份（按需建号 + 进服务器），已在线时是幂等的。 */
 export async function openVoiceSession(): Promise<VoiceSession> {
   try {
-    const { data } = await apiClient.post('/music/voice/session')
+    // 后端总连接时限为 25 秒，另留快照刷新和建号请求的余量。
+    const { data } = await apiClient.post('/music/voice/session', undefined, { timeout: 40_000 })
     return data
   } catch (error) {
     throw new Error(describeFailure(error, '无法加入通话'))

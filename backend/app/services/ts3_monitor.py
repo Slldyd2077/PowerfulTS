@@ -19,10 +19,15 @@ import asyncio
 import logging
 import threading
 import time
+from concurrent.futures import Future
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from ..core.config import Settings
 from .ts3_query import TS3QueryClient, TS3QueryError
+
+if TYPE_CHECKING:
+    from .monitor_users import MonitorUserStore
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +149,7 @@ def _build_channel_tree(raw_channels: list[dict]) -> list[dict]:
 class TS3Monitor:
     """TeamSpeak ServerQuery 监控器（单例，由 app.state 持有）。"""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, user_store: MonitorUserStore | None = None) -> None:
         self.settings = settings
         self.host = settings.ts3_host
         self.port = settings.ts3_query_port
@@ -158,8 +163,12 @@ class TS3Monitor:
         self.channel_tree: list[dict] = []
         # cid -> 是否设了频道密码（网页通话切频道时决定要不要弹密码框）
         self.channel_password: dict[int, bool] = {}
-        # 累计 unique_identifier（本次运行；跨重启持久化留待后续）
+        # Startup restores this cache from durable identity history, including offline users.
         self._total_users: set[str] = set()
+        self._user_store = user_store
+        self._pending_user_ids: set[str] = set()
+        self._user_save_future: Future[None] | None = None
+        self._flushing_users = False
         self.start_time = datetime.now()
         self.running = False
         self._stop_event = threading.Event()
@@ -192,6 +201,63 @@ class TS3Monitor:
     def set_notifier(self, notifier) -> None:
         """注入上线提醒编排器（OnlineNotifier）。"""
         self._notifier = notifier
+
+    async def restore_cumulative_users(self) -> None:
+        """Load durable history before starting the polling thread."""
+        if self._user_store is None:
+            return
+        user_ids = await self._user_store.load()
+        with self._lock:
+            self._total_users.update(user_ids)
+
+    def _schedule_cumulative_save(self) -> None:
+        """Write outside the polling lock; retain failed batches for the next poll."""
+        if self._user_store is None or self._loop is None or self._loop.is_closed():
+            return
+        with self._lock:
+            if self._flushing_users or self._user_save_future is not None or not self._pending_user_ids:
+                return
+            batch = frozenset(self._pending_user_ids)
+            future = asyncio.run_coroutine_threadsafe(self._user_store.save(batch), self._loop)
+            self._user_save_future = future
+        # Register outside the lock: a completed future runs its callback immediately.
+        future.add_done_callback(lambda completed: self._complete_cumulative_save(completed, batch))
+
+    def _complete_cumulative_save(self, future: Future[None], batch: frozenset[str]) -> None:
+        try:
+            future.result()
+        except Exception:
+            logger.warning("累计用户保存失败，保留待保存记录并在下一轮重试", exc_info=True)
+        else:
+            with self._lock:
+                self._pending_user_ids.difference_update(batch)
+        finally:
+            with self._lock:
+                if self._user_save_future is future:
+                    self._user_save_future = None
+
+    async def flush_cumulative_users(self) -> None:
+        """Drain in-flight and pending writes after the polling thread stops."""
+        if self._user_store is None:
+            return
+        with self._lock:
+            self._flushing_users = True
+            future = self._user_save_future
+        try:
+            if future is not None:
+                # The callback logs failures; pending identities are retried below.
+                await asyncio.gather(asyncio.wrap_future(future), return_exceptions=True)
+            while True:
+                with self._lock:
+                    batch = frozenset(self._pending_user_ids)
+                if not batch:
+                    return
+                await self._user_store.save(batch)
+                with self._lock:
+                    self._pending_user_ids.difference_update(batch)
+        finally:
+            with self._lock:
+                self._flushing_users = False
 
     def set_voice_exclusivity(self, coordinator) -> None:
         """Inject the web-vs-real voice presence coordinator."""
@@ -323,7 +389,10 @@ class TS3Monitor:
                         "first_seen": now,
                         "last_seen": now,
                     }
-                    self._total_users.add(uid)
+                    if uid not in self._total_users:
+                        self._total_users.add(uid)
+                        if self._user_store is not None:
+                            self._pending_user_ids.add(uid)
                     new_online.append((u["identity"], uid, u["identity"] != u["nickname"]))
                 else:
                     entry.update(
@@ -337,6 +406,7 @@ class TS3Monitor:
                 if uid not in seen_uids and now - self.client_data[uid]["last_seen"] > ONLINE_WINDOW:
                     went_offline.append(self.client_data[uid]["identity"])
                     del self.client_data[uid]
+        self._schedule_cumulative_save()
         return new_online, went_offline, became_visible
 
     def _poll_once(self) -> None:
@@ -517,9 +587,10 @@ class TS3Monitor:
                     "channel": channel_name,
                 })
                 games[display_game] = games.get(display_game, 0) + 1
+            total_users = len(self._total_users)
         return {
             "running_time": int((datetime.now() - self.start_time).total_seconds()),
-            "total_users": len(self._total_users),
+            "total_users": total_users,
             "online_users": len(online_list),
             "gaming_users": len(online_list),
             "games": games,

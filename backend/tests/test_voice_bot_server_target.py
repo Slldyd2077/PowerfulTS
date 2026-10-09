@@ -12,7 +12,7 @@ from app.services.voice_bot import VoiceBotError, VoiceBotManager, _resolve_serv
 def test_voice_bot_inherits_server_password_without_exposing_it(password, caplog):
     async def scenario():
         tsmusic = SimpleNamespace(
-            list_bots=AsyncMock(return_value=[]),
+            list_bots_checked=AsyncMock(return_value=[]),
             get_bot_config=AsyncMock(return_value={
                 "serverAddress": "ts6.test.invalid",
                 "serverPort": 9999,

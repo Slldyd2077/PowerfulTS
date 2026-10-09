@@ -38,6 +38,7 @@ from .services.voice_exclusivity import VoiceExclusivityCoordinator
 from .services.online_notifier import OnlineNotifier
 from .services.tsmusic_client import TSMusicClient
 from .services.ts3_monitor import TS3Monitor
+from .services.monitor_users import MonitorUserStore
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -135,7 +136,8 @@ async def lifespan(app: FastAPI):
     app.state.online_notifier = OnlineNotifier(app.state.napcat, AsyncSessionLocal, settings)
     # 原生 TS3 监控 (后台线程 ServerQuery 轮询; 未配置则优雅降级)
     # 注入主 event loop + notifier，使监控线程能把上线事件投递回 async 主循环
-    app.state.ts3_monitor = TS3Monitor(settings)
+    app.state.ts3_monitor = TS3Monitor(settings, user_store=MonitorUserStore(AsyncSessionLocal))
+    await app.state.ts3_monitor.restore_cumulative_users()
     app.state.ts3_monitor.set_loop(asyncio.get_running_loop())
     app.state.ts3_monitor.set_notifier(app.state.online_notifier)
     # Steam 集成（OpenID 绑定 + 游戏查询；未配置 API Key 则功能降级）
@@ -215,6 +217,10 @@ async def lifespan(app: FastAPI):
         watch_cleanup_task.cancel()
         await asyncio.gather(watch_cleanup_task, return_exceptions=True)
         app.state.ts3_monitor.stop()
+        try:
+            await app.state.ts3_monitor.flush_cumulative_users()
+        except Exception:
+            logger.warning("关闭时累计用户记录保存失败", exc_info=True)
         await app.state.bot_idle_manager.stop()
         entry_sound_tasks = tuple(app.state.entry_sound_tasks)
         for task in entry_sound_tasks:

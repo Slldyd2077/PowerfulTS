@@ -787,9 +787,12 @@ class TSMusicClient:
         data = resp.json()
         if not isinstance(data, dict):
             raise ValueError("TSMusicBot bot list response is not an object")
-        raw = data.get("bots", data.get("data", {}).get("bots", []))
+        nested = data.get("data")
+        raw = data.get("bots", nested.get("bots") if isinstance(nested, dict) else None)
         if not isinstance(raw, list):
             raise ValueError("TSMusicBot bot list response has no bots array")
+        if any(not isinstance(bot, dict) or not bot.get("id") for bot in raw):
+            raise ValueError("TSMusicBot bot list response contains an invalid bot")
         return [self._map_bot(b) for b in raw if isinstance(b, dict)]
 
     async def create_bot(self, payload: dict) -> dict:
@@ -809,7 +812,9 @@ class TSMusicClient:
     async def start_bot(self, bot_id: str) -> dict:
         """POST /api/bot/:id/start → 连接 TS（首次生成并持久化 identity）。"""
         await self._ensure_login()
-        resp = await self._request("POST", f"/api/bot/{bot_id}/start")
+        # 引擎的握手时限是 15 秒，HTTP 时限需留出返回失败响应的余量。
+        resp = await self._request("POST", f"/api/bot/{bot_id}/start", timeout=20.0)
+        resp.raise_for_status()
         result = self._json(resp)
         if not result.get("error"):
             self.mark_player_disconnected(bot_id)
