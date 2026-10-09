@@ -1,0 +1,52 @@
+diff --git a/src/ts-protocol/client-nickname.test.ts b/src/ts-protocol/client-nickname.test.ts
+new file mode 100644
+index 0000000..648ea7a
+--- /dev/null
++++ b/src/ts-protocol/client-nickname.test.ts
+@@ -0,0 +1,29 @@
++import { describe, expect, it, vi } from "vitest";
++import pino from "pino";
++import { TS3Client } from "./client.js";
++
++// A valid name reaches discovery, but these tests never open network sockets.
++vi.mock("./protocol-detect.js", () => ({
++  detectServerProtocol: vi.fn(async () => { throw new Error("discovery reached"); }),
++}));
++
++describe("TS3Client nickname length", () => {
++  it.each(["1", "雪凌", "a".repeat(31), "中".repeat(31), "😀😀", "   "])(
++    "rejects invalid nickname %s before discovery or UDP connection", async (nickname) => {
++      const client = new TS3Client(
++        { host: "invalid.test", port: 9987, queryPort: 10011, nickname },
++        pino({ level: "silent" }),
++      );
++      await expect(client.connect()).rejects.toThrow("nickname must contain 3–30 characters");
++    },
++  );
++  it.each(["abc", "a".repeat(30), "中文名", "中".repeat(30), "😀😀😀", "😀".repeat(30)])(
++    "accepts boundary nickname %s measured in Unicode characters", async (nickname) => {
++      const client = new TS3Client(
++        { host: "invalid.test", port: 9987, queryPort: 10011, nickname },
++        pino({ level: "silent" }),
++      );
++      await expect(client.connect()).rejects.toThrow("discovery reached");
++    },
++  );
++});
+diff --git a/src/ts-protocol/client.ts b/src/ts-protocol/client.ts
+index 14671c9..99f004a 100644
+--- a/src/ts-protocol/client.ts
++++ b/src/ts-protocol/client.ts
+@@ -150,6 +150,12 @@ export class TS3Client extends EventEmitter {
+   }
+ 
+   async connect(): Promise<void> {
++    // Reject invalid login names before discovery/UDP: TS requires 3–30
++    // Unicode characters for non-SDK clients, not UTF-8 bytes or UTF-16 units.
++    const nicknameLength = Array.from(this.options.nickname).length;
++    if (!this.options.nickname.trim() || nicknameLength < 3 || nicknameLength > 30) {
++      throw new Error("TeamSpeak nickname must contain 3–30 characters");
++    }
+     this.voiceEndpointResolver.reset();
+     this.clearVisibleClientUids();
+     // Clean up any existing connection before creating a new one

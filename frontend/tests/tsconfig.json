@@ -13,6 +13,8 @@
     "noEmit": false
   },
   "include": [
+    "./ts-nickname.test.ts",
+    "./voice-api.test.ts",
     "../src/services/microphone-uplink.ts",
     "../src/services/voice-downlink-policy.ts",
     "../src/services/watch-playback.ts",

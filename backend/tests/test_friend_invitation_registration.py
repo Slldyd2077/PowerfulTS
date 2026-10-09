@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
+import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -20,6 +21,46 @@ from app.routers import auth, friends
 
 
 TEST_INVITER_SESSION = "inviter-session"
+
+
+@pytest.mark.parametrize("nickname", ["1", "雪凌", "a" * 31, "中" * 31, "😀😀"])
+def test_invitation_rejects_invalid_nickname_without_consuming_link(nickname):
+    async def scenario():
+        app, engine, session_factory, _inviter_id, database_dir = await _new_app()
+        try:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                issued = await client.post("/api/friends/invitations", headers={"X-Session-Token": TEST_INVITER_SESSION})
+                payload = {"password": "test-password", "invite_token": issued.json()["token"], "qq_number": "12345"}
+                rejected = await client.post("/api/auth/register", json={**payload, "ts_nickname": nickname})
+                async with session_factory() as db:
+                    invitation = await db.scalar(select(FriendInvitation))
+                    assert invitation.used_at is None
+                    assert await db.scalar(select(Account).where(Account.ts_nickname == nickname)) is None
+                accepted = await client.post("/api/auth/register", json={**payload, "ts_nickname": "ValidInvitee"})
+                assert accepted.json()["success"] is True
+                assert rejected.json() == {"success": False, "error": "TS 昵称需为 3–30 个字符"}
+        finally:
+            await _dispose_test_engine(engine, database_dir)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("nickname", ["abc", "a" * 30, "中文名", "中" * 30, "😀😀😀", "😀" * 30])
+def test_invitation_accepts_nickname_boundaries_in_characters(nickname):
+    async def scenario():
+        app, engine, _session_factory, _inviter_id, database_dir = await _new_app()
+        try:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                issued = await client.post("/api/friends/invitations", headers={"X-Session-Token": TEST_INVITER_SESSION})
+                registered = await client.post("/api/auth/register", json={
+                    "ts_nickname": nickname, "password": "test-password",
+                    "invite_token": issued.json()["token"], "qq_number": "12345",
+                })
+                assert registered.json()["success"] is True
+        finally:
+            await _dispose_test_engine(engine, database_dir)
+
+    asyncio.run(scenario())
 
 
 class _AllowAllLimiter:

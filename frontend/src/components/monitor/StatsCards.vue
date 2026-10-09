@@ -123,7 +123,7 @@ function formatTime(seconds: number): string {
       <div class="stat-value mono"><CountUp :value="total" /></div>
       <div class="stat-rule"></div>
       <div class="stat-foot">
-        <span class="foot-cadence mono">注册总数</span>
+        <span class="foot-cadence mono">历史身份去重</span>
       </div>
     </div>
 

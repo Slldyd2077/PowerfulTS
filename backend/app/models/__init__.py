@@ -16,7 +16,7 @@ from .app_setting import AppSetting
 from .bot_player_state import BotPlayerState
 from .community import ChannelRental, Friend, FriendRequest, PendingNotification
 from .entry_sound import EntrySound
-from .stats import VisitStat
+from .stats import MonitorUser, VisitStat
 from .ts_playlist import TsPlaylist, TsPlaylistSong
 
 __all__ = [
@@ -37,6 +37,7 @@ __all__ = [
     "PendingNotification",
     "EntrySound",
     "VisitStat",
+    "MonitorUser",
     "TsPlaylist",
     "TsPlaylistSong",
 ]

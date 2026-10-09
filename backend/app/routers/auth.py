@@ -20,6 +20,7 @@ from ..core.database import get_db
 from ..services import ts3_auth
 from ..services.auth_service import AuthService, GUEST_SESSION_TTL
 from ..services.invitation_service import InvitationService
+from ..services.ts_nickname import ts_nickname_error
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -69,6 +70,9 @@ def _monitor(request: Request):
 @router.post("/send_code")
 async def send_code(body: NicknameRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """向在线 TS 客户端私聊下发验证码（含 60s 节流）。"""
+    nickname_error = ts_nickname_error(body.ts_nickname)
+    if nickname_error:
+        return {"success": False, "error": nickname_error}
     monitor = _monitor(request)
     if not ts3_auth.is_online(monitor, body.ts_nickname):
         return {"success": False, "error": "该昵称当前不在线，请先用此昵称登录 TS 服务器"}
@@ -101,10 +105,12 @@ async def verify_code(body: VerifyCodeRequest, db: AsyncSession = Depends(get_db
 async def register(body: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """注册：验证码校验 + uid 一致性校验 + 建账号。"""
     invite_token = body.invite_token.strip() if body.invite_token is not None else None
+    nickname = body.ts_nickname.strip() if invite_token else body.ts_nickname
+    nickname_error = ts_nickname_error(nickname)
+    if nickname_error:
+        return {"success": False, "error": nickname_error}
     if invite_token:
-        ts_nickname = body.ts_nickname.strip()
-        if not ts_nickname:
-            return {"success": False, "error": "TS 昵称不能为空"}
+        ts_nickname = nickname
         qq_number = body.qq_number.strip() if body.qq_number is not None else None
         if not qq_number:
             return {"success": False, "error": "邀请注册必须填写 QQ 号"}

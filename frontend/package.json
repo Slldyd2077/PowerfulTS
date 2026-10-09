@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "node scripts/package-watch-extension.mjs && vite",
-    "test:unit": "tsc -p tests/tsconfig.json && node --experimental-test-coverage --test dist/.voice-tests/tests/microphone-uplink.test.js dist/.voice-tests/tests/login-mobile-layout.test.js dist/.voice-tests/tests/voice-downlink-policy.test.js dist/.voice-tests/tests/polling-scheduler.test.js dist/.voice-tests/tests/theme-palette.test.js dist/.voice-tests/tests/watch-playback.test.js tests/watch-extension.test.mjs",
+    "test:unit": "tsc -p tests/tsconfig.json && node --experimental-test-coverage --test dist/.voice-tests/tests/ts-nickname.test.js dist/.voice-tests/tests/voice-api.test.js dist/.voice-tests/tests/microphone-uplink.test.js dist/.voice-tests/tests/login-mobile-layout.test.js dist/.voice-tests/tests/voice-downlink-policy.test.js dist/.voice-tests/tests/polling-scheduler.test.js dist/.voice-tests/tests/theme-palette.test.js dist/.voice-tests/tests/watch-playback.test.js tests/watch-extension.test.mjs",
     "build": "node scripts/package-watch-extension.mjs && vue-tsc -b && vite build",
     "preview": "vite preview"
   },

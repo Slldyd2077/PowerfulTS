@@ -1,4 +1,4 @@
-"""访问统计 — 面板自身访问计数。"""
+"""面板访问计数与 TeamSpeak 历史身份统计。"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -18,3 +18,12 @@ class VisitStat(Base):
     ip: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     visit_count: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     last_seen: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class MonitorUser(Base):
+    """Durable TS identities observed by this deployment's monitor."""
+
+    __tablename__ = "monitor_users"
+
+    unique_identifier: Mapped[str] = mapped_column(String(128), primary_key=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

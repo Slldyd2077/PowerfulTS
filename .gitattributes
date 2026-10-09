@@ -1,0 +1,2 @@
+# Patch context contains significant blank-line spaces; preserve the payload.
+deploy/tsmusicbot/*.patch -text -whitespace

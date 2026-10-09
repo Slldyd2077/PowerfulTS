@@ -1,0 +1,168 @@
+diff --git a/src/bot/manager-identity.test.ts b/src/bot/manager-identity.test.ts
+new file mode 100644
+index 0000000..a2fbdc9
+--- /dev/null
++++ b/src/bot/manager-identity.test.ts
+@@ -0,0 +1,106 @@
++import { EventEmitter } from "node:events";
++import { describe, expect, it, vi, beforeEach } from "vitest";
++import { generateIdentity, identityFromString } from "@honeybbq/teamspeak-client";
++import type { BotDatabase, BotInstance as SavedBot } from "../data/database.js";
++import type { ProviderFactory } from "./provider-factory.js";
++import type { CookieStore } from "../music/auth.js";
++import type { AvatarStore } from "../data/avatars.js";
++import type { PermissionStore } from "../data/permissions.js";
++import type { Logger } from "../logger.js";
++import { getDefaultConfig } from "../data/config.js";
++
++const probe = vi.hoisted(() => ({ connect: vi.fn(), disconnect: vi.fn() }));
++vi.mock("./instance.js", () => ({
++  BotInstance: class extends EventEmitter {
++    id: string;
++    name: string;
++    identity: string;
++    constructor(options: { id: string; name: string; tsOptions: { identity?: string } }) {
++      super();
++      this.id = options.id;
++      this.name = options.name;
++      this.identity = options.tsOptions.identity || generateIdentity(8).toString();
++    }
++    getIdentityExport() { return this.identity; }
++    connect() { return probe.connect(this); }
++    disconnect() { probe.disconnect(); }
++  },
++}));
++import { BotManager } from "./manager.js";
++
++function fixture(initial?: SavedBot) {
++  const rows = new Map<string, SavedBot>(initial ? [[initial.id, initial]] : []);
++  const database = {
++    getBotInstances: () => [...rows.values()],
++    saveBotInstance: (saved: SavedBot) => rows.set(saved.id, { ...saved }),
++    getMusicQuality: () => ({}),
++  } as unknown as BotDatabase;
++  const provider = () => ({ platform: "test", setPersist() {} });
++  const factory = {
++    createNetease: provider, createQQ: provider, createBiliBili: provider,
++    createKugou: provider, createJellyfin: provider,
++    localProvider: provider(), youtubeProvider: provider(), spotifyProvider: provider(),
++  } as unknown as ProviderFactory;
++  const logger = { info() {}, warn() {}, error() {} } as unknown as Logger;
++  const manager = new BotManager(
++    factory, { load: () => "" } as unknown as CookieStore, database,
++    getDefaultConfig(), logger, {} as AvatarStore, {} as PermissionStore, "unused.json",
++  );
++  return { manager, rows };
++}
++
++const params = { name: "voice", nickname: "voice", serverAddress: "ts.test", serverPort: 9987 };
++const legacy: SavedBot = {
++  ...params, id: "legacy", defaultChannel: "", channelId: "", channelPassword: "",
++  serverPassword: "", serverProtocol: "", ts6ApiKey: "", autoStart: false,
++};
++
++beforeEach(() => { probe.connect.mockReset(); probe.disconnect.mockReset(); });
++
++describe("voice identity persistence", () => {
++  it("stores a new identity before any connection attempt", async () => {
++    const { manager, rows } = fixture();
++    const bot = await manager.createBot(params);
++    expect(rows.get(bot.id)?.identity).toBe(bot.getIdentityExport());
++    expect(identityFromString(rows.get(bot.id)!.identity!).securityLevel()).toBeGreaterThanOrEqual(8);
++    expect(rows.get(bot.id)?.autoStart).toBe(false);
++    expect(probe.connect).not.toHaveBeenCalled();
++  });
++
++  it("repairs a legacy NULL identity and reuses it after rejected handshakes", async () => {
++    const { manager, rows } = fixture(legacy);
++    await manager.loadSavedBots();
++    const identity = rows.get("legacy")?.identity;
++    expect(identity).toBeTruthy();
++    probe.connect.mockImplementation(async (bot: { getIdentityExport(): string }) => {
++      expect(bot.getIdentityExport()).toBe(identity);
++      expect(rows.get("legacy")?.identity).toBe(identity);
++      throw new Error("handshake rejected");
++    });
++    await expect(manager.startBot("legacy")).rejects.toThrow("handshake rejected");
++    await expect(manager.startBot("legacy")).rejects.toThrow("handshake rejected");
++    expect(rows.get("legacy")?.identity).toBe(identity);
++    expect(rows.get("legacy")?.autoStart).toBe(false);
++    expect(probe.connect).toHaveBeenCalledTimes(2);
++  });
++
++  it("keeps autoStart and the current identity after successful connection", async () => {
++    const { manager, rows } = fixture(legacy);
++    await manager.loadSavedBots();
++    probe.connect.mockResolvedValue(undefined);
++    await manager.startBot("legacy");
++    expect(rows.get("legacy")?.identity).toBe(manager.getBot("legacy")?.getIdentityExport());
++    expect(rows.get("legacy")?.autoStart).toBe(true);
++  });
++
++  it("stores a legacy identity before an automatic connection can fail", async () => {
++    const { manager, rows } = fixture({ ...legacy, autoStart: true });
++    probe.connect.mockImplementation(async (bot: { getIdentityExport(): string }) => {
++      expect(rows.get("legacy")?.identity).toBe(bot.getIdentityExport());
++      throw new Error("handshake rejected");
++    });
++    await manager.loadSavedBots();
++    expect(rows.get("legacy")?.identity).toBeTruthy();
++    expect(rows.get("legacy")?.autoStart).toBe(true);
++  });
++});
+diff --git a/src/bot/manager.ts b/src/bot/manager.ts
+index ad10d16..f080d30 100644
+--- a/src/bot/manager.ts
++++ b/src/bot/manager.ts
+@@ -294,6 +294,8 @@ export class BotManager extends EventEmitter {
+       serverProtocol: params.serverProtocol ?? "",
+       ts6ApiKey: params.ts6ApiKey ?? "",
+       serverPassword: params.serverPassword ?? "",
++      // Persist the generated key and security offset before the first start.
++      identity: bot.getIdentityExport(),
+     });
+ 
+     this.logger.info({ botId: id, name: params.name }, "Bot instance created");
+@@ -417,10 +419,18 @@ export class BotManager extends EventEmitter {
+       });
+       this.bots.set(id, bot);
+       this.emit("botInstance", bot);
+-      await connectWithTimeout(bot, 15_000, this.logger);
+-      // Mark as autoStart so it reconnects on Docker restart, and persist identity
+-      this.database.saveBotInstance({ ...saved, autoStart: true });
++      // A failed handshake must not cause the next start to generate a new UID.
+       this.persistBotIdentity(saved, bot);
++      await connectWithTimeout(bot, 15_000, this.logger);
++      // Save both fields together so an identity write cannot undo autoStart.
++      const connected = this.getBotConfig(id);
++      if (connected) {
++        this.database.saveBotInstance({
++          ...connected,
++          identity: bot.getIdentityExport(),
++          autoStart: true,
++        });
++      }
+     } else {
+       await connectWithTimeout(oldBot, 15_000, this.logger);
+     }
+@@ -470,6 +480,8 @@ export class BotManager extends EventEmitter {
+ 
+       this.bots.set(saved.id, bot);
+       this.emit("botInstance", bot);
++      // Repair legacy NULL identities even when autoStart is disabled.
++      this.persistBotIdentity(saved, bot);
+ 
+       // Only auto-connect bots that have autoStart enabled
+       if (saved.autoStart) {
+@@ -505,8 +517,9 @@ export class BotManager extends EventEmitter {
+ 
+   private persistBotIdentity(saved: import("../data/database.js").BotInstance, bot: BotInstance): void {
+     const identity = bot.getIdentityExport();
+-    if (identity && identity !== saved.identity) {
+-      this.database.saveBotInstance({ ...saved, identity });
++    const current = this.getBotConfig(saved.id);
++    if (current && identity && identity !== current.identity) {
++      this.database.saveBotInstance({ ...current, identity });
+     }
+   }
+ 

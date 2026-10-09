@@ -4,7 +4,7 @@
 
 TS6 SSH Query 从 v1.0.0 起支持，旧 v0.13.2 安装包不包含此能力。配置变量仍使用兼容旧安装的 `TS3_*` 名称。[TS6 接入、主机公钥核验与验证范围](https://github.com/Slldyd2077/PowerfulTS/blob/v1.0.0/docs/ts6-server.md)。
 
-音乐引擎需使用 [PowerfulTS 指定的 TSMusicBot 定制 fork v1.12.2](https://github.com/Slldyd2077/teamspeak-music-bot/tree/2c1fc74fce812caaaa79b5e8566a7dd617c1e9ad)，固定提交 `2c1fc74fce812caaaa79b5e8566a7dd617c1e9ad`。请按 [安装与适配说明](https://github.com/Slldyd2077/PowerfulTS/blob/main/docs/release-guide.md#上游引擎) 核对接口；原版上游不包含网页双向语音中继等定制接口。
+音乐引擎需使用 [PowerfulTS 指定的 TSMusicBot 同步主干后的定制 fork](https://github.com/Slldyd2077/teamspeak-music-bot/tree/453d2d124b9995034fe9cd46ebf2cad597382d42)，固定提交 `453d2d124b9995034fe9cd46ebf2cad597382d42`。请按 [安装与适配说明](https://github.com/Slldyd2077/PowerfulTS/blob/main/docs/release-guide.md#上游引擎) 核对接口；原版上游不包含网页双向语音中继等定制接口。
 
 ## 选择安装包
 
