@@ -44,7 +44,7 @@ https://github.com/user-attachments/assets/3761cb43-a68d-4768-b6d0-dd5860de7902
 
 > **TS6 服务端接入（v1.0.0 起）**：使用 `TS3_QUERY_TRANSPORT=ssh` 连接 TS6 的 SSH ServerQuery（通常 TCP 10022），并配置可信主机公钥。`TS3_*` 名称为兼容旧配置保留，TS6 同样使用这些变量。请升级到 v1.0.0 或更新版本的源码 / 安装包；旧 v0.13.2 不包含 SSH。[TS6 配置与验证范围](docs/ts6-server.md)。
 
-> **版本与验证范围**：当前修订 **v1.1.1**，修复昵称长度与通话超时提示，持久化累计用户统计，并更新 TSMusicBot 定制引擎引用。v1.1.0 引入一起看、屏幕共享、站点背景设置与 NAS 镜像部署；安装包生成状态见 [Releases](https://github.com/Slldyd2077/PowerfulTS/releases)。不同 TS 服务端、浏览器和第三方播放器的真实使用情况仍需分别验证。如遇问题，欢迎[提交 Issue](https://github.com/Slldyd2077/PowerfulTS/issues) 并附上复现步骤。
+> **版本与验证范围**：当前修订 **v1.1.2**，修复观影断线清理竞态、昵称长度与通话超时提示，持久化累计用户统计，并更新 TSMusicBot 定制引擎引用。v1.1.0 引入一起看、屏幕共享、站点背景设置与 NAS 镜像部署；安装包生成状态见 [Releases](https://github.com/Slldyd2077/PowerfulTS/releases)。不同 TS 服务端、浏览器和第三方播放器的真实使用情况仍需分别验证。如遇问题，欢迎[提交 Issue](https://github.com/Slldyd2077/PowerfulTS/issues) 并附上复现步骤。
 
 ---
 

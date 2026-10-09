@@ -1,6 +1,6 @@
 [project]
 name = "powerfults-backend"
-version = "1.1.1"
+version = "1.1.2"
 description = "PowerfulTS — TS3 / TS6 管理面板后端"
 requires-python = ">=3.11"
 dependencies = [

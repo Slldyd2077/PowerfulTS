@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 
+import anyio
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
@@ -132,9 +133,15 @@ async def room_socket(websocket: WebSocket, ticket_id: str):
         if websocket.application_state != WebSocketState.DISCONNECTED:
             await websocket.close(code=1011, reason="共享连接失败，请重新加入")
     finally:
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        # Remove the peer before an await can be interrupted during ASGI shutdown.
         if peer:
             rooms.disconnect(peer)
-        await tickets.release(ticket)
+        for task in tasks:
+            task.cancel()
+        # AnyIO cancellation remains active at every await until we leave its
+        # scope. Shield finalization so draining tasks cannot skip lease release.
+        with anyio.CancelScope(shield=True):
+            try:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            finally:
+                await tickets.release(ticket)
