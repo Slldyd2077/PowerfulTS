@@ -1,4 +1,5 @@
 @import './variables.css';
+@import './controls.css';
 
 /* ── Google Fonts：Geist（正文）+ Geist Mono（数据）+ Noto Sans SC（中文回退）── */
 @import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
