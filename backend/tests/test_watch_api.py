@@ -1,4 +1,6 @@
 from contextlib import asynccontextmanager
+import asyncio
+import anyio
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 import unittest
@@ -87,6 +89,60 @@ class WatchAPITests(unittest.TestCase):
                 with self.client.websocket_connect(path, headers={"origin": "http://testserver"}):
                     pass
             self.assertEqual(caught.exception.code, 4403)
+
+    def test_cancelled_socket_removes_room_before_draining_and_releases_ticket(self):
+        async def scenario():
+            receive_started = asyncio.Event()
+            drain_started = asyncio.Event()
+            allow_drain = asyncio.Event()
+            completed = asyncio.Event()
+
+            class Socket:
+                app = self.app
+                headers = {"origin": "http://testserver", "host": "testserver"}
+                url = SimpleNamespace(scheme="ws")
+
+                async def accept(self):
+                    pass
+
+                async def receive(self):
+                    receive_started.set()
+                    await asyncio.Event().wait()
+
+            async def sender(_socket, _peer):
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    drain_started.set()
+                    await allow_drain.wait()
+
+            async def run_socket(ticket_id, *, task_status):
+                with anyio.CancelScope() as scope:
+                    task_status.started(scope)
+                    try:
+                        await watch.room_socket(Socket(), ticket_id)
+                    finally:
+                        completed.set()
+
+            tickets = self.app.state.watch_tickets
+            ticket = await tickets.create(self.account.id, "voice-1")
+            with patch.object(watch, "send_messages", sender):
+                async with anyio.create_task_group() as group:
+                    scope = await group.start(run_socket, ticket.id)
+                    await asyncio.wait_for(receive_started.wait(), 1)
+                    scope.cancel()
+                    await asyncio.wait_for(drain_started.wait(), 1)
+                    try:
+                        self.assertFalse(self.app.state.watch_rooms.rooms)
+                    finally:
+                        allow_drain.set()
+                    await asyncio.wait_for(completed.wait(), 1)
+
+            next_ticket = await tickets.create(self.account.id, "voice-1")
+            self.assertIsNotNone(await tickets.claim(next_ticket.id))
+            await tickets.release(next_ticket)
+
+        anyio.run(scenario)
 
 
 if __name__ == "__main__":
