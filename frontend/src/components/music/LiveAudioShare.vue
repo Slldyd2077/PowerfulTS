@@ -252,7 +252,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   background:
-    linear-gradient(90deg, rgba(17, 108, 224, 0.12), transparent 46%),
+    linear-gradient(90deg, rgba(var(--color-primary-rgb), 0.12), transparent 46%),
     var(--gradient-surface);
   transition: border-color .25s, box-shadow .25s;
 }
@@ -261,7 +261,7 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background-image: linear-gradient(90deg, rgba(148, 190, 242, .035) 1px, transparent 1px);
+  background-image: linear-gradient(90deg, rgba(var(--tint-rgb), .035) 1px, transparent 1px);
   background-size: 36px 100%;
   mask-image: linear-gradient(90deg, black, transparent 72%);
 }
@@ -281,7 +281,7 @@ onBeforeUnmount(() => {
   gap: 1px;
   flex-direction: column;
   padding: 3px 0;
-  background: rgba(82, 147, 226, .08);
+  background: rgba(var(--color-primary-rgb), .08);
 }
 .signal-bar {
   flex: 1;

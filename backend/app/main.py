@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from ._version import __version__
 from .core.config import get_settings
 from .core.database import AsyncSessionLocal, dispose_db, init_db
-from .routers import admin, auth, bilibili, friends, intro_music, monitor, music, steam, ts_playlist
+from .routers import admin, auth, bilibili, friends, intro_music, monitor, music, steam, theme, ts_playlist, watch
 from .services.netease import NeteaseClient
 from .services.napcat_client import NapCatClient
 from .services.steam_client import SteamClient
@@ -28,9 +28,12 @@ from .services.bot_idle_manager import BotIdleManager
 from .services.bot_player_state import BotPlayerStateStore
 from .services.live_audio import LiveAudioRelay
 from .services.guest_access import GuestSessionRateLimiter
+from .services.background import BackgroundStorage
 from .services.entry_sound import EntrySoundCapabilities, EntrySoundStorage
 from .services.voice_bot import VoiceBotManager
 from .services.voice_downlink import VoiceDownlinkTickets
+from .services.watch_room import WatchRooms
+from .services.watch_config import parse_ice_servers
 from .services.voice_exclusivity import VoiceExclusivityCoordinator
 from .services.online_notifier import OnlineNotifier
 from .services.tsmusic_client import TSMusicClient
@@ -172,9 +175,16 @@ async def lifespan(app: FastAPI):
         max_requests=10, window_seconds=3600
     )
     app.state.entry_sound_storage = EntrySoundStorage(settings.entry_sound_dir)
+    app.state.background_storage = BackgroundStorage(settings.background_dir)
     app.state.entry_sound_capabilities = EntrySoundCapabilities(ttl_seconds=30)
     app.state.entry_sound_tasks = set()
     app.state.voice_downlink = VoiceDownlinkTickets()
+    app.state.watch_tickets = VoiceDownlinkTickets()
+    app.state.watch_rooms = WatchRooms()
+    watch_cleanup_task = asyncio.create_task(app.state.watch_rooms.cleanup_loop())
+    app.state.watch_limiter = GuestSessionRateLimiter(max_requests=20, window_seconds=60)
+    app.state.watch_origins = settings.cors_origins
+    app.state.watch_ice_servers = parse_ice_servers(settings.screen_share_ice_servers)
     # 同样解析 tsmusic：admin 热重载会换掉 app.state.tsmusic。
     app.state.voice_bots = VoiceBotManager(
         lambda: app.state.tsmusic, AsyncSessionLocal, settings=settings
@@ -202,6 +212,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        watch_cleanup_task.cancel()
+        await asyncio.gather(watch_cleanup_task, return_exceptions=True)
         app.state.ts3_monitor.stop()
         await app.state.bot_idle_manager.stop()
         entry_sound_tasks = tuple(app.state.entry_sound_tasks)
@@ -242,6 +254,7 @@ app.add_middleware(
 
 # 音乐通道：TSMusicBot 多平台音乐引擎（网易云 / QQ / B 站）
 app.include_router(music.router, prefix="/api")
+app.include_router(watch.router, prefix="/api")
 # B 站通道：搜索/点播 (TSMusicBot 多平台) + 图片代理
 app.include_router(bilibili.router, prefix="/api")
 # 原生监控：/api/stats、/api/channels (从 TS3 ServerQuery 直读)
@@ -256,6 +269,8 @@ app.include_router(intro_music.router, prefix="/api")
 app.include_router(steam.router, prefix="/api")
 # TS 专属歌单：/api/ts-playlists/*（跨平台混合收藏）
 app.include_router(ts_playlist.router, prefix="/api")
+# 站点外观：/api/theme/*（自定义背景图 + 主题色提取）
+app.include_router(theme.router, prefix="/api")
 # 管理后台：/api/admin/*（RBAC：仅 admin）
 app.include_router(admin.router, prefix="/api")
 

@@ -223,6 +223,7 @@ function initVisualizer() {
     const h = canvas.getBoundingClientRect().height
 
     ctx.clearRect(0, 0, w, h)
+    const rgb = getComputedStyle(document.documentElement).getPropertyValue('--color-primary-rgb').trim() || '82, 147, 226'
 
     const gap = 3
     const barWidth = (w - gap * (BAR_COUNT - 1)) / BAR_COUNT
@@ -252,9 +253,9 @@ function initVisualizer() {
 
       // 渐变色条
       const gradient = ctx.createLinearGradient(x, y, x, h)
-      gradient.addColorStop(0, 'rgba(82, 147, 226, 0.95)')
-      gradient.addColorStop(0.5, 'rgba(17, 108, 224, 0.5)')
-      gradient.addColorStop(1, 'rgba(1, 30, 77, 0.16)')
+      gradient.addColorStop(0, `rgba(${rgb}, 0.9)`)
+      gradient.addColorStop(0.5, `rgba(${rgb}, 0.36)`)
+      gradient.addColorStop(1, `rgba(${rgb}, 0.04)`)
 
       ctx.beginPath()
       ctx.roundRect(x, y, barWidth, barHeight, 2)
@@ -264,7 +265,7 @@ function initVisualizer() {
       // 顶部高亮点
       ctx.beginPath()
       ctx.roundRect(x, y, barWidth, Math.min(3, barHeight), 2)
-      ctx.fillStyle = 'rgba(82, 147, 226, 1)'
+      ctx.fillStyle = `rgb(${rgb})`
       ctx.fill()
     }
 
@@ -874,7 +875,10 @@ async function handleRegister() {
 .panel-visual {
   position: relative;
   width: 55%;
-  background: linear-gradient(160deg, #030812 0%, #071329 46%, #0a2140 100%);
+  background:
+    radial-gradient(ellipse 90% 70% at 15% 0%, rgba(var(--color-primary-rgb), 0.16), transparent 60%),
+    linear-gradient(160deg, #000 0%, #050505 60%, #0a0a0a 100%);
+  border-right: 1px solid var(--border-default);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -922,8 +926,8 @@ async function handleRegister() {
   width: 42px;
   height: 42px;
   border-radius: 50%;
-  border: 1px solid rgba(82, 147, 226, 0.28);
-  background: rgba(3, 8, 18, 0.58);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.28);
+  background: rgba(var(--surface-0-rgb), 0.58);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   cursor: pointer;
@@ -934,8 +938,8 @@ async function handleRegister() {
 }
 
 .sound-toggle:hover {
-  border-color: rgba(82, 147, 226, 0.55);
-  box-shadow: 0 0 18px rgba(17, 108, 224, 0.24);
+  border-color: rgba(var(--color-primary-rgb), 0.55);
+  box-shadow: 0 0 18px rgba(var(--color-primary-rgb), 0.24);
   transform: translateY(-1px);
 }
 
@@ -954,10 +958,10 @@ async function handleRegister() {
   align-items: center;
   gap: 8px;
   padding: 8px 14px;
-  background: rgba(3, 8, 18, 0.68);
+  background: rgba(var(--surface-0-rgb), 0.68);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(82, 147, 226, 0.22);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.22);
   border-radius: 100px;
   opacity: 0;
   transform: translateX(8px) scale(0.96);
@@ -978,7 +982,7 @@ async function handleRegister() {
   width: 96px;
   height: 4px;
   border-radius: 2px;
-  background: linear-gradient(90deg, rgba(82, 147, 226, 0.72), rgba(17, 108, 224, 0.14));
+  background: linear-gradient(90deg, rgba(var(--color-primary-rgb), 0.72), rgba(var(--color-primary-rgb), 0.14));
   outline: none;
   cursor: pointer;
 }
@@ -989,9 +993,9 @@ async function handleRegister() {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #5293e2;
+  background: var(--color-primary);
   border: none;
-  box-shadow: 0 0 8px rgba(82, 147, 226, 0.62);
+  box-shadow: 0 0 8px rgba(var(--color-primary-rgb), 0.62);
   cursor: pointer;
 }
 
@@ -999,9 +1003,9 @@ async function handleRegister() {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #5293e2;
+  background: var(--color-primary);
   border: none;
-  box-shadow: 0 0 8px rgba(82, 147, 226, 0.62);
+  box-shadow: 0 0 8px rgba(var(--color-primary-rgb), 0.62);
   cursor: pointer;
 }
 
@@ -1015,16 +1019,16 @@ async function handleRegister() {
 
 /* autoplay 兜底态：按钮高亮脉动，提示用户点击开声 */
 .sound-control.hint .sound-toggle {
-  border-color: rgba(82, 147, 226, 0.58);
+  border-color: rgba(var(--color-primary-rgb), 0.58);
   animation: sound-hint-pulse 2s ease-in-out infinite;
 }
 
 @keyframes sound-hint-pulse {
   0%, 100% {
-    box-shadow: 0 0 0 0 rgba(82, 147, 226, 0.35);
+    box-shadow: 0 0 0 0 rgba(var(--color-primary-rgb), 0.35);
   }
   50% {
-    box-shadow: 0 0 18px 4px rgba(82, 147, 226, 0.22);
+    box-shadow: 0 0 18px 4px rgba(var(--color-primary-rgb), 0.22);
   }
 }
 
@@ -1041,44 +1045,43 @@ async function handleRegister() {
   width: 82px;
   height: 82px;
   margin-bottom: 24px;
-  border-radius: 20px;
+  border-radius: 14px;
   padding: 5px;
-  background: linear-gradient(145deg, #f8fbff, #dbeafe);
-  border: 1px solid rgba(148, 190, 242, 0.42);
+  background: linear-gradient(145deg, #fafafa, #d4d4d8);
+  border: 1px solid rgba(var(--tint-rgb), 0.42);
   box-shadow: 0 14px 36px rgba(1, 30, 77, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.72);
   animation: badge-pulse 3s ease-in-out infinite;
 }
 
 @keyframes badge-pulse {
-  0%, 100% { box-shadow: 0 10px 30px rgba(1, 30, 77, 0.42), 0 0 0 0 rgba(82, 147, 226, 0.18); }
-  50% { box-shadow: 0 12px 34px rgba(1, 30, 77, 0.5), 0 0 22px 4px rgba(82, 147, 226, 0.16); }
+  0%, 100% { box-shadow: 0 10px 30px rgba(1, 30, 77, 0.42), 0 0 0 0 rgba(var(--color-primary-rgb), 0.18); }
+  50% { box-shadow: 0 12px 34px rgba(1, 30, 77, 0.5), 0 0 22px 4px rgba(var(--color-primary-rgb), 0.16); }
 }
 
 .brand-title {
   font-size: clamp(3rem, 5vw, 4.5rem);
-  font-weight: 800;
-  line-height: 1.05;
-  letter-spacing: -2px;
+  font-weight: 500;
+  line-height: 1.02;
+  letter-spacing: -0.055em;
   margin-bottom: 12px;
 }
 
 .brand-title-line {
   display: block;
-  color: #eceff1;
+  color: #ededed;
 }
 
 .brand-title-accent {
-  background: linear-gradient(135deg, #78aef0 0%, #116ce0 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--color-primary);
 }
 
 .brand-tagline {
-  font-size: 1.1em;
+  font-family: var(--font-mono);
+  font-size: 0.8em;
   color: var(--text-secondary);
   font-weight: 400;
-  letter-spacing: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
   margin-bottom: 24px;
 }
 
@@ -1089,8 +1092,10 @@ async function handleRegister() {
   font-size: 0.82em;
   color: var(--text-muted);
   padding: 6px 14px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
   background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-default);
   border-radius: 100px;
 }
 
@@ -1146,7 +1151,7 @@ async function handleRegister() {
   top: 10%;
   bottom: 10%;
   width: 1px;
-  background: linear-gradient(180deg, transparent, rgba(82, 147, 226, 0.16), rgba(17, 108, 224, 0.12), transparent);
+  background: linear-gradient(180deg, transparent, rgba(var(--color-primary-rgb), 0.16), rgba(var(--color-primary-rgb), 0.12), transparent);
 }
 
 .form-wrapper {
@@ -1179,9 +1184,9 @@ async function handleRegister() {
   width: 100%;
   height: 100%;
   border-radius: 8px;
-  background: linear-gradient(135deg, rgba(17, 108, 224, 0.18), rgba(82, 147, 226, 0.1));
-  border: 1px solid rgba(82, 147, 226, 0.24);
-  box-shadow: 0 0 18px rgba(17, 108, 224, 0.12);
+  background: linear-gradient(135deg, rgba(var(--color-primary-rgb), 0.18), rgba(var(--color-primary-rgb), 0.1));
+  border: 1px solid rgba(var(--color-primary-rgb), 0.24);
+  box-shadow: 0 0 18px rgba(var(--color-primary-rgb), 0.12);
 }
 
 .mode-thumb.right {
@@ -1232,11 +1237,11 @@ async function handleRegister() {
   gap: 11px;
   margin: -10px 0 18px;
   padding: 12px 13px;
-  border: 1px solid rgba(82, 147, 226, 0.22);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.22);
   border-left-width: 3px;
   border-radius: 7px;
   background:
-    linear-gradient(90deg, rgba(17, 108, 224, 0.09), transparent 72%),
+    linear-gradient(90deg, rgba(var(--color-primary-rgb), 0.09), transparent 72%),
     rgba(1, 8, 20, 0.26);
 }
 
@@ -1246,7 +1251,7 @@ async function handleRegister() {
   margin-top: 4px;
   border: 2px solid var(--color-primary);
   border-radius: 50%;
-  box-shadow: 0 0 9px rgba(82, 147, 226, 0.5);
+  box-shadow: 0 0 9px rgba(var(--color-primary-rgb), 0.5);
 }
 
 .invite-notice strong {
@@ -1300,7 +1305,7 @@ async function handleRegister() {
   font-size: 0.72em;
   cursor: pointer;
   border: 0;
-  border-bottom: 1px solid rgba(82, 147, 226, 0.38);
+  border-bottom: 1px solid rgba(var(--color-primary-rgb), 0.38);
   background: transparent;
 }
 
@@ -1379,10 +1384,10 @@ async function handleRegister() {
 }
 
 .guest-btn:hover {
-  border-color: rgba(82, 147, 226, 0.4);
-  background: rgba(82, 147, 226, 0.07);
+  border-color: rgba(var(--color-primary-rgb), 0.4);
+  background: rgba(var(--color-primary-rgb), 0.07);
   color: var(--text-primary);
-  box-shadow: 0 0 18px rgba(17, 108, 224, 0.12);
+  box-shadow: 0 0 18px rgba(var(--color-primary-rgb), 0.12);
 }
 
 .guest-icon {
@@ -1432,12 +1437,12 @@ async function handleRegister() {
   height: 46px;
   margin-top: 12px;
   border: none;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #0951ae, #5293e2);
-  color: #fff;
+  border-radius: var(--radius-md);
+  background: var(--gradient-brand);
+  color: var(--text-inverse);
   font-size: 0.95em;
   font-weight: 600;
-  letter-spacing: 1px;
+  letter-spacing: 0.04em;
   cursor: pointer;
   overflow: hidden;
   transition: transform 0.2s, box-shadow 0.3s;
@@ -1446,7 +1451,7 @@ async function handleRegister() {
 
 .submit-btn:not(:disabled):hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 26px rgba(17, 108, 224, 0.34);
+  box-shadow: 0 4px 26px rgba(var(--color-primary-rgb), 0.34);
 }
 
 .submit-btn:not(:disabled):active {
@@ -1498,9 +1503,9 @@ async function handleRegister() {
   white-space: nowrap;
   padding: 0 16px;
   height: 40px;
-  border: 1px solid rgba(82, 147, 226, 0.24);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.24);
   border-radius: 6px;
-  background: rgba(82, 147, 226, 0.08);
+  background: rgba(var(--color-primary-rgb), 0.08);
   color: var(--color-primary);
   font-size: 0.85em;
   font-weight: 500;
@@ -1510,8 +1515,8 @@ async function handleRegister() {
 }
 
 .code-btn:hover:not(:disabled) {
-  background: rgba(82, 147, 226, 0.14);
-  border-color: rgba(82, 147, 226, 0.42);
+  background: rgba(var(--color-primary-rgb), 0.14);
+  border-color: rgba(var(--color-primary-rgb), 0.42);
 }
 
 .code-btn:disabled {

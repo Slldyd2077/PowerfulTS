@@ -1,0 +1,67 @@
+# PowerfulTS — NAS / 服务器免编译安装
+# 将本文件粘贴到 NAS 的 Compose 项目中，修改下方地址、账号与密码后部署。
+# 无需下载源码或准备 .env；镜像需先发布为公开包，详见 docs/nas.md。
+# 支持 linux/amd64 与 linux/arm64；TeamSpeak / TSMusicBot 需已部署。
+# SSH 启动：docker compose -f docker-compose.nas.yml up -d
+# 访问：http://NAS的IP:8080
+# 密码含 $ 时写成 $$，避免被 Compose 当作变量替换。
+
+services:
+  backend:
+    image: ghcr.io/slldyd2077/powerfults-backend:latest
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      DATABASE_URL: sqlite+aiosqlite:///./data/powerfults.db
+      ENTRY_SOUND_DIR: ./data/entry-sounds
+      BACKGROUND_DIR: ./data/backgrounds
+
+      # TeamSpeak ServerQuery：填写服务所在机器的局域网 IP 和查询账号。
+      TS3_HOST: "192.168.1.100"
+      TS3_QUERY_PORT: "10011"
+      TS3_QUERY_USER: ""
+      TS3_QUERY_PASSWORD: ""
+      TS3_SID: "1"
+
+      # TSMusicBot：须使用 README 指定的专用分支。
+      TSMUSIC_URL: "http://192.168.1.100:3000"
+      TSMUSIC_USER: ""
+      TSMUSIC_PASSWORD: ""
+      TSMUSIC_BOT_ID: ""
+
+      # 改为面板实际地址；TSMusicBot 必须也能访问此地址。
+      # 启用入场音效时，在 TSMusicBot 设置相同的 POWERFUL_TS_ORIGIN。
+      LIVE_AUDIO_PUBLIC_URL: "http://192.168.1.100:8080"
+      CORS_ORIGINS: "http://192.168.1.100:8080"
+
+      # 可选：留空即不启用 QQ 通知 / Steam 集成。
+      NAPCAT_URL: ""
+      NAPCAT_TOKEN: ""
+      STEAM_API_KEY: ""
+      STEAM_OPENID_RETURN_URL: ""
+      STEAM_OPENID_REALM: ""
+      STEAM_OPENID_STATE_SECRET: ""
+      STEAM_OPENID_VERIFY_ENDPOINT: ""
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=5).close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  frontend:
+    image: ghcr.io/slldyd2077/powerfults-frontend:latest
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:80" # 左侧为 NAS 端口，右侧保持 80。
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

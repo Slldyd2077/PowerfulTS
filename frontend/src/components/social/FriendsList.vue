@@ -283,7 +283,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   font-size: 0.66em;
   font-weight: 500;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   letter-spacing: 0.04em;
 }
 

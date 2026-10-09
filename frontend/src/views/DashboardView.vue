@@ -26,7 +26,7 @@ usePolling(() => monitor.fetchStats(), 5000)
             <span class="meta-dot meta-dot--off"></span>监控未运行
           </span>
           <span v-else-if="monitor.lastUpdate !== '--'" class="meta-live">
-            <span class="meta-dot"></span>实时 · {{ monitor.lastUpdate }}
+            <span class="meta-dot"></span>更新于 {{ monitor.lastUpdate }}
           </span>
           <span v-else class="meta-idle">
             <span class="meta-dot meta-dot--idle"></span>等待数据
@@ -107,14 +107,14 @@ usePolling(() => monitor.fetchStats(), 5000)
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 0.7em;
   color: var(--text-secondary);
   letter-spacing: 0.04em;
 }
 
 .meta-live {
-  color: var(--color-success);
+  color: var(--text-muted);
 }
 
 .meta-off {

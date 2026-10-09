@@ -211,7 +211,7 @@ function navigate(key: string) {
 .version {
   display: block;
   text-align: center;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 0.66em;
   color: var(--text-muted);
   letter-spacing: 0.1em;

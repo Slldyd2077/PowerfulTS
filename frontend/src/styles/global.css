@@ -1,5 +1,8 @@
 @import './variables.css';
 
+/* ── Google Fonts：Geist（正文）+ Geist Mono（数据）+ Noto Sans SC（中文回退）── */
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
+
 *,
 *::before,
 *::after {
@@ -23,7 +26,8 @@ html {
 }
 
 body {
-  font-family: 'Noto Sans SC', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-sans);
+  letter-spacing: -0.005em;
   background-color: var(--surface-0);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
@@ -35,13 +39,13 @@ body {
 /* ── 数据 / 数字专用字体 ── */
 .mono,
 [data-mono] {
-  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
 /* ── 等宽小标签（caps + 字距）：遥测仪表风格 ── */
 .label-mono {
-  font-family: 'JetBrains Mono', 'Cascadia Code', monospace;
+  font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.14em;
   font-weight: 500;
@@ -365,3 +369,139 @@ body {
 
 
 
+
+/* ───────────────────────────────────────────────
+   自定义背景图模式（管理员上传后 <html class="has-bg">）
+   面板改为半透明毛玻璃，让背景图透出来；主色/表面色由 useSiteTheme 覆盖。
+   ─────────────────────────────────────────────── */
+html.has-bg {
+  --glass-bg: rgba(var(--surface-2-rgb), 0.5);
+  --glass-bg-soft: rgba(var(--surface-1-rgb), 0.36);
+  --surface-3: rgba(var(--surface-1-rgb), 0.5);
+  --surface-3-hover: rgba(var(--surface-1-rgb), 0.64);
+  --surface-4: rgba(var(--surface-1-rgb), 0.58);
+  --gradient-surface: linear-gradient(180deg, rgba(var(--surface-2-rgb), 0.58), rgba(var(--surface-1-rgb), 0.44));
+  --border-subtle: rgba(var(--tint-rgb), 0.13);
+  --border-default: rgba(var(--tint-rgb), 0.2);
+  --border-emphasis: rgba(var(--tint-rgb), 0.3);
+}
+
+html.has-bg :is(.panel, .stat-card, .channel-sidebar, .player, .channel-browser, .voice-guide, .notify-card, .el-card) {
+  backdrop-filter: blur(16px) saturate(1.25);
+  -webkit-backdrop-filter: blur(16px) saturate(1.25);
+}
+
+/* ───────────────────────────────────────────────
+   柔化与动效：降低「仪表盘」的机械感
+   ─────────────────────────────────────────────── */
+
+/* 面板入场：错峰上浮。fill-mode 用 backwards，结束后不残留 transform（避免影响 fixed 子元素） */
+@keyframes surface-rise {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+:is(.panel, .stat-card, .channel-sidebar, .player, .channel-browser, .voice-guide, .notify-card) {
+  animation: surface-rise 0.65s var(--ease-out-expo) backwards;
+}
+:is(.panel, .stat-card, .channel-sidebar, .player, .channel-browser, .voice-guide, .notify-card):nth-child(2) { animation-delay: 0.06s; }
+:is(.panel, .stat-card, .channel-sidebar, .player, .channel-browser, .voice-guide, .notify-card):nth-child(3) { animation-delay: 0.12s; }
+:is(.panel, .stat-card, .channel-sidebar, .player, .channel-browser, .voice-guide, .notify-card):nth-child(4) { animation-delay: 0.18s; }
+:is(.panel, .stat-card, .channel-sidebar, .player, .channel-browser, .voice-guide, .notify-card):nth-child(n + 5) { animation-delay: 0.24s; }
+
+/* 面板悬停：边缘微微透出主题色 */
+.panel {
+  transition: border-color 0.3s var(--ease-out-expo), box-shadow 0.45s var(--ease-out-expo);
+}
+.panel:hover {
+  box-shadow: 0 18px 40px -26px rgba(var(--color-primary-rgb), 0.5);
+}
+
+/* 按钮：弹性按压反馈 */
+.el-button {
+  transition:
+    transform 0.28s var(--ease-spring),
+    filter 0.2s,
+    box-shadow 0.3s var(--ease-out-expo),
+    background-color 0.2s,
+    border-color 0.2s,
+    color 0.2s;
+}
+.el-button:not(.is-disabled):hover {
+  transform: translateY(-1px);
+}
+.el-button:not(.is-disabled):active {
+  transform: translateY(0) scale(0.96);
+}
+
+/* 菜单项：悬停时轻微右移 */
+.el-menu-item {
+  transition:
+    color 0.2s var(--ease-out-expo),
+    background 0.2s var(--ease-out-expo),
+    transform 0.3s var(--ease-out-expo);
+}
+.el-menu-item:not(.is-active):hover {
+  transform: translateX(3px);
+}
+
+/* 弹窗：弹性弹出（覆盖 Element Plus 同名关键帧） */
+@keyframes dialog-fade-in {
+  0% { transform: translate3d(0, 22px, 0) scale(0.95); opacity: 0; }
+  60% { opacity: 1; }
+  100% { transform: translate3d(0, 0, 0) scale(1); opacity: 1; }
+}
+.el-dialog {
+  border-radius: var(--radius-lg) !important;
+}
+.dialog-fade-enter-active .el-dialog {
+  animation: dialog-fade-in 0.45s var(--ease-spring);
+}
+
+
+/* ───────────────────────────────────────────────
+   vgpu 风格层：纯黑底 · 发丝线 · 克制圆角 · 紧字距标题
+   ─────────────────────────────────────────────── */
+h1, h2, h3 {
+  letter-spacing: -0.035em;
+  font-weight: 500;
+}
+
+/* 默认按钮：幽灵样式（白 4% 底 + 14% 描边 + 6px 圆角），与参考站「Ask AI」按钮一致 */
+.el-button:not(.el-button--primary):not(.el-button--danger):not(.el-button--success):not(.el-button--warning):not(.el-button--info) {
+  --el-button-bg-color: rgba(var(--tint-rgb), 0.04);
+  --el-button-border-color: var(--border-default);
+  --el-button-text-color: var(--text-primary);
+  --el-button-hover-bg-color: rgba(var(--tint-rgb), 0.08);
+  --el-button-hover-border-color: var(--border-emphasis);
+  --el-button-hover-text-color: var(--text-primary);
+  --el-button-active-bg-color: rgba(var(--tint-rgb), 0.12);
+  --el-button-active-border-color: var(--border-emphasis);
+  --el-button-disabled-bg-color: rgba(var(--tint-rgb), 0.02);
+  --el-button-disabled-border-color: var(--border-subtle);
+  --el-button-disabled-text-color: var(--text-muted);
+}
+.el-button {
+  border-radius: var(--radius-md);
+  font-weight: 500;
+}
+.el-button--primary {
+  letter-spacing: 0;
+}
+.el-input__wrapper {
+  border-radius: var(--radius-md) !important;
+}
+
+/* 等宽小标签：参考站卡片头的「LABEL · SPEC」小号大写 */
+.label-mono {
+  letter-spacing: 0.1em;
+}
+
+/* 面板：纯黑底 + 发丝线，去掉渐变的「糖衣」 */
+:is(.panel, .stat-card, .channel-sidebar, .player, .channel-browser, .voice-guide, .notify-card) {
+  background-color: rgba(var(--surface-0-rgb), 0.55);
+}
+.panel:hover {
+  box-shadow: none;
+  border-color: var(--border-emphasis);
+}

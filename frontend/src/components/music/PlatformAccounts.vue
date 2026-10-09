@@ -423,7 +423,7 @@ async function jellyfinLogout() {
   border-radius: 7px;
   display: grid;
   place-items: center;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 0.82em;
   font-weight: 700;
   flex-shrink: 0;
@@ -503,7 +503,7 @@ async function jellyfinLogout() {
   line-height: 1.5;
 }
 .cookie-hint .mono {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   color: var(--text-secondary);
 }
 .cookie-input {
@@ -514,7 +514,7 @@ async function jellyfinLogout() {
   border-radius: var(--radius-sm);
   padding: 10px;
   color: var(--text-primary);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 0.74em;
   resize: vertical;
   outline: none;

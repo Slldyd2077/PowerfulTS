@@ -143,9 +143,33 @@ function formatTime(seconds: number): string {
 
 <style scoped>
 .stats-row {
+  position: relative;
+  padding-top: 22px;
   display: grid;
   grid-template-columns: 1.35fr 1fr 1fr 1fr;
   gap: 12px;
+}
+
+/* 参考站的结构线：卡片组上方一条发丝线，两端各一个圆点 */
+.stats-row::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: 3px;
+  right: 3px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border-emphasis), var(--border-default) 50%, var(--border-emphasis));
+}
+.stats-row::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 0;
+  right: 0;
+  height: 5px;
+  background:
+    radial-gradient(circle at 2.5px 2.5px, var(--text-secondary) 2.5px, transparent 3px) left / 5px 5px no-repeat,
+    radial-gradient(circle at 2.5px 2.5px, var(--text-secondary) 2.5px, transparent 3px) right / 5px 5px no-repeat;
 }
 
 @media (max-width: 1100px) {
@@ -181,11 +205,17 @@ function formatTime(seconds: number): string {
   flex-direction: column;
   gap: 8px;
   overflow: hidden;
-  transition: border-color 0.2s var(--ease-out-expo), background 0.2s;
+  transition:
+    border-color 0.25s var(--ease-out-expo),
+    background 0.25s,
+    transform 0.45s var(--ease-out-expo),
+    box-shadow 0.45s var(--ease-out-expo);
 }
 
 .stat-card:hover {
   border-color: var(--border-emphasis);
+  transform: translateY(-3px);
+  box-shadow: 0 14px 30px -16px rgba(var(--color-primary-rgb), 0.45);
 }
 
 /* 内容层抬到聚光之上 */
@@ -237,7 +267,7 @@ function formatTime(seconds: number): string {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 0.62em;
   font-weight: 600;
   letter-spacing: 0.12em;

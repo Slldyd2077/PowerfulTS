@@ -1,3 +1,13 @@
+## v1.1.0 (2026-10-09)
+
+### Feat
+
+- add channel watch rooms, site appearance and NAS image deployment
+
+### Fix
+
+- preserve release dependencies and include watch extension in source installers
+
 ## v1.0.0 (2026-10-03)
 
 ### Feat

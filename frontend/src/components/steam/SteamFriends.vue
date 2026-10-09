@@ -207,7 +207,7 @@ function statusClass(state: string | null | undefined): string {
   flex-shrink: 0;
   font-size: 0.66em;
   font-weight: 500;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
 }
 .friend-status .status-pip {
   width: 5px;

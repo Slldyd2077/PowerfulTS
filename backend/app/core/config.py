@@ -52,6 +52,8 @@ class Settings:
     live_audio_public_url: str
     # Per-account entry-sound bytes; metadata remains in the database.
     entry_sound_dir: str
+    # Admin-uploaded site background images (desktop / mobile).
+    background_dir: str
 
     # ── NapCat QQ 机器人 (HTTP API, 好友上线提醒推送; 未配置则不推送) ──
     napcat_url: str
@@ -69,6 +71,7 @@ class Settings:
 
     # ── CORS 允许的前端来源 (逗号分隔; 生产改为实际域名) ──
     cors_origins: list[str]
+    screen_share_ice_servers: str = '[{"urls":"stun:stun.l.google.com:19302"}]'
 
     # Keep TS3_* names for existing installations. SSH is the native TS6 Query transport.
     ts3_query_transport: str = "raw"
@@ -100,6 +103,7 @@ def get_settings() -> Settings:
         tsmusic_bot_id=os.environ.get("TSMUSIC_BOT_ID", ""),
         live_audio_public_url=os.environ.get("LIVE_AUDIO_PUBLIC_URL", ""),
         entry_sound_dir=os.environ.get("ENTRY_SOUND_DIR", "./data/entry-sounds"),
+        background_dir=os.environ.get("BACKGROUND_DIR", "./data/backgrounds"),
         napcat_url=os.environ.get("NAPCAT_URL", "http://127.0.0.1:3000"),
         napcat_token=os.environ.get("NAPCAT_TOKEN", ""),
         steam_api_key=os.environ.get("STEAM_API_KEY", ""),
@@ -109,6 +113,9 @@ def get_settings() -> Settings:
         steam_openid_verify_endpoint=os.environ.get("STEAM_OPENID_VERIFY_ENDPOINT", ""),
         cors_origins=_parse_origins(
             os.environ.get("CORS_ORIGINS", "http://localhost:5173")
+        ),
+        screen_share_ice_servers=os.environ.get(
+            "SCREEN_SHARE_ICE_SERVERS", '[{"urls":"stun:stun.l.google.com:19302"}]'
         ),
         ts3_query_transport=transport,
         ts3_query_ssh_known_hosts=os.environ.get("TS3_QUERY_SSH_KNOWN_HOSTS", "").strip(),

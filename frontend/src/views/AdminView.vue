@@ -2,6 +2,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import AppearancePanel from '@/components/admin/AppearancePanel.vue'
 import {
   getAdminSettings, putAdminSettings, checkNapcatStatus, getMemberNotifications, putMemberNotifications,
   getFriendMessageTemplates, getNotificationMessageTemplates,
@@ -178,6 +179,8 @@ onMounted(() => {
       </div>
       <button class="ns-btn" :disabled="checkingNapcat" @click="checkNapcat">{{ checkingNapcat ? '检测中…' : '检测连接' }}</button>
     </div>
+
+    <AppearancePanel />
 
     <div v-if="loading" class="loading-row">加载中…</div>
     <div v-else class="settings-form">
@@ -380,7 +383,7 @@ onMounted(() => {
 .field input {
   background: var(--surface-3); border: 1px solid var(--border-default); border-radius: 6px;
   padding: 7px 10px; color: var(--text-primary); font-size: 0.82em;
-  font-family: 'JetBrains Mono', monospace; outline: none;
+  font-family: var(--font-mono); outline: none;
   transition: border-color 0.15s;
 }
 .field input:focus { border-color: var(--color-primary); }
@@ -473,7 +476,7 @@ onMounted(() => {
   background: var(--surface-3);
   color: var(--text-primary);
   font-size: 0.8em;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   resize: vertical;
   outline: none;
   transition: border-color 0.15s;

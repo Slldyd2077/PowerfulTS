@@ -134,7 +134,7 @@ onUnmounted(() => window.removeEventListener('message', onMessage))
   place-items: center;
   background: linear-gradient(135deg, #1b2838, #66c0f4 130%);
   color: #fff;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-weight: 800;
   font-size: 1.2em;
 }

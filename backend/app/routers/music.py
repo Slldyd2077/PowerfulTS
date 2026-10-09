@@ -549,6 +549,8 @@ async def close_voice_session(
     db: AsyncSession = Depends(get_db),
 ):
     """挂断：让通话 bot 立刻离开服务器。"""
+    if hasattr(request.app.state, "watch_rooms"):
+        request.app.state.watch_rooms.remove_account(account.id)
     bid = await request.app.state.voice_bots.current_bot_id(db, account.id)
     if bid:
         await request.app.state.voice_bots.release_now(
@@ -861,6 +863,8 @@ async def move_voice_channel(
         # 密码错误是用户能自己纠正的输入问题，其余归为上游/权限问题。
         status = 403 if result.get("invalid_password") else 502
         raise HTTPException(status_code=status, detail=result["detail"])
+    if hasattr(request.app.state, "watch_rooms"):
+        request.app.state.watch_rooms.remove_account(account.id)
     await _trigger_entry_sound(request, tsmusic, account, bid, db)
     # 人已经过去了，快照得跟上：否则前端紧接着的刷新会把你「弹回」原频道。
     await _sync_ts3_snapshot(request)
