@@ -194,7 +194,6 @@ class VoiceExclusivityKickTests(unittest.TestCase):
         conn = Mock()
         conn.send.side_effect = [
             [],
-            [],
             [
                 _client_with_uid("Alice", 11, "real-uid"),
                 _client_with_uid("<WEB通讯> Alice", 12, "web-uid"),
@@ -228,7 +227,6 @@ class VoiceExclusivityKickTests(unittest.TestCase):
         conn = Mock()
         conn.send.side_effect = [
             [],
-            [],
             [_client_with_uid("Alice", 11, "someone-else")],
         ]
 
@@ -255,7 +253,6 @@ class VoiceExclusivityKickTests(unittest.TestCase):
         )
         conn = Mock()
         conn.send.side_effect = [
-            [],
             [],
             [_client_with_uid("Alice", 11, "someone-else")],
         ]
@@ -298,7 +295,6 @@ class VoiceExclusivityPresenceTests(unittest.TestCase):
         conn = Mock()
         conn.send.side_effect = [
             [],
-            [],
             [_client_with_uid("Alice", 11, "real-uid")],
         ]
 
@@ -318,7 +314,6 @@ class VoiceExclusivityPresenceTests(unittest.TestCase):
         query_client["client_type"] = "1"
         conn = Mock()
         conn.send.side_effect = [
-            [],
             [],
             [
                 query_client,

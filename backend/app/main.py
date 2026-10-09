@@ -241,7 +241,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="PowerfulTS Backend",
     version=__version__,
-    description="TS3 管理面板后端 — 原生 TS3 直连 + TSMusicBot 多媒体代理",
+    description="TS3 / TS6 管理面板后端 — 原生 raw / SSH ServerQuery + TSMusicBot 多媒体代理",
     lifespan=lifespan,
 )
 

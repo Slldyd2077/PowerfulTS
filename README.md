@@ -13,24 +13,36 @@
   <a href="https://www.python.org/" target="_blank"><img alt="Python" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white"></a>
   <img alt="Docker" src="https://img.shields.io/badge/Docker-一键部署-2496ED?logo=docker&logoColor=white">
   <img alt="TS3" src="https://img.shields.io/badge/TS3-支持-2580C3?logo=teamspeak&logoColor=white">
-  <img alt="TS6" src="https://img.shields.io/badge/TS6-支持-2580C3?logo=teamspeak&logoColor=white">
+  <img alt="TS6 SSH Query" src="https://img.shields.io/badge/TS6-SSH_Query-2580C3?logo=teamspeak&logoColor=white">
   <a href="https://github.com/sealdong/napcat-dotnet" target="_blank"><img alt="NapCat" src="https://img.shields.io/badge/NapCat-QQ通知-12B1E9?logo=tencentqq&logoColor=white"></a>
   <img alt="License" src="https://img.shields.io/badge/License-MIT-blue?logo=mit&logoColor=white">
 </p>
 
 ---
 
+## 🎬 宣传视频
+
+https://github.com/user-attachments/assets/3761cb43-a68d-4768-b6d0-dd5860de7902
+
+[▶ 在 Bilibili 观看高清版宣传视频与部署教程](https://www.bilibili.com/video/BV1f3He6EEZS/)
+
+---
+
 ## 📖 简介
 
 **PowerfulTS** 是一个面向 TeamSpeak（TS3 / TS6）服务器的 Web 管理面板，采用**前后端分离**架构。
-后端原生直连 TS3 ServerQuery 提供服务器数据，并将音乐与点播能力委托给 TSMusicBot 多平台引擎，
+后端通过 raw TCP 或 SSH 原生直连 TS3 / TS6 ServerQuery 提供服务器数据，并将音乐与点播能力委托给 TSMusicBot 多平台引擎，
 让一个 Web 面板即可聚合呈现服务器的在线状态、用户、频道与多媒体能力。
 
 其中**网页通话**让成员不装 TeamSpeak 客户端也能直接在浏览器里收听频道并发言。
 
 > 🍴 **TSMusicBot 专用分支**：本项目的音乐引擎与网页通话中继依赖 [TSMusicBot](https://github.com/Slldyd2077/teamspeak-music-bot) 的专用定制分支 [`merge/upstream-v1.12`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/merge/upstream-v1.12)——per-bot 多实例架构、双向 Opus 语音中继、语音闪避（含网页通话触发）等接口仅存在于该分支。**部署时必须使用该分支构建的 TSMusicBot**（v1.12.1+），上游 [ZHANGTIANYAO1/teamspeak-music-bot](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot) 的原版不支持这些能力。
 
-> 💡 **跨平台**：提供源码构建与 [NAS 直接拉取镜像](docs/nas.md)两种 Docker 部署方案，支持 Linux / Windows / macOS / NAS（群晖、威联通等）。NAS 模板需维护者先完成首次镜像发布。
+> 💡 **跨平台 Release**：从 [Releases](https://github.com/Slldyd2077/PowerfulTS/releases) 下载 x64 或 ARM64 安装包，解压、配置后启动。预构建包无需 Git / Python / Node.js，需要 Docker Engine 与 Compose v2；支持 Windows、macOS、Linux 和支持 Docker 的 NAS。详见 [安装与升级指南](docs/release-guide.md)。
+
+> **NAS 直接拉取镜像**：也可使用 [NAS Compose 模板](docs/nas.md)，无需下载源码或安装包。首次镜像发布完成并公开后即可匿名拉取。
+
+> **TS6 服务端接入（v1.0.0 起）**：使用 `TS3_QUERY_TRANSPORT=ssh` 连接 TS6 的 SSH ServerQuery（通常 TCP 10022），并配置可信主机公钥。`TS3_*` 名称为兼容旧配置保留，TS6 同样使用这些变量。请升级到 v1.0.0 或更新版本的源码 / 安装包；旧 v0.13.2 不包含 SSH。[TS6 配置与验证范围](docs/ts6-server.md)。
 
 > ⚠️ **早期测试版本**：本项目目前处于**早期开发与测试阶段**，功能仍在快速迭代中，存在诸多 Bug。如遇问题，欢迎[提交 Issue](https://github.com/Slldyd2077/PowerfulTS/issues) 反馈。
 
@@ -113,29 +125,30 @@
 | **后端** | FastAPI · Uvicorn · httpx · SQLAlchemy (async) · aiosqlite · python-dotenv |
 | **数据层** | SQLite（默认零依赖文件库，可切 PostgreSQL/MySQL） |
 | **部署** | Docker · Docker Compose（跨平台一键部署） |
-| **运行时** | Node.js ≥ 18 · Python ≥ 3.11（仅手动部署需要；Docker 已内置） |
+| **运行时** | Node.js ≥ 22.12 · Python ≥ 3.11（仅手动部署需要；Docker 已内置） |
 
 ---
 
 ## 🏗️ 系统架构
 
-PowerfulTS 后端原生直连 TS3 ServerQuery，同时代理 TSMusicBot 的多媒体能力；对前端只暴露 `/api/*` 一个入口。
+PowerfulTS 后端原生直连 TS3 / TS6 ServerQuery，同时代理 TSMusicBot 的多媒体能力；对前端只暴露 `/api/*` 一个入口。Query 管理连接与机器人 UDP 语音连接分别配置。
 
 ```
-                          ┌──▶ TS3 ServerQuery (:10011)   监控 · 用户 · 频道 · 好友 · 认证（原生直连）
+                          ┌──▶ TS3 / TS6 ServerQuery     监控 · 用户 · 频道 · 好友 · 认证（原生直连）
+                          │    raw TCP :10011 / SSH :10022
 浏览器  ▶  Vue 3 SPA (:5173)  ▶  FastAPI (:8001)  ──┤
           (Vite 代理 /api)     原生数据层 + 代理网关   └──▶ TSMusicBot (:3000)            音乐搜索 · 点歌 · 播放控制 · B 站点播
-                                                                 （网易云 / QQ / B 站 多平台 · TS3/TS6 双协议）
+                                                                 （网易云 / QQ / B 站 多平台 · UDP 语音通常 :9987）
 ```
 
-- `/api/stats`、`/api/channels` → 原生 TS3 ServerQuery（概览 / 频道，直读）
-- `/api/auth/*`、`/api/friends/*` → 原生 TS3 ServerQuery + SQLite（认证 / 好友 / 账户）
+- `/api/stats`、`/api/channels` → 原生 TS3 / TS6 ServerQuery（概览 / 频道，直读）
+- `/api/auth/*`、`/api/friends/*` → 原生 TS3 / TS6 ServerQuery + SQLite（认证 / 好友 / 账户）
 - `/api/music/*` → TSMusicBot 音乐引擎（搜索 / 播放控制 / 平台账号登录）
 - `/api/music/voice/*` → 网页通话（浏览器 ⇄ TSMusicBot 的双向 Opus 中继 + 频道浏览/切换）
 - `/api/steam/*` → Steam OpenID 绑定与好友 / 游戏数据
 - `/api/bili/*` → Bilibili 浏览与点播（点播由 TSMusicBot 多平台引擎驱动）+ 图片代理
 
-> 监控、认证、社交等模块已由原生 TS3 ServerQuery 直连 + SQLite 数据层实现，不再依赖外部桥接服务。
+> 监控、认证、社交等模块使用 ServerQuery 直连 + SQLite 数据层；TS6 SSH 接入无需部署额外 Query 代理。TS6 的音乐播放与网页双向语音仍需在目标服务器验收，不能仅凭 Query 连通判定通过。
 
 ---
 
@@ -144,13 +157,13 @@ PowerfulTS 后端原生直连 TS3 ServerQuery，同时代理 TSMusicBot 的多�
 ```
 PowerfulTS/
 ├── assets/                      # 项目 LOGO、banner 与界面截图（screenshots/）
-├── backend/                     # FastAPI 后端 — 原生 TS3 直连 + 代理网关
+├── backend/                     # FastAPI 后端 — 原生 TS3 / TS6 Query 直连 + 代理网关
 │   ├── app/
-│   │   ├── core/config.py           # 配置：从环境变量读取 TSMusicBot / TS3 凭据
+│   │   ├── core/config.py           # 配置：TSMusicBot / TS3、TS6 共用的 TS3_* 凭据
 │   │   ├── models/                  # SQLAlchemy 模型（账号 / bot 归属 / 歌单 …）
 │   │   ├── routers/                 # music(含 voice) / bilibili / monitor / auth / friends / steam / admin
-│   │   ├── services/                # TSMusicBot 客户端 · TS3 监控 · 语音中继 · 通话 bot · Steam …
-│   │   └── main.py                  # 应用入口（原生数据层 + TS3 监控 + 多媒体代理）
+│   │   ├── services/                # TSMusicBot 客户端 · TS 监控 · 语音中继 · 通话 bot · Steam …
+│   │   └── main.py                  # 应用入口（原生数据层 + TS 监控 + 多媒体代理）
 │   ├── tests/                   # 后端测试
 │   ├── Dockerfile               # 后端镜像
 │   ├── .env.example             # 配置模板（复制为 .env 填写）
@@ -174,7 +187,16 @@ PowerfulTS/
 
 ## 🚀 快速开始
 
-### 方式一：NAS / 服务器直接拉取镜像（推荐）
+### 方式一：下载 Release（推荐）
+
+1. 安装并启动 Docker Desktop（Windows / macOS），或 Docker Engine + Compose v2（Linux / NAS）。Windows 必须使用 Linux containers。
+2. 从 [Releases](https://github.com/Slldyd2077/PowerfulTS/releases) 下载对应 CPU 的预构建包；普通 Intel / AMD 选 `amd64`，Apple Silicon / ARM64 NAS 选 `arm64`。Windows 优先 ZIP，Linux / macOS 优先 tar.gz。
+3. 解压到固定目录，Windows 双击 `start.cmd`，Linux / macOS 执行 `sh powerfults.sh start`。首次运行生成配置后会停止，按提示编辑 `backend.env` 填入 TS3 / TS6 ServerQuery 与 TSMusicBot 凭据，再次运行启动。TS6 SSH 接入需先按 [TS6 指南](docs/ts6-server.md) 准备可信主机公钥，并使用包含 SSH 适配的版本。
+4. 打开 `http://localhost:8080`。先通过 TS 身份验证码注册自己的管理员账号，再按安装指南开启局域网 / 公网访问。
+
+`data/` 与 `backend.env` 必须保留。预构建包包含镜像，可用 `docker load` 离线导入；TSMusicBot、TS3 或 TS6 服务端需另外部署。源码包首次启动需要联网构建。[详细安装、升级与排错](docs/release-guide.md)。
+
+### 方式二：NAS / 服务器直接拉取镜像
 
 在 NAS 的 Compose 项目中粘贴 [`docker-compose.nas.yml`](docker-compose.nas.yml)，直接修改其中的 TeamSpeak / TSMusicBot 地址与账号密码后部署。无需下载源码、编译镜像或准备 `.env` 文件。默认访问 `http://NAS的IP:8080`，数据保存在项目的 `data` 目录。
 
@@ -186,7 +208,7 @@ PowerfulTS/
 docker compose -f docker-compose.nas.yml up -d
 ```
 
-### 方式二：从源码构建 Docker 镜像
+### 方式三：从源码构建 Docker 镜像
 
 适用于 Linux 服务器、Windows、macOS、NAS 等所有支持 Docker 的平台。**无需本地安装 Python / Node.js。**
 
@@ -195,7 +217,7 @@ docker compose -f docker-compose.nas.yml up -d
 - 已安装 [Docker](https://docs.docker.com/get-docker/) 与 [Docker Compose](https://docs.docker.com/compose/install/)（Docker Desktop 自带）
 - 上游服务已就绪（见 [🔌 接入上游服务](#-接入上游服务)）：
   - **TSMusicBot**（音乐 / 点播引擎，默认 :3000；须使用 [专用分支 `merge/upstream-v1.12`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/merge/upstream-v1.12) 构建，v1.12.1+）
-  - **TS3 服务端**（开启 ServerQuery，默认 :10011）
+  - **TS3 或 TS6 服务端**（TS3 raw Query 通常 TCP :10011；TS6 开启 SSH Query，通常 TCP :10022；机器人语音通常 UDP :9987）
 
 #### 2. 配置环境变量
 
@@ -204,7 +226,7 @@ cd backend
 cp .env.example .env          # Windows PowerShell: copy .env.example .env
 ```
 
-编辑 `backend/.env`，填入 TSMusicBot 与 TS3 凭据（**关键：容器内地址需特殊配置，见下方说明**）：
+编辑 `backend/.env`，填入 TSMusicBot 与 TS3 / TS6 凭据（**关键：容器内地址需特殊配置，见下方说明**）：
 
 ```ini
 # TSMusicBot 音乐引擎
@@ -213,8 +235,9 @@ TSMUSIC_USER=你的TSMusicBot账号
 TSMUSIC_PASSWORD=你的TSMusicBot密码
 TSMUSIC_BOT_ID=你的bot实例id
 
-# TS3 ServerQuery
+# TeamSpeak ServerQuery（下例为 TS3 raw TCP）
 TS3_HOST=host.docker.internal                  # ← 同上
+TS3_QUERY_TRANSPORT=raw
 TS3_QUERY_PORT=10011
 TS3_QUERY_USER=你的ServerQuery账号
 TS3_QUERY_PASSWORD=你的ServerQuery密码
@@ -224,11 +247,13 @@ TS3_SID=1
 CORS_ORIGINS=http://localhost:8080
 ```
 
+TS6 改为 `TS3_QUERY_TRANSPORT=ssh`、`TS3_QUERY_PORT=10022`、`TS3_QUERY_SSH_KNOWN_HOSTS=/app/data/known_hosts`，并先完成[主机公钥核验](docs/ts6-server.md#核验-ssh-主机公钥)。只改 transport 不会覆盖 `.env` 里显式填写的旧端口。源码 Compose 使用命名数据卷，公钥文件放入该卷的 `/app/data/known_hosts`；Release 使用安装目录的 `data/known_hosts`。
+
 > **🐳 容器网络地址说明**（Docker 部署必读）
 >
-> 容器内的 `127.0.0.1` 指向容器自身，**不是宿主机**。因此当 TSMusicBot / TS3 运行在宿主机时：
+> 容器内的 `127.0.0.1` 指向容器自身，**不是宿主机**。因此当 TSMusicBot / TS3 / TS6 运行在宿主机时：
 > - **Windows / macOS（Docker Desktop）**：用 `host.docker.internal`（如上例）。
-> - **Linux**：`host.docker.internal` 默认不可用，需改用**宿主机内网 IP**（如 `192.168.1.100`），或在 `docker-compose.yml` 的 backend 服务加 `extra_hosts: ["host.docker.internal:host-gateway"]`。
+> - **Linux**：本项目 Compose 已添加 `host.docker.internal:host-gateway` 映射；也可使用**宿主机内网 IP**（如 `192.168.1.100`）。
 > - 若 TSMusicBot 也用 Docker 且在同一 compose 网络，则用服务名（如 `http://tsmusic:3000`）。
 
 #### 3. 启动
@@ -263,19 +288,19 @@ frontend:
 
 ---
 
-### 方式三：手动部署（开发 / 无 Docker 环境）
+### 方式四：手动部署（开发 / 无 Docker 环境）
 
 #### 1. 前提条件
 
-- Node.js ≥ 18、pnpm
+- Node.js ≥ 22.12、pnpm 10.27.0
 - Python ≥ 3.11、[uv](https://docs.astral.sh/uv/)（推荐）或 pip
-- 上游服务运行中：TSMusicBot（:3000）、TS3 服务端（ServerQuery :10011）
+- 上游服务运行中：TSMusicBot（:3000）、TS3 或 TS6 服务端（raw Query TCP :10011 / SSH Query TCP :10022）
 
 #### 2. 后端
 
 ```bash
 cd backend
-cp .env.example .env          # 编辑 .env 填入 TSMusicBot / TS3 凭据
+cp .env.example .env          # 编辑 .env 填入 TSMusicBot / TS3、TS6 凭据
 uv sync                       # 安装依赖（或 pip install -r requirements.txt）
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 ```
@@ -312,8 +337,10 @@ pnpm build                    # 输出到 dist/，可用任意静态服务器（
 | `TSMUSIC_PASSWORD` | ✅ | TSMusicBot WebUI 登录密码 | — |
 | `TSMUSIC_BOT_ID` | ✅ | 默认操作的 bot 实例 id | — |
 | `LIVE_AUDIO_PUBLIC_URL` | — | TSMusicBot 可访问的 PowerfulTS 后端地址；跨 Docker 网络时配置 | 从当前请求推断 |
-| `TS3_HOST` | ✅ | TS3 服务端地址（容器内用 `host.docker.internal`） | `127.0.0.1` |
-| `TS3_QUERY_PORT` | ✅ | ServerQuery 端口 | `10011` |
+| `TS3_HOST` | ✅ | TS3 / TS6 服务端地址（容器内用 `host.docker.internal`） | `127.0.0.1` |
+| `TS3_QUERY_TRANSPORT` | — | `raw` 或 `ssh`；TS6 使用 SSH Query | `raw` |
+| `TS3_QUERY_PORT` | — | ServerQuery TCP 端口；显式值优先于 transport 默认值 | raw `10011` / ssh `10022` |
+| `TS3_QUERY_SSH_KNOWN_HOSTS` | SSH 时需可信公钥 | known_hosts 文件路径；也读取运行用户的系统 known_hosts，拒绝未知或变更的主机公钥 | 留空；Docker 推荐 `/app/data/known_hosts` |
 | `TS3_QUERY_USER` | ✅ | ServerQuery 账号 | — |
 | `TS3_QUERY_PASSWORD` | ✅ | ServerQuery 密码 | — |
 | `TS3_SID` | ✅ | 虚拟服务器 ID | `1` |
@@ -323,13 +350,13 @@ pnpm build                    # 输出到 dist/，可用任意静态服务器（
 
 **获取 TSMusicBot 凭据：** 在 TSMusicBot WebUI（默认 `http://localhost:3000`）登录所用的账号密码与 bot 实例 id，填入 `TSMUSIC_*`；后端会自动登录并代理其音乐 API，用户只与 PowerfulTS 交互。
 
-**获取 TS3 ServerQuery 凭据：** 在 TS3 服务端创建 ServerQuery 账号（监控需 `clientlist` / `channellist` 读权限）。
+**获取 ServerQuery 凭据：** 在 TS3 / TS6 服务端创建专用 Query 账号（监控需 `clientlist` / `channellist` 读权限，注册验证码需私聊权限）。TS6 要开启 SSH Query 并核验主机公钥，详见 [TS6 指南](docs/ts6-server.md)。配置变量的 `TS3_` 前缀不限制服务端版本。
 
 ---
 
 ## 🔌 接入上游服务
 
-PowerfulTS 本身不含 TS3 服务端与音乐引擎，需接入两个上游：
+PowerfulTS 本身不含 TeamSpeak 服务端与音乐引擎，需接入两个上游：
 
 ### TSMusicBot（音乐 / 点播引擎）
 
@@ -337,12 +364,19 @@ PowerfulTS 本身不含 TS3 服务端与音乐引擎，需接入两个上游：
 - 自行部署后，将 `TSMUSIC_URL` 指向其地址，并填入账号密码与 bot id
 - 它同时提供音乐搜索、播放控制与 **B 站点播**（PowerfulTS 的 `/api/bili/*` 即委托其 `platform=bilibili` 能力）
 
-### TS3 服务端（监控 / 认证数据源）
+### TS3 / TS6 服务端（监控 / 认证数据源）
 
-- 开启 **ServerQuery**（默认 :10011），创建专用账号填入 `TS3_QUERY_*`
+- TS3：开启 raw **ServerQuery**（通常 TCP :10011），使用 `TS3_QUERY_TRANSPORT=raw`；也可连接已开启的 SSH Query
+- TS6：开启 **SSH ServerQuery**（官方配置默认关闭，通常 TCP :10022），使用 `TS3_QUERY_TRANSPORT=ssh` 并准备可信主机公钥；配置示例与官方来源见 [TS6 指南](docs/ts6-server.md)
+- 创建专用账号填入 `TS3_QUERY_USER` / `TS3_QUERY_PASSWORD`，并用 `TS3_SID` 选择虚拟服务器
 - PowerfulTS 通过 ServerQuery 长连接轮询在线用户 / 频道 / 游戏状态
+- TSMusicBot 连接相同虚拟服务器的 **UDP 语音端口**（通常 :9987），其 bot 配置中的 port 不可填 Query 的 10022
 
+<<<<<<< HEAD
 > 两者均可运行在宿主机、独立容器或同一 compose 网络中，按 [NAS 服务地址与回调说明](docs/nas.md#服务地址与回调)或上方源码部署的容器网络说明配置连接地址即可。
+=======
+> 两者均可运行在宿主机、独立容器或同一 compose 网络中，按 [容器网络地址说明](docs/release-guide.md#容器网络与远程访问) 配置连接地址即可。
+>>>>>>> origin/main
 
 ---
 
@@ -376,7 +410,7 @@ PowerfulTS 本身不含 TS3 服务端与音乐引擎，需接入两个上游：
 - 浏览器需支持 **WebCodecs `AudioDecoder`**（Chrome / Edge 等 Chromium 内核）；不支持时会明确报错而不是静默失灵。
 - 生产环境需 HTTPS（localhost 开发环境除外），否则拿不到麦克风权限。
 - TSMusicBot 需要带 `/api/voice/downlink/:botId` 下行接口与 `POST /api/player/:botId/live` 实时流入口。**改完 TSMusicBot 源码要重新 build 镜像并重建容器**，否则跑的还是旧代码。
-- 若 TSMusicBot 无法通过浏览器所用域名反连 PowerfulTS，把 `LIVE_AUDIO_PUBLIC_URL` 设为它能访问的后端地址（例如 `http://host.docker.internal:8001`）。
+- 若 TSMusicBot 无法通过浏览器所用域名反连 PowerfulTS，把 `LIVE_AUDIO_PUBLIC_URL` 设为它能访问的面板地址（例如 `http://host.docker.internal:8080`），面板需绑定上游可访问的地址；在 TSMusicBot 设置同值 `POWERFUL_TS_ORIGIN`。
 - **建议戴耳机**；同一台设备不要让 TS 客户端和网页同时待在同一频道，否则会形成回声。
 
 > 实现细节与协议见 [`docs/web-voice-downlink-spec.md`](docs/web-voice-downlink-spec.md)。
@@ -394,7 +428,7 @@ PowerfulTS 本身不含 TS3 服务端与音乐引擎，需接入两个上游：
 - 生产环境需要 HTTPS（localhost 开发环境除外），建议使用最新版 Chrome / Edge。
 - 优先选择单个应用窗口。共享整个屏幕可能把 TeamSpeak 的声音再次录入，造成回声。
 - TSMusicBot 需要包含 `POST /api/player/:botId/live` 实时流入口。
-- 如果 TSMusicBot 无法通过浏览器访问的域名反向连接 PowerfulTS，可将 `LIVE_AUDIO_PUBLIC_URL` 设置为它能访问的后端地址，例如 `http://host.docker.internal:8001`。
+- 如果 TSMusicBot 无法通过浏览器访问的域名反向连接 PowerfulTS，可将 `LIVE_AUDIO_PUBLIC_URL` 设置为它能访问的面板地址，例如 `http://host.docker.internal:8080`，并按[语音回连说明](docs/release-guide.md#容器网络与远程访问)配置监听地址和 `POWERFUL_TS_ORIGIN`。
 
 ---
 
@@ -443,7 +477,7 @@ backend:
 
 | 平台 | 说明 |
 |------|------|
-| **Linux 服务器** | 安装 Docker + Compose 插件，按 Docker 教程部署；TSMusicBot/TS3 用宿主内网 IP 或 `host-gateway` |
+| **Linux 服务器** | 安装 Docker + Compose 插件，按 Docker 教程部署；TSMusicBot/TS3/TS6 用宿主内网 IP 或 `host-gateway` |
 | **Windows / macOS** | 安装 [Docker Desktop](https://www.docker.com/products/docker-desktop/)，上游地址用 `host.docker.internal` |
 | **NAS（群晖 / 威联通等）** | 使用 [`docker-compose.nas.yml`](docker-compose.nas.yml) 直接拉取镜像，参见 [NAS 安装说明](docs/nas.md)；支持 x86_64 / ARM64，注意 NAS 防火墙放行端口 |
 | **反向代理 / HTTPS** | 将 nginx（frontend 容器）置于 Caddy / Traefik / Nginx 之后，并在 `CORS_ORIGINS` 填入最终访问域名 |
@@ -455,6 +489,7 @@ backend:
 - 所有凭据通过环境变量注入，源码中**无任何硬编码秘钥**；`.env` 已被 `.gitignore` 忽略。
 - 统一鉴权：`X-Session-Token` 先校验真实会话，再按角色授权；普通接口拒绝 guest，只有网页通话接口接受两小时游客会话，无效会话一律 401。
 - CORS 默认收敛为白名单（`CORS_ORIGINS`），生产部署请改为实际域名。
+- SSH ServerQuery 校验可信主机公钥，拒绝未知或已变更的公钥；不自动信任 `ssh-keyscan` 的结果。raw TCP Query 只用于可信内网或已有安全隧道。
 - B 站图片代理 `/api/bili/pic` 限制为 B 站 CDN 域名白名单，防止 SSRF。
 - 网页通话的收听凭据是 32 字节一次性票据（30 秒过期、只能消费一次），不把登录 Token 放进 WebSocket URL。
 - 切换频道由通话 bot 以**自己的 TS 客户端身份**执行，频道密码由服务端正常校验；刻意不走 ServerQuery `clientmove`——查询管理员通常持有 `b_channel_join_ignore_password`，那条路会直接绕过频道密码。
@@ -465,12 +500,13 @@ backend:
 ## 🗺️ 路线图
 
 - [x] 账户 / 概览 / 音乐 / 平台账号 / 社交（核心功能）
-- [x] 原生 TS3 ServerQuery 直连（概览 / 认证 / 好友）
+- [x] 原生 TS3 / TS6 ServerQuery 直连（raw TCP / SSH；概览 / 认证 / 好友）
 - [x] 音乐与点播引擎迁移至 TSMusicBot（网易云 / QQ / 酷狗 / B 站 多平台）
 - [x] Steam 集成（OpenID 绑定 · 好友在线 · 共同游戏 · 时长排行）
 - [x] Docker 化跨平台一键部署
 - [x] 网页通话（浏览器直连频道语音，双向）
 - [ ] 网页通话：多人同时接入的实机压测与延迟基线
+- [ ] TS6：目标服务器上的音乐播放、频道密码和网页双向语音实机验收
 
 ---
 
@@ -493,13 +529,16 @@ backend:
 ## ❓ 常见问题（FAQ）
 
 **Q：访问 `localhost:8080` 打不开 / 502？**
-检查容器状态 `docker compose ps` 与日志 `docker compose logs -f`。502 多为后端未就绪或上游 TSMusicBot/TS3 不可达。
+检查容器状态 `docker compose ps` 与日志 `docker compose logs -f`。502 多为后端未就绪或上游 TSMusicBot / TeamSpeak 不可达。
 
 **Q：音乐搜索 / B站点播无结果？**
 确认 `TSMUSIC_*` 配置正确、TSMusicBot 在线，且容器能访问其地址（容器内勿用 `127.0.0.1`，用 `host.docker.internal` 或宿主 IP）。
 
 **Q：监控无数据 / 在线用户为空？**
-检查 `TS3_QUERY_*` 凭据是否正确、ServerQuery 是否开启、容器到 TS3 的 :10011 是否可达。
+检查 `TS3_QUERY_*` 凭据、虚拟服务器 ID、Query transport 和 TCP 端口。TS3 raw 通常 :10011；TS6 SSH 通常 :10022，且服务端需显式开启 SSH Query。SSH 模式还要确认后端能读取 known_hosts 且其中记录与 `TS3_HOST` / 端口一致，详见 [TS6 排错](docs/ts6-server.md#排错)。
+
+**Q：TS6 连接配置为什么还是 `TS3_*`？10022 可以用作音乐机器人的端口吗？**
+`TS3_*` 为兼容旧配置保留，TS3 / TS6 共用。10022 是 SSH Query 管理端口；音乐机器人和网页通话连接 UDP 语音端口，通常为 9987。修改 Query transport 不需要向 TSMusicBot API 添加 `serverProtocol` 参数。
 
 **Q：登录后提示跨域 / CORS 错误？**
 将实际访问地址加入 `CORS_ORIGINS`（逗号分隔），如 `http://localhost:8080,https://ts.example.com`，重启后端。

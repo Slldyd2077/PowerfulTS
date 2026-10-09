@@ -14,7 +14,7 @@
 # 约定：提交信息用 feat:/fix:/docs:/refactor: 等前缀，cz bump 会据此判定版本变化。
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.12.8"
+version = "1.0.0"
 version_files = [
   "pyproject.toml:version",
   "backend/pyproject.toml:version",
@@ -24,6 +24,5 @@ version_files = [
 tag_format = "v$version"
 update_changelog_on_bump = true
 annotated_tag = true
-# 当前处于 0.x 阶段：major_version_zero 让 feat 只升 minor、不兼容改动也只升 minor，
-# 避免首次 feat 把版本直接顶到 1.0.0（遵循 SemVer 0.y.z 惯例）。
-major_version_zero = true
+# 从 v1.0.0 起按正式 SemVer 升级：feat 升 minor，破坏性变更升 major。
+major_version_zero = false

@@ -56,11 +56,7 @@ def _safe_int(value: object) -> int | None:
 
 def _login(conn: TS3QueryClient, settings: Settings) -> None:
     conn.connect()
-    conn.send(
-        "login",
-        client_login_name=settings.ts3_query_user,
-        client_login_password=settings.ts3_query_password,
-    )
+    conn.authenticate(settings.ts3_query_user, settings.ts3_query_password)
     conn.send("use", sid=settings.ts3_sid)
 
 
@@ -80,7 +76,12 @@ def kick_real_ts_client_for_account(
     expected_uid = str(getattr(account, "unique_identifier", "") or "").strip()
     expected_nickname = str(getattr(account, "ts_nickname", "") or "").strip()
     verified_identity = _has_registered_ts_identity(account)
-    conn = TS3QueryClient(settings.ts3_host, settings.ts3_query_port)
+    conn = TS3QueryClient(
+        settings.ts3_host, settings.ts3_query_port,
+        transport=getattr(settings, "ts3_query_transport", "raw"),
+        username=settings.ts3_query_user, password=settings.ts3_query_password,
+        ssh_known_hosts=getattr(settings, "ts3_query_ssh_known_hosts", "") or None,
+    )
     try:
         _login(conn, settings)
         kick_clids: list[int] = []
@@ -138,7 +139,12 @@ def is_ts_client_connection_present(
     clid: int,
 ) -> bool:
     """Revalidate a monitor arrival against a fresh ServerQuery snapshot."""
-    conn = TS3QueryClient(settings.ts3_host, settings.ts3_query_port)
+    conn = TS3QueryClient(
+        settings.ts3_host, settings.ts3_query_port,
+        transport=getattr(settings, "ts3_query_transport", "raw"),
+        username=settings.ts3_query_user, password=settings.ts3_query_password,
+        ssh_known_hosts=getattr(settings, "ts3_query_ssh_known_hosts", "") or None,
+    )
     try:
         _login(conn, settings)
         for client in conn.send("clientlist", uid=True):

@@ -1,0 +1,38 @@
+name: powerfults
+
+services:
+  backend:
+    image: powerfults-backend:${POWERFULTS_VERSION:?Use the start launcher}
+    build: ./backend
+    restart: unless-stopped
+    env_file: ./backend.env
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "${POWERFULTS_BACKEND_BIND:-127.0.0.1}:${POWERFULTS_BACKEND_PORT:-8001}:8001"
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      retries: 6
+      start_period: 20s
+
+  frontend:
+    image: powerfults-frontend:${POWERFULTS_VERSION:?Use the start launcher}
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${POWERFULTS_BIND:-127.0.0.1}:${POWERFULTS_PORT:-8080}:80"
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s

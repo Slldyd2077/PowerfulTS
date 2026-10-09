@@ -7,7 +7,10 @@
 #
 # 上游依赖（需另行部署，详见 README「接入上游服务」）：
 #   - TSMusicBot（音乐/点播引擎，默认 :3000）
-#   - TS3 服务端（开启 ServerQuery，默认 :10011）
+#   - TS3 / TS6 服务端（TS3 raw Query TCP :10011；TS6 SSH Query TCP :10022，需显式开启）
+# TS6：backend/.env 设 TS3_QUERY_TRANSPORT=ssh、TS3_QUERY_PORT=10022，
+#      TS3_QUERY_SSH_KNOWN_HOSTS=/app/data/known_hosts；核验后的公钥文件放入 backend 数据卷。
+# TSMusicBot 连接 UDP 语音端口（通常 :9987），不使用 Query 端口。详见 docs/ts6-server.md。
 
 services:
   backend:
@@ -19,10 +22,12 @@ services:
       - ./backend/.env
     environment:
       TZ: Asia/Shanghai
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - powerfults-data:/app/data   # SQLite 持久化
     ports:
-      - "8001:8001"                 # 后端直接暴露（健康检查/调试；仅前端访问可删除此行）
+      - "127.0.0.1:8001:8001"       # 健康检查/调试；上游反连使用面板 :8080
     networks:
       - powerfults
 
@@ -32,7 +37,8 @@ services:
     container_name: powerfults-frontend
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "8080:80"                   # 面板入口 → http://localhost:8080
     networks:

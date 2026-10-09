@@ -8,3 +8,5 @@ Pillow>=10.0.0
 python-dotenv>=1.0.0
 sqlalchemy[asyncio]>=2.0.0
 aiosqlite>=0.20.0
+# Native TS3/TS6 SSH ServerQuery; exact runtime versions are in requirements.lock.txt.
+paramiko>=5,<6

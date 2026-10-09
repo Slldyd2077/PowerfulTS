@@ -60,3 +60,6 @@ backend/uvicorn.out.log
 
 # 部署备份目录（本地发布前的快照，勿提交）
 .deploy-backup/
+
+# Isolated release builds, test environments and generated archives
+.release/

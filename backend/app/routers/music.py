@@ -76,10 +76,11 @@ async def _strict_owned_bot_id(
     db: AsyncSession = Depends(get_db),
 ) -> str | None:
     """严格 owner 校验：仅 bot 的 owner 可用（delete/配置/profile/avatar/平台账号 auth）。"""
-    if bot_id:
-        owned = await _owned_bot_ids(db, account.id)
-        if bot_id not in owned:
-            raise HTTPException(status_code=403, detail="仅 Bot 主人可执行此操作")
+    if not bot_id:
+        raise HTTPException(status_code=400, detail="平台账号操作必须指定 botId")
+    owned = await _owned_bot_ids(db, account.id)
+    if bot_id not in owned:
+        raise HTTPException(status_code=403, detail="仅 Bot 主人可执行此操作")
     return bot_id
 
 

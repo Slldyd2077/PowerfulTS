@@ -19,7 +19,7 @@ usePolling(() => monitor.fetchStats(), 5000)
       <div class="page-header">
         <div class="page-title-group">
           <h1 class="page-title">服务器监控</h1>
-          <span class="page-sub label-mono">SERVER MONITOR · TS3</span>
+          <span class="page-sub label-mono">SERVER MONITOR · TS3 / TS6 · {{ (monitor.stats?.serverquery_transport ?? 'raw').toUpperCase() }}</span>
         </div>
         <div class="page-meta">
           <span v-if="monitor.stats?.monitor_running === false" class="meta-off">

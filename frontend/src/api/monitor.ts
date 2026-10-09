@@ -18,6 +18,7 @@ export interface StatsData {
   server_port?: number
   last_update?: string
   monitor_running?: boolean
+  serverquery_transport?: 'raw' | 'ssh'
   mining_users?: string[]
   mining_pools?: Record<string, string[]>
 }
@@ -35,7 +36,7 @@ export interface ChannelInfo {
   depth: number
 }
 
-/** 获取 TS3 服务器统计 */
+/** 获取 TS3 / TS6 服务器统计 */
 export async function getStats(): Promise<StatsData> {
   const { data } = await apiClient.get('/stats')
   return data

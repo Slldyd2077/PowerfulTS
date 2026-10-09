@@ -15,8 +15,8 @@ RUN apt-get update \
 WORKDIR /app
 
 # 先装依赖（利用 Docker 层缓存：依赖不变时跳过重装）
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.lock.txt .
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock.txt
 
 # 应用代码
 COPY app ./app
@@ -26,5 +26,8 @@ RUN mkdir -p /app/data
 VOLUME ["/app/data"]
 
 EXPOSE 8001
+
+HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=6 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=4)"
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]

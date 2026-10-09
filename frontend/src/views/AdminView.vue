@@ -121,7 +121,7 @@ async function save() {
   try {
     const res = await putAdminSettings(items)
     if (res.need_restart) {
-      ElMessage.warning('已保存。TS3 / CORS 改动需重启后端才生效')
+      ElMessage.warning('已保存。ServerQuery / CORS 改动需重启后端才生效')
     } else if (res.reloaded.length) {
       ElMessage.success(`已保存并热重载: ${res.reloaded.join(', ')}`)
     } else {
@@ -288,6 +288,7 @@ onMounted(() => {
       </section>
 
       <!-- 系统设置 -->
+      <p class="hint">TS6 的 SSH Query 传输与可信 known_hosts 文件请在后端配置文件中设置。Query TCP 10022 与语音 UDP 9987 是不同端口。</p>
       <div v-for="(s, key) in settings" :key="key" class="field">
         <label>
           <span class="field-label">{{ s.label }}</span>

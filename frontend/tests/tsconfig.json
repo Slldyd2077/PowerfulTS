@@ -18,9 +18,11 @@
     "../src/services/watch-playback.ts",
     "./watch-playback.test.ts",
     "../src/services/theme-palette.ts",
+    "../src/services/polling-scheduler.ts",
     "./microphone-uplink.test.ts",
     "./login-mobile-layout.test.ts",
     "./voice-downlink-policy.test.ts",
-    "./theme-palette.test.ts"
+    "./theme-palette.test.ts",
+    "./polling-scheduler.test.ts"
   ]
 }
