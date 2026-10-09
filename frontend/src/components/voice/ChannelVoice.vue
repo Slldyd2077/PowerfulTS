@@ -815,23 +815,19 @@ onBeforeUnmount(() => {
         <span class="setting-label">麦克风音量 <b>{{ microphoneVolume }}%</b></span>
         <input v-model.number="microphoneVolume" type="range" min="0" max="200" @change="setMicrophoneVolume">
       </label>
-      <label class="setting">
+      <label class="setting" for="voice-input-device">
         <span class="setting-label">麦克风设备</span>
-        <select v-model="selectedInput" @change="onInputDeviceChange">
-          <option value="">系统默认</option>
-          <option v-for="(device, i) in inputDevices" :key="device.deviceId" :value="device.deviceId">
-            {{ deviceLabel(device, i, '麦克风') }}
-          </option>
-        </select>
+        <el-select id="voice-input-device" v-model="selectedInput" aria-label="麦克风设备" :empty-values="[null, undefined]" :show-arrow="false" :offset="6" @change="onInputDeviceChange">
+          <el-option value="" label="系统默认" />
+          <el-option v-for="(device, i) in inputDevices" :key="device.deviceId" :value="device.deviceId" :label="deviceLabel(device, i, '麦克风')" />
+        </el-select>
       </label>
-      <label v-if="canChooseOutput" class="setting">
+      <label v-if="canChooseOutput" class="setting" for="voice-output-device">
         <span class="setting-label">播放设备</span>
-        <select v-model="selectedOutput" @change="applyOutputDevice">
-          <option value="">系统默认</option>
-          <option v-for="(device, i) in outputDevices" :key="device.deviceId" :value="device.deviceId">
-            {{ deviceLabel(device, i, '扬声器') }}
-          </option>
-        </select>
+        <el-select id="voice-output-device" v-model="selectedOutput" aria-label="播放设备" :empty-values="[null, undefined]" :show-arrow="false" :offset="6" @change="applyOutputDevice">
+          <el-option value="" label="系统默认" />
+          <el-option v-for="(device, i) in outputDevices" :key="device.deviceId" :value="device.deviceId" :label="deviceLabel(device, i, '扬声器')" />
+        </el-select>
       </label>
       <div v-else class="setting">
         <span class="setting-label">播放设备</span>
@@ -943,34 +939,6 @@ p { margin: 0; color: var(--text-secondary); font-size: .76em; line-height: 1.6;
 .setting-label { color: var(--text-muted); font-size: .64em; font-weight: 600; }
 .setting-label b { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .setting input[type="range"] { width: 100%; accent-color: var(--color-primary); }
-.setting select {
-  appearance: none;
-  width: 100%;
-  min-width: 0;
-  min-height: 38px;
-  padding: 8px 36px 8px 11px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
-  color-scheme: dark;
-  background-color: var(--surface-2);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237387a5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 11px center;
-  color: var(--text-primary);
-  font-family: inherit;
-  font-size: .7em;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .025);
-  cursor: pointer;
-  transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
-}
-.setting select:hover { border-color: var(--border-emphasis); background-color: #0e1d32; }
-.setting select:focus-visible {
-  outline: none;
-  border-color: rgba(var(--color-primary-rgb), .62);
-  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), .14);
-}
-.setting select:disabled { opacity: .52; cursor: not-allowed; }
-.setting select option { background-color: var(--surface-2); color: var(--text-primary); }
 .system-device {
   display: flex;
   min-height: 38px;

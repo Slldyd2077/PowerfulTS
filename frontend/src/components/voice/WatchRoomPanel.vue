@@ -169,17 +169,17 @@ onBeforeUnmount(() => {
 
     <template v-if="connected">
       <div v-if="isHost" class="host-transfer">
-        <label>转交房主<select v-model="nextHost"><option value="">选择同频道成员</option><option v-for="peer in hostCandidates" :key="peer.id" :value="peer.id">{{ peer.nickname }}</option></select></label>
+        <label for="watch-next-host">转交房主<el-select id="watch-next-host" v-model="nextHost" aria-label="转交房主" placeholder="选择同频道成员" no-data-text="暂无可转交的成员" :show-arrow="false" :offset="6"><el-option v-for="peer in hostCandidates" :key="peer.id" :value="peer.id" :label="peer.nickname" /></el-select></label>
         <button type="button" :disabled="!hostCandidates.some(peer => peer.id === nextHost)" @click="transferHost(nextHost); nextHost = ''">转交</button>
         <p class="hint">转交同步观看会保留视频进度；转交屏幕共享会结束当前画面，由新房主选择自己的窗口。</p>
       </div>
       <p v-else-if="room.host" class="hint">房主：{{ hostName }}。需要分享自己的内容时，请房主转交权限。</p>
       <div v-if="!share && (!room.host || isHost)" class="share-controls">
-        <label>观看方式
-          <select v-model="source">
-            <option value="site">网站视频（配套浏览器扩展）</option>
-            <option value="direct">视频直链（MP4 / WebM 等）</option>
-          </select>
+        <label for="watch-source">观看方式
+          <el-select id="watch-source" v-model="source" aria-label="观看方式" :show-arrow="false" :offset="6">
+            <el-option value="site" label="网站视频（配套浏览器扩展）" />
+            <el-option value="direct" label="视频直链（MP4 / WebM 等）" />
+          </el-select>
         </label>
         <label>视频地址<input v-model="url" type="url" placeholder="https://…" maxlength="2048" /></label>
         <div class="watch-options">
@@ -240,23 +240,25 @@ onBeforeUnmount(() => {
 .panel-heading, .share-heading, .actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 h2 { margin: 0; font-size: 0.98em; color: var(--text-primary); }
 .panel-heading p, .hint, .site-watch p { font-size: 0.74em; line-height: 1.7; color: var(--text-secondary); }
-button, select, input { font: inherit; font-size: 0.78em; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-elevated); color: var(--text-primary); padding: 8px 10px; }
+button, input:not([type="checkbox"]) { font: inherit; font-size: 0.78em; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-elevated); color: var(--text-primary); padding: 8px 10px; }
 button { cursor: pointer; } button:disabled { opacity: 0.5; cursor: default; }
 .share-controls { display: grid; gap: 12px; margin-top: 16px; }
 label { display: grid; gap: 6px; font-size: 0.9em; color: var(--text-secondary); min-width: 0; }
-input, select { width: 100%; box-sizing: border-box; min-width: 0; }
+input:not([type="checkbox"]) { width: 100%; box-sizing: border-box; min-width: 0; }
 .actions { justify-content: flex-start; }
 .active-share { margin-top: 16px; display: grid; gap: 12px; }
 .host-transfer { margin-top: 12px; display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
 .host-transfer .hint { width: 100%; margin: 0; }
+.host-transfer > label { flex: 1; max-width: 320px; }
 .watch-options { display: flex; flex-wrap: wrap; gap: 10px; }
-.watch-options label { display: flex; align-items: center; font-size: 0.75em; }
-.watch-options input { width: auto; }
+.watch-options label { display: flex; align-items: center; min-height: 32px; gap: 8px; font-size: 0.75em; cursor: pointer; }
+.watch-options label:has(input:disabled) { color: var(--text-muted); cursor: not-allowed; }
 .waiting { font-size: 0.78em; line-height: 1.7; color: var(--color-accent); margin: 0; }
 .share-heading { font-size: 0.85em; color: var(--text-primary); }
 .shared-video { display: block; width: 100%; max-height: 60vh; border-radius: 8px; background: #000; }
 .shared-video:fullscreen { width: 100vw; height: 100vh; max-height: none; border-radius: 0; object-fit: contain; }
 .error { color: var(--color-danger, #ef6666); font-size: 0.8em; }
 a { color: var(--color-accent); overflow-wrap: anywhere; }
+@media (pointer: coarse) { .watch-options label { min-height: 44px; } }
 @media (max-width: 768px) { .watch-panel { padding: 16px; } }
 </style>
