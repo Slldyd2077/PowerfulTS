@@ -15,8 +15,12 @@
   "include": [
     "../src/services/microphone-uplink.ts",
     "../src/services/voice-downlink-policy.ts",
+    "../src/services/watch-playback.ts",
+    "./watch-playback.test.ts",
+    "../src/services/theme-palette.ts",
     "./microphone-uplink.test.ts",
     "./login-mobile-layout.test.ts",
-    "./voice-downlink-policy.test.ts"
+    "./voice-downlink-policy.test.ts",
+    "./theme-palette.test.ts"
   ]
 }

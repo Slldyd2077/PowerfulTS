@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import ChannelVoice from '@/components/voice/ChannelVoice.vue'
 import ChannelBrowser from '@/components/voice/ChannelBrowser.vue'
 import EntrySoundPanel from '@/components/voice/EntrySoundPanel.vue'
+import WatchRoomPanel from '@/components/voice/WatchRoomPanel.vue'
 
 const browser = ref<InstanceType<typeof ChannelBrowser> | null>(null)
 
@@ -24,6 +25,7 @@ function onSessionChange() {
     <div class="voice-body">
       <div class="voice-column">
         <ChannelVoice @session-change="onSessionChange" />
+        <WatchRoomPanel />
         <EntrySoundPanel />
 
         <section class="voice-guide">

@@ -1,5 +1,6 @@
 # ── 构建阶段：Vue 3 + Vite 编译 ──
-FROM node:22-alpine AS build
+# 静态资源在构建机架构上编译，避免 ARM64 镜像构建时模拟运行 Node。
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml ./

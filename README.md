@@ -30,7 +30,7 @@
 
 > 🍴 **TSMusicBot 专用分支**：本项目的音乐引擎与网页通话中继依赖 [TSMusicBot](https://github.com/Slldyd2077/teamspeak-music-bot) 的专用定制分支 [`merge/upstream-v1.12`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/merge/upstream-v1.12)——per-bot 多实例架构、双向 Opus 语音中继、语音闪避（含网页通话触发）等接口仅存在于该分支。**部署时必须使用该分支构建的 TSMusicBot**（v1.12.1+），上游 [ZHANGTIANYAO1/teamspeak-music-bot](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot) 的原版不支持这些能力。
 
-> 💡 **跨平台**：提供完整 Docker 化方案，Linux / Windows / macOS / NAS（群晖、威联通等）均可一键部署。
+> 💡 **跨平台**：提供源码构建与 [NAS 直接拉取镜像](docs/nas.md)两种 Docker 部署方案，支持 Linux / Windows / macOS / NAS（群晖、威联通等）。NAS 模板需维护者先完成首次镜像发布。
 
 > ⚠️ **早期测试版本**：本项目目前处于**早期开发与测试阶段**，功能仍在快速迭代中，存在诸多 Bug。如遇问题，欢迎[提交 Issue](https://github.com/Slldyd2077/PowerfulTS/issues) 反馈。
 
@@ -42,6 +42,7 @@
 |------|:----:|------|
 | 👤 账户 | ✅ | 登录 / 注册（QQ + TS 昵称绑定 + 验证码） |
 | 🎙️ **网页通话** | ✅ | **不装 TS 客户端，直接在网页收听频道并发言**：以自己的昵称接入、浏览并切换频道（支持频道密码）、按人调节音量、麦克风增益与输入输出设备选择 |
+| 🖥️ 一起看 / 屏幕共享 | ✅ | 每个网页通话频道一个画面，首位分享者为房主、支持转交；视频同步默认等待缓冲并允许成员暂停，网页视频通过配套扩展同步进度，屏幕 / 窗口使用 WebRTC 共享 |
 | 👥 在线用户 | ✅ | 昵称 · 游戏 · 所在频道 · 在线时长 · 各游戏人数分布 |
 | 📡 频道列表 | ✅ | 频道树浏览 · 各频道在场成员 |
 | 🎵 音乐中心 | ✅ | 搜索 · 点歌 · 队列 · 音量 · 播放模式 · 语音闪避（有人说话自动压低音乐）（网易云 / QQ / 酷狗 / B 站） |
@@ -163,7 +164,9 @@ PowerfulTS/
 │   ├── nginx.conf               # 静态托管 + /api 反向代理
 │   └── vite.config.ts
 ├── docs/                        # 设计与校验文档
-├── docker-compose.yml           # 一键编排（backend + frontend）
+├── docker-compose.yml           # 从源码构建（backend + frontend）
+├── docker-compose.nas.yml       # NAS 直接拉取镜像，无需源码 / .env
+├── .github/workflows/docker-publish.yml # GHCR 多架构镜像发布
 └── README.md
 ```
 
@@ -171,7 +174,19 @@ PowerfulTS/
 
 ## 🚀 快速开始
 
-### 方式一：Docker 一键部署（推荐）
+### 方式一：NAS / 服务器直接拉取镜像（推荐）
+
+在 NAS 的 Compose 项目中粘贴 [`docker-compose.nas.yml`](docker-compose.nas.yml)，直接修改其中的 TeamSpeak / TSMusicBot 地址与账号密码后部署。无需下载源码、编译镜像或准备 `.env` 文件。默认访问 `http://NAS的IP:8080`，数据保存在项目的 `data` 目录。
+
+支持 x86_64 / ARM64，TeamSpeak 与专用分支的 TSMusicBot 需已部署。**首次使用前，维护者需完成 GHCR 镜像发布并设为 Public**；完整步骤、服务地址配置、更新与备份见 [NAS 安装说明](docs/nas.md)。
+
+通过 SSH 启动（先修改配置并创建 `data` 目录）：
+
+```bash
+docker compose -f docker-compose.nas.yml up -d
+```
+
+### 方式二：从源码构建 Docker 镜像
 
 适用于 Linux 服务器、Windows、macOS、NAS 等所有支持 Docker 的平台。**无需本地安装 Python / Node.js。**
 
@@ -248,7 +263,7 @@ frontend:
 
 ---
 
-### 方式二：手动部署（开发 / 无 Docker 环境）
+### 方式三：手动部署（开发 / 无 Docker 环境）
 
 #### 1. 前提条件
 
@@ -327,7 +342,7 @@ PowerfulTS 本身不含 TS3 服务端与音乐引擎，需接入两个上游：
 - 开启 **ServerQuery**（默认 :10011），创建专用账号填入 `TS3_QUERY_*`
 - PowerfulTS 通过 ServerQuery 长连接轮询在线用户 / 频道 / 游戏状态
 
-> 两者均可运行在宿主机、独立容器或同一 compose 网络中，按 [容器网络地址说明](#方式一docker-一键部署推荐) 配置连接地址即可。
+> 两者均可运行在宿主机、独立容器或同一 compose 网络中，按 [NAS 服务地址与回调说明](docs/nas.md#服务地址与回调)或上方源码部署的容器网络说明配置连接地址即可。
 
 ---
 
@@ -383,6 +398,19 @@ PowerfulTS 本身不含 TS3 服务端与音乐引擎，需接入两个上游：
 
 ---
 
+## 🖥️ 一起看与屏幕共享
+
+在「网页通话」加入频道后，点击「一起看 · 屏幕共享」中的「加入共享房间」。同频道的网页成员会看到已有内容，每个频道只允许一个画面；父子频道互不影响。首位发起者成为房主，可以将权限转交给同频道已加入共享的成员。
+
+- **同步观看**：每人自行加载视频，只发送播放进度、暂停、倍速和就绪状态。MP4 / WebM 等直链可以直接播放；B 站、腾讯视频、爱奇艺等使用通话页提供的 Chrome / Edge 扩展连接视频标签页。每人需要自己的账号与播放权限；各平台播放器、广告及嵌入方式的兼容性仍需实站验证。
+- **等待成员**：点播默认等待所有观看者加载完成，房主可关闭。掉线后保留 20 秒等待重新加入；主动退出或切频道会立即移出。选择「这是直播」或屏幕共享时不等待缓冲。
+- **成员暂停**：默认允许成员暂停整个房间，房主可关闭；继续播放由房主控制。转交同步观看保留进度，转交屏幕共享需要新房主重新选择并授权窗口。
+- **屏幕共享**：使用 WebRTC 传输用户选择的屏幕、窗口或标签页及可捕获的音频。生产环境需要 HTTPS；跨网络连接失败时配置 `SCREEN_SHARE_ICE_SERVERS` 的 TURN 中继。当前使用分享者向观看者逐一发送的模式，每个房间最多 9 人。
+
+完整安装、部署要求和验证范围见 [一起看与屏幕共享说明](docs/watch-room.md)。
+
+---
+
 ## 🎼 开屏背景音乐（可选）
 
 登录页左侧的音频频谱会随**真实音频**律动，开屏可随机播放本地背景音乐。
@@ -417,7 +445,7 @@ backend:
 |------|------|
 | **Linux 服务器** | 安装 Docker + Compose 插件，按 Docker 教程部署；TSMusicBot/TS3 用宿主内网 IP 或 `host-gateway` |
 | **Windows / macOS** | 安装 [Docker Desktop](https://www.docker.com/products/docker-desktop/)，上游地址用 `host.docker.internal` |
-| **NAS（群晖 / 威联通等）** | 通过 Container Manager / Container Station 部署 compose，或在 SSH 下用 `docker compose`；注意 NAS 防火墙放行端口 |
+| **NAS（群晖 / 威联通等）** | 使用 [`docker-compose.nas.yml`](docker-compose.nas.yml) 直接拉取镜像，参见 [NAS 安装说明](docs/nas.md)；支持 x86_64 / ARM64，注意 NAS 防火墙放行端口 |
 | **反向代理 / HTTPS** | 将 nginx（frontend 容器）置于 Caddy / Traefik / Nginx 之后，并在 `CORS_ORIGINS` 填入最终访问域名 |
 
 ---

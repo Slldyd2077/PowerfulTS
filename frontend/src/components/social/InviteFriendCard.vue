@@ -139,7 +139,7 @@ async function copyExisting() {
     90deg,
     transparent 0,
     transparent 31px,
-    rgba(82, 147, 226, 0.025) 32px
+    rgba(var(--color-primary-rgb), 0.025) 32px
   );
 }
 
@@ -301,7 +301,7 @@ async function copyExisting() {
   border: 0;
   border-radius: var(--radius-sm);
   background: var(--gradient-brand);
-  box-shadow: 0 7px 22px rgba(17, 108, 224, 0.18);
+  box-shadow: 0 7px 22px rgba(var(--color-primary-rgb), 0.18);
   transition: transform 0.18s, filter 0.18s, opacity 0.18s;
 }
 

@@ -338,7 +338,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
 }
 .sb-kbd {
   flex-shrink: 0;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 0.66em;
   color: var(--text-muted);
   border: 1px solid var(--border-emphasis);
