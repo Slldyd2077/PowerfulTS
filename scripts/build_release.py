@@ -23,6 +23,11 @@ SOURCE_FILES = (
     "frontend/package.json", "frontend/pnpm-lock.yaml", "frontend/nginx.conf",
     "frontend/index.html", "frontend/vite.config.ts", "frontend/tsconfig.json",
     "frontend/tsconfig.app.json", "frontend/tsconfig.node.json",
+    "frontend/scripts/package-watch-extension.mjs",
+    "frontend/watch-extension/manifest.json", "frontend/watch-extension/popup.html",
+    "frontend/watch-extension/popup.js", "frontend/watch-extension/background.js",
+    "frontend/watch-extension/dashboard.js", "frontend/watch-extension/identity.js",
+    "frontend/watch-extension/video.js",
 )
 SOURCE_TREES = {
     "backend/app": {".py"},

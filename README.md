@@ -372,11 +372,7 @@ PowerfulTS 本身不含 TeamSpeak 服务端与音乐引擎，需接入两个上�
 - PowerfulTS 通过 ServerQuery 长连接轮询在线用户 / 频道 / 游戏状态
 - TSMusicBot 连接相同虚拟服务器的 **UDP 语音端口**（通常 :9987），其 bot 配置中的 port 不可填 Query 的 10022
 
-<<<<<<< HEAD
-> 两者均可运行在宿主机、独立容器或同一 compose 网络中，按 [NAS 服务地址与回调说明](docs/nas.md#服务地址与回调)或上方源码部署的容器网络说明配置连接地址即可。
-=======
-> 两者均可运行在宿主机、独立容器或同一 compose 网络中，按 [容器网络地址说明](docs/release-guide.md#容器网络与远程访问) 配置连接地址即可。
->>>>>>> origin/main
+> 两者均可运行在宿主机、独立容器或同一 compose 网络中，按 [容器网络地址说明](docs/release-guide.md#容器网络与远程访问) 或 [NAS 服务地址与回调说明](docs/nas.md#服务地址与回调)配置连接地址即可。
 
 ---
 

@@ -63,6 +63,11 @@ class ReleaseTests(unittest.TestCase):
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(value, encoding="utf-8")
+        for name in release.SOURCE_FILES:
+            path = self.root / name
+            if not path.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("extension build fixture", encoding="utf-8")
 
     def test_source_archive_excludes_state_and_has_start_and_stop(self):
         artifacts = release.build_release(self.root, self.output, tag="v1.2.3")
@@ -71,6 +76,9 @@ class ReleaseTests(unittest.TestCase):
             names = {name.split("/", 1)[1] for name in zipped.namelist()}
             self.assertIn("backend/app/main.py", names)
             self.assertIn("frontend/src/main.ts", names)
+            self.assertIn("frontend/scripts/package-watch-extension.mjs", names)
+            self.assertIn("frontend/watch-extension/manifest.json", names)
+            self.assertIn("frontend/watch-extension/video.js", names)
             self.assertTrue({"start.cmd", "stop.cmd", "start.sh", "stop.sh", "compose.yml", "backend.env.example"} <= names)
             self.assertFalse(any(name.endswith((".db", ".pyc")) or "node_modules" in name or name.endswith("/.env") for name in names))
             config = zipped.read("powerfults-1.2.3/backend.env.example").decode()
