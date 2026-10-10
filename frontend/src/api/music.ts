@@ -43,6 +43,10 @@ export interface NowPlaying {
   platform: string
   /** VIP/版权受限（来自搜索元数据回填；上游 currentSong 不自带） */
   vip?: boolean
+  loudnessNormalization?: {
+    state: 'disabled' | 'analyzing' | 'applied' | 'failed' | 'unavailable'
+    gainDb: number
+  } | null
 }
 
 /** 搜索歌曲（botId 指定 bot → 用该 bot 的平台 cookie 搜索） */
@@ -293,6 +297,11 @@ export interface BotSettings {
   autoPauseOnEmpty: boolean
   /** 语音闪避 */
   voiceDucking: VoiceDuckingSettings
+  loudnessNormalization: {
+    supported: boolean
+    enabled: boolean
+    targetLufs: number
+  }
 }
 
 /** per-bot profile 开关（头像/昵称/描述等 6 字段） */

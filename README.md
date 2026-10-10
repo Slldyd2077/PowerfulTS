@@ -36,7 +36,7 @@ https://github.com/user-attachments/assets/3761cb43-a68d-4768-b6d0-dd5860de7902
 
 其中**网页通话**让成员不装 TeamSpeak 客户端也能直接在浏览器里收听频道并发言。
 
-> 🍴 **TSMusicBot 专用分支**：本项目的音乐引擎与网页通话中继依赖 [Slldyd2077/teamspeak-music-bot](https://github.com/Slldyd2077/teamspeak-music-bot) 的专用定制分支 [`merge/upstream-v1.12`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/merge/upstream-v1.12)。**部署时须使用 [同步主干后的定制 fork 的固定提交 `453d2d1`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/453d2d124b9995034fe9cd46ebf2cad597382d42) 构建**，详见[安装与适配说明](docs/release-guide.md#上游引擎)。PowerfulTS 依赖该 fork 的 per-bot 多实例架构、双向 Opus 语音中继与语音闪避（含网页通话触发）；原版上游不能直接替换。
+> 🍴 **TSMusicBot 专用分支**：本项目的音乐引擎与网页通话中继依赖 [Slldyd2077/teamspeak-music-bot](https://github.com/Slldyd2077/teamspeak-music-bot) 的专用定制分支 [`merge/upstream-v1.12`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/merge/upstream-v1.12)。**部署时须使用 [含逐曲响度均衡的生产兼容固定提交 `9ea0a2e`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/9ea0a2e7600333cf6caf72eae3a4bc5a0e1248a6) 构建**，详见[安装与适配说明](docs/release-guide.md#上游引擎)。PowerfulTS 依赖该 fork 的 per-bot 多实例架构、双向 Opus 语音中继与语音闪避（含网页通话触发）；原版上游不能直接替换。
 
 > 💡 **跨平台 Release**：从 [Releases](https://github.com/Slldyd2077/PowerfulTS/releases) 下载 x64 或 ARM64 安装包，解压、配置后启动。预构建包无需 Git / Python / Node.js，需要 Docker Engine 与 Compose v2；支持 Windows、macOS、Linux 和支持 Docker 的 NAS。详见 [安装与升级指南](docs/release-guide.md)。
 
@@ -242,7 +242,7 @@ docker compose -f docker-compose.nas.yml up -d
 
 - 已安装 [Docker](https://docs.docker.com/get-docker/) 与 [Docker Compose](https://docs.docker.com/compose/install/)（Docker Desktop 自带）
 - 上游服务已就绪（见 [🔌 接入上游服务](#-接入上游服务)）：
-  - **TSMusicBot**（音乐 / 点播引擎，默认 :3000；须使用 [同步主干后的定制 fork 的固定提交 `453d2d1`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/453d2d124b9995034fe9cd46ebf2cad597382d42) 构建，详见[安装与适配说明](docs/release-guide.md#上游引擎)）
+  - **TSMusicBot**（音乐 / 点播引擎，默认 :3000；须使用 [含逐曲响度均衡的生产兼容固定提交 `9ea0a2e`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/9ea0a2e7600333cf6caf72eae3a4bc5a0e1248a6) 构建，详见[安装与适配说明](docs/release-guide.md#上游引擎)）
   - **TS3 或 TS6 服务端**（TS3 raw Query 通常 TCP :10011；TS6 开启 SSH Query，通常 TCP :10022；机器人语音通常 UDP :9987）
 
 #### 2. 配置环境变量
@@ -413,8 +413,8 @@ PowerfulTS 本身不含 TeamSpeak 服务端与音乐引擎，需接入两个上�
 ### TSMusicBot（音乐 / 点播引擎）
 
 - 项目：[Slldyd2077/teamspeak-music-bot 专用分支 `merge/upstream-v1.12`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/merge/upstream-v1.12) —— PowerfulTS 定制的 TS3/TS6 多平台音乐机器人（网易云 / QQ / B 站）
-- 使用 [同步主干后的定制 fork 的固定提交 `453d2d1`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/453d2d124b9995034fe9cd46ebf2cad597382d42) 构建并部署，将 `TSMUSIC_URL` 指向其地址，并填入账号密码与 bot id。原版上游不能直接替换，接口要求见[安装与适配说明](docs/release-guide.md#上游引擎)
-- 该基线需同时应用 [issue #15 identity 保存补丁](deploy/tsmusicbot/README.md)，再重新构建引擎镜像并重建容器。只更新 PowerfulTS 不会更新独立部署的 TSMusicBot
+- 使用 [含逐曲响度均衡的生产兼容固定提交 `9ea0a2e`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/9ea0a2e7600333cf6caf72eae3a4bc5a0e1248a6) 构建并部署，将 `TSMUSIC_URL` 指向其地址，并填入账号密码与 bot id。原版上游不能直接替换，接口要求见[安装与适配说明](docs/release-guide.md#上游引擎)
+- 该兼容提交已包含逐曲响度均衡，无需重复应用响度补丁。连接层与 Issue #15 修复的版本差异见[升级指南](docs/release-guide.md#上游引擎)；只更新 PowerfulTS 不会更新独立部署的 TSMusicBot
 - 它同时提供音乐搜索、播放控制与 **B 站点播**（PowerfulTS 的 `/api/bili/*` 即委托其 `platform=bilibili` 能力）
 
 ### TS3 / TS6 服务端（监控 / 认证数据源）
@@ -457,6 +457,8 @@ PowerfulTS 本身不含 TeamSpeak 服务端与音乐引擎，需接入两个上�
 **运行要求**
 
 - 下行语音优先使用 **WebCodecs Opus**，不支持时自动加载 **WASM Opus Worker** 回退；仍需 Web Audio / AudioWorklet、WebAssembly 和 Worker 支持。麦克风上行需 `getUserMedia`、MediaRecorder 与可用的录音格式。输出设备选择取决于浏览器是否支持 `setSinkId`。
+- 麦克风默认启用 **RNNoise 智能降噪**、可调键盘与停顿噪声抑制，并提供回声消除、自动增益及省电基础降噪模式；处理在本机运行，失败会提示并降级。详见[音频增强与验证说明](docs/web-microphone-processing.md)。
+- 音乐机器人可启用**逐曲响度均衡**：先分析整首歌曲，再应用固定增益，保留曲内动态，网页与原版客户端都生效。需更新外部 TSMusicBot 引擎，见[引擎补丁与使用说明](docs/track-loudness-normalization.md)。
 - 生产环境需 HTTPS（localhost 开发环境除外），否则拿不到麦克风权限。
 - TSMusicBot 需要带 `/api/voice/downlink/:botId` 下行接口与 `POST /api/player/:botId/live` 实时流入口。**改完 TSMusicBot 源码要重新 build 镜像并重建容器**，否则跑的还是旧代码。
 - 若 TSMusicBot 无法通过浏览器所用域名反连 PowerfulTS，把 `LIVE_AUDIO_PUBLIC_URL` 设为它能访问的面板地址（例如 `http://host.docker.internal:8080`），面板需绑定上游可访问的地址；在 TSMusicBot 设置同值 `POWERFUL_TS_ORIGIN`。

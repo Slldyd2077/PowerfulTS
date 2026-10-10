@@ -32,7 +32,7 @@ from ..services.entry_sound import (
     inspect_audio,
     read_limited_upload,
 )
-from ..services.tsmusic_client import TSMusicClient, TSMusicUnavailable
+from ..services.tsmusic_client import TSMusicClient, TSMusicUnavailable, LoudnessNormalizationUnsupported
 from ..services.voice_bot import VoiceBotError
 from ..services.voice_exclusivity import NATIVE_TS_PREEMPTED_CLOSE_CODE
 
@@ -169,11 +169,17 @@ class VoiceDuckingRequest(BaseModel):
     volumePercent: float | None = Field(default=None, ge=0, le=100, description="有人说话时音乐保留的音量百分比")
 
 
+class LoudnessNormalizationRequest(BaseModel):
+    enabled: bool | None = Field(default=None, description="下一首起启用逐曲响度均衡")
+    targetLufs: float | None = Field(default=None, ge=-24, le=-14, description="歌曲目标综合响度")
+
+
 class BotSettingsRequest(BaseModel):
     """全局 bot 行为设置（各项均可选，未传项上游保持不变）。"""
     idleTimeoutMinutes: int | None = Field(default=None, ge=0, description="频道无人多少分钟后自动断开，0=禁用")
     autoPauseOnEmpty: bool | None = Field(default=None, description="频道无人时自动暂停")
     voiceDucking: VoiceDuckingRequest | None = Field(default=None, description="语音闪避设置")
+    loudnessNormalization: LoudnessNormalizationRequest | None = Field(default=None, description="逐曲响度均衡")
 
 
 class BotProfileRequest(BaseModel):
@@ -1529,7 +1535,10 @@ async def put_bot_settings(body: BotSettingsRequest, tsmusic: TsmusicDep, _accou
             body.idleTimeoutMinutes,
             body.autoPauseOnEmpty,
             body.voiceDucking.model_dump(exclude_none=True) if body.voiceDucking else None,
+            body.loudnessNormalization.model_dump(exclude_none=True) if body.loudnessNormalization else None,
         )
+    except LoudnessNormalizationUnsupported as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (httpx.HTTPError, ValueError):
         raise HTTPException(status_code=502, detail="TSMusicBot 不可达，请确认其 Docker 容器在运行")
 

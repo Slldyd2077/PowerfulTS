@@ -66,8 +66,17 @@ const isTrial = computed(
   () => !!(np.value?.effectiveDuration && np.value?.duration && np.value.effectiveDuration < np.value.duration),
 )
 const statusText = computed(() =>
-  isPlaying.value ? '正在播放' : np.value?.paused ? '已暂停' : '空闲',
+  np.value?.loudnessNormalization?.state === 'analyzing' ? '正在分析歌曲响度'
+    : isPlaying.value ? '正在播放' : np.value?.paused ? '已暂停' : '空闲',
 )
+const loudnessStatusText = computed(() => {
+  const status = np.value?.loudnessNormalization
+  if (status?.state === 'analyzing') return '正在分析整首歌曲，完成后开始播放。'
+  if (status?.state === 'applied') return `逐曲均衡已应用 · 整首固定 ${status.gainDb > 0 ? '+' : ''}${status.gainDb.toFixed(1)} dB`
+  if (status?.state === 'failed') return '本首响度分析失败，按原始响度播放。'
+  if (status?.state === 'unavailable' && music.botSettings.loudnessNormalization?.enabled) return '当前音源为实时流，未应用逐曲响度均衡。'
+  return ''
+})
 
 function fmt(sec?: number): string {
   if (!sec || sec < 0) return '0:00'
@@ -256,6 +265,7 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
     </div>
 
     <!-- Now Playing Hero -->
+    <p v-if="loudnessStatusText" class="loudness-status" role="status">{{ loudnessStatusText }}</p>
     <div class="np-hero" :class="{ playing: isPlaying }">
       <div class="np-cover-wrap">
         <img v-if="np?.cover && !brokenCovers.has(np.cover)" :src="np.cover" class="np-cover" referrerpolicy="no-referrer" @error="onCoverError(np.cover)" />
@@ -405,6 +415,7 @@ function isCurrent(item: { id?: string; platform?: string }): boolean {
 </template>
 
 <style scoped>
+.loudness-status { margin: 0 0 10px; color: var(--text-secondary); font-size: .72em; line-height: 1.5; }
 .player {
   background: var(--gradient-surface);
   border: 1px solid var(--border-subtle);

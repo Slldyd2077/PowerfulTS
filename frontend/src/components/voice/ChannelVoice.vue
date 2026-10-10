@@ -22,6 +22,13 @@ import {
 import {
   resolveVoiceDownlinkCloseAction,
 } from '@/services/voice-downlink-policy'
+import { MicrophoneProcessing, type MicrophoneProcessingStatus } from '@/services/microphone-processing'
+import {
+  MICROPHONE_PROCESSING_KEY,
+  normalizeMicrophoneProcessing,
+  microphoneConstraints,
+} from '@/services/microphone-processing-settings'
+import denoiseWorkletUrl from '@/workers/microphone-denoise-worklet.ts?worker&url'
 
 const emit = defineEmits<{ (e: 'session-change'): void }>()
 
@@ -54,7 +61,36 @@ const activeSpeakers = ref(0)
 const speakingIds = ref<number[]>([])
 const outputVolume = ref(85)
 const microphoneVolume = ref(100)
+const microphoneProcessing = ref(loadMicrophoneProcessing())
+const processingStatus = ref<MicrophoneProcessingStatus>({ mode: 'idle', message: '' })
+const captureSettings = ref<MediaTrackSettings>({})
+const changingProcessing = ref(false)
+const processingBusy = computed(() => changingProcessing.value
+  || microphoneState.value === 'requesting' || microphoneState.value === 'connecting')
+const processingStatusText = computed(() => {
+  if (processingStatus.value.mode === 'loading') return '正在加载智能降噪模型…'
+  if (processingStatus.value.mode === 'rnnoise') return microphoneProcessing.value.keyboardSuppression
+    ? 'RNNoise 智能降噪 · 键盘抑制运行中' : 'RNNoise 智能降噪运行中'
+  if (processingStatus.value.mode === 'browser') return captureSettings.value.noiseSuppression === true
+    ? '浏览器基础降噪运行中' : '已请求基础降噪；当前浏览器未确认支持'
+  if (processingStatus.value.mode === 'off') return '降噪已关闭'
+  return '设置将在麦克风开启后生效'
+})
 const decoderBackend = ref<'webcodecs' | 'wasm' | ''>('')
+
+function loadMicrophoneProcessing() {
+  try {
+    return normalizeMicrophoneProcessing(JSON.parse(localStorage.getItem(MICROPHONE_PROCESSING_KEY) || 'null'))
+  } catch {
+    return normalizeMicrophoneProcessing(null)
+  }
+}
+
+function saveMicrophoneProcessing() {
+  try {
+    localStorage.setItem(MICROPHONE_PROCESSING_KEY, JSON.stringify(microphoneProcessing.value))
+  } catch { /* Settings still apply for this call when storage is unavailable. */ }
+}
 
 const { roommates, refresh: refreshChannels, clearPendingChannel } = useVoiceChannels()
 
@@ -113,12 +149,11 @@ let listenGeneration = 0
 const decoders = new Map<number, SpeakerDecoder>()
 let WasmDecoderCtor: typeof import('opus-decoder').OpusDecoderWebWorker | null = null
 
-// The microphone uses the raw getUserMedia stream at 100% volume. A separate
-// Web Audio graph is created only when the user explicitly requests gain.
-let microphoneContext: AudioContext | null = null
-let microphoneSource: MediaStreamAudioSourceNode | null = null
-let microphoneGain: GainNode | null = null
-let microphoneOutput: MediaStreamAudioDestinationNode | null = null
+let microphoneTrack: MediaStreamTrack | null = null
+const microphoneProcessor = new MicrophoneProcessing(denoiseWorkletUrl, (status) => {
+  processingStatus.value = status
+  captureSettings.value = microphoneTrack?.getSettings() ?? {}
+})
 
 function websocketUrl(path: string): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -526,48 +561,39 @@ function deviceLabel(device: MediaDeviceInfo, index: number, kind: string): stri
 }
 
 function setMicrophoneVolume() {
-  if (microphoneGain && microphoneContext) {
-    microphoneGain.gain.setTargetAtTime(
-      microphoneVolume.value / 100, microphoneContext.currentTime, 0.015,
-    )
-    return
-  }
+  if (microphoneProcessor.setVolume(microphoneVolume.value)) return
   if (microphoneState.value !== 'idle' && microphoneVolume.value !== 100) {
     void microphoneUplink.restartTransport()
   }
 }
 
-/**
- * The raw stream is the reliable mobile path. Web Audio is only introduced for
- * an explicit non-100% gain and must prove that its context is actually running.
- */
 async function prepareMicrophoneStream(stream: MediaStream): Promise<MediaStream> {
-  if (microphoneVolume.value === 100) return stream
-  microphoneContext = new AudioContext({ latencyHint: 'interactive' })
-  await microphoneContext.resume().catch(() => {})
-  if (microphoneContext.state !== 'running') {
-    await releasePreparedMicrophoneStream()
-    microphoneVolume.value = 100
-    ElMessage.warning('当前浏览器无法启用网页麦克风增益，已改用系统麦克风音量')
-    return stream
-  }
-  microphoneSource = microphoneContext.createMediaStreamSource(stream)
-  microphoneGain = microphoneContext.createGain()
-  microphoneGain.gain.value = microphoneVolume.value / 100
-  microphoneOutput = microphoneContext.createMediaStreamDestination()
-  microphoneSource.connect(microphoneGain).connect(microphoneOutput)
-  return microphoneOutput.stream
+  const output = await microphoneProcessor.prepare(stream, { ...microphoneProcessing.value }, microphoneVolume.value)
+  captureSettings.value = stream.getAudioTracks()[0]?.getSettings() ?? {}
+  return output
 }
 
 async function releasePreparedMicrophoneStream() {
-  microphoneSource?.disconnect()
-  microphoneGain?.disconnect()
-  microphoneOutput?.disconnect()
-  microphoneSource = null
-  microphoneGain = null
-  microphoneOutput = null
-  if (microphoneContext) await microphoneContext.close().catch(() => {})
-  microphoneContext = null
+  await microphoneProcessor.release()
+  microphoneTrack = null
+  captureSettings.value = {}
+}
+
+async function onProcessingChange() {
+  saveMicrophoneProcessing()
+  if (microphoneState.value === 'idle') return
+  changingProcessing.value = true
+  try {
+    await stopMicrophone()
+    await startMicrophone()
+  } finally {
+    changingProcessing.value = false
+  }
+}
+
+function onKeyboardSuppressionChange() {
+  saveMicrophoneProcessing()
+  microphoneProcessor.configure(microphoneProcessing.value)
 }
 
 function describeMicrophoneError(error: unknown): string {
@@ -584,15 +610,11 @@ function describeMicrophoneError(error: unknown): string {
 const microphoneUplink = new MicrophoneUplink({
   acquireStream: async () => {
     try {
-      return await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          channelCount: 1,
-          ...(selectedInput.value ? { deviceId: { exact: selectedInput.value } } : {}),
-        },
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: microphoneConstraints(microphoneProcessing.value, selectedInput.value),
       })
+      microphoneTrack = stream.getAudioTracks()[0] ?? null
+      return stream
     } catch (error) {
       throw new Error(describeMicrophoneError(error))
     }
@@ -692,9 +714,9 @@ async function joinCall() {
 }
 
 async function leaveCall() {
+  voiceBotId.value = ''
   await stopMicrophone()
   await stopListening()
-  voiceBotId.value = ''
   try {
     await closeVoiceSession()
   } catch {
@@ -715,6 +737,7 @@ async function toggleMicrophone() {
 function resumeAudioAfterForeground() {
   if (!connectionsMayRecover()) return
   if (listening.value) void audioContext?.resume()
+  void microphoneProcessor.resume()?.catch(() => {})
   if (listening.value && listenState.value === 'reconnecting' && !reconnectTimer && !downlinkSocket) {
     void connectDownlink(listenGeneration).catch((error) => {
       if (listening.value) scheduleReconnect(listenGeneration, errorText(error, '频道语音重连失败'))
@@ -794,7 +817,7 @@ onBeforeUnmount(() => {
         class="mic-toggle"
         :class="{ live: microphoneLive }"
         type="button"
-        :disabled="microphoneState === 'requesting' || microphoneState === 'connecting'"
+        :disabled="processingBusy"
         @click="toggleMicrophone"
       >
         <span v-if="microphoneLive" class="live-ring" />
@@ -813,11 +836,11 @@ onBeforeUnmount(() => {
       </label>
       <label class="setting">
         <span class="setting-label">麦克风音量 <b>{{ microphoneVolume }}%</b></span>
-        <input v-model.number="microphoneVolume" type="range" min="0" max="200" @change="setMicrophoneVolume">
+        <input v-model.number="microphoneVolume" type="range" min="0" max="200" :disabled="processingBusy" @change="setMicrophoneVolume">
       </label>
       <label class="setting" for="voice-input-device">
         <span class="setting-label">麦克风设备</span>
-        <el-select id="voice-input-device" v-model="selectedInput" aria-label="麦克风设备" :empty-values="[null, undefined]" :show-arrow="false" :offset="6" @change="onInputDeviceChange">
+        <el-select id="voice-input-device" v-model="selectedInput" aria-label="麦克风设备" :disabled="processingBusy" :empty-values="[null, undefined]" :show-arrow="false" :offset="6" @change="onInputDeviceChange">
           <el-option value="" label="系统默认" />
           <el-option v-for="(device, i) in inputDevices" :key="device.deviceId" :value="device.deviceId" :label="deviceLabel(device, i, '麦克风')" />
         </el-select>
@@ -840,6 +863,42 @@ onBeforeUnmount(() => {
         {{ compatibilityNote }}
       </p>
     </div>
+
+    <fieldset class="processing-settings" :disabled="processingBusy">
+      <legend>麦克风音频增强</legend>
+      <label class="setting" for="voice-noise-mode">
+        <span class="setting-label">背景降噪</span>
+        <el-select id="voice-noise-mode" v-model="microphoneProcessing.mode" aria-label="背景降噪" :disabled="processingBusy" @change="onProcessingChange">
+          <el-option value="rnnoise" label="RNNoise 智能降噪（推荐）" />
+          <el-option value="browser" label="浏览器基础降噪（省电）" />
+          <el-option value="off" label="关闭降噪" />
+        </el-select>
+      </label>
+      <label class="processing-switch">
+        <input v-model="microphoneProcessing.echoCancellation" type="checkbox" @change="onProcessingChange">
+        <span>回声消除</span>
+      </label>
+      <label class="processing-switch">
+        <input v-model="microphoneProcessing.autoGainControl" type="checkbox" @change="onProcessingChange">
+        <span>自动麦克风增益</span>
+      </label>
+      <label class="processing-switch">
+        <input v-model="microphoneProcessing.keyboardSuppression" type="checkbox" :disabled="microphoneProcessing.mode !== 'rnnoise'" @change="onKeyboardSuppressionChange">
+        <span>键盘与停顿噪声抑制</span>
+      </label>
+      <label v-if="microphoneProcessing.mode === 'rnnoise' && microphoneProcessing.keyboardSuppression" class="setting">
+        <span class="setting-label">人声门限 <b>{{ Math.round(microphoneProcessing.voiceThreshold * 100) }}%</b></span>
+        <input v-model.number="microphoneProcessing.voiceThreshold" aria-label="人声门限" type="range" min="0.1" max="0.9" step="0.05" @input="onKeyboardSuppressionChange">
+        <span class="setting-hint">调低保留轻声，调高加强停顿噪声抑制。</span>
+      </label>
+      <p class="setting-hint" role="status">{{ processingStatusText }}</p>
+      <p v-if="processingStatus.message" class="processing-warning" role="status">{{ processingStatus.message }}</p>
+      <p v-if="microphoneState !== 'idle'" class="setting-hint">
+        回声消除：{{ !microphoneProcessing.echoCancellation ? '已关闭' : captureSettings.echoCancellation === true ? '已启用' : '浏览器未确认支持' }} ·
+        自动增益：{{ !microphoneProcessing.autoGainControl ? '已关闭' : captureSettings.autoGainControl === true ? '已启用' : '浏览器未确认支持' }}
+      </p>
+      <p class="setting-hint">智能降噪在本机处理，不上传到第三方。切换降噪模式、回声或自动增益时会短暂重启麦克风；设置自动保存。</p>
+    </fieldset>
 
     <div v-if="listening" class="speaker-mixer">
       <div class="mixer-head">
@@ -870,7 +929,7 @@ onBeforeUnmount(() => {
     </p>
 
     <div class="voice-note">
-      <span>回声保护已启用</span>
+      <span>{{ microphoneProcessing.echoCancellation ? '已请求回声消除' : '回声消除已关闭' }}</span>
       建议使用耳机；网页通话时不要让同一设备上的 TeamSpeak 客户端同时进入该频道。
     </div>
   </section>
@@ -939,6 +998,21 @@ p { margin: 0; color: var(--text-secondary); font-size: .76em; line-height: 1.6;
 .setting-label { color: var(--text-muted); font-size: .64em; font-weight: 600; }
 .setting-label b { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .setting input[type="range"] { width: 100%; accent-color: var(--color-primary); }
+.processing-settings {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px 18px;
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.processing-settings legend { padding: 0 6px; color: var(--text-secondary); font-size: .76em; }
+.processing-switch { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: .76em; }
+.processing-switch input { accent-color: var(--color-primary); }
+.processing-warning { grid-column: 1 / -1; color: var(--color-accent); }
 .system-device {
   display: flex;
   min-height: 38px;

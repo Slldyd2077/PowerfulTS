@@ -1,0 +1,23 @@
+{
+  "baseline": "Production source snapshot before 2026-10-10 audio deployment",
+  "source_archive_sha256": "6d463b1c20375ac25280e759bd7c4539c9034a886e04b145a5361ee860197d33",
+  "unchanged_ts_client_sha256": "83aa4e6017466c18426811efc1474ef6a347006f60f75ea1b734a7b5ede419d3",
+  "modified_source_baseline_sha256": {
+    "src/audio/player.ts": "5c3a16e48318318e7122b4bdd0cc9470ce76fcaedd789c309741a632c5b4e796",
+    "src/bot/instance.ts": "37f2d978d33e0a2494c9613285b63f8aef27bfaad84fbbecb3db59a634f89807",
+    "src/data/config.ts": "31f68c75985b711eca29d26809ff6fe9ad1b5da062469cdc58b4c3417b81b105",
+    "src/data/config.test.ts": "7405d23af548422afa7f719e510a37bce49cb101538f5b1c9c7d10a45f90803b",
+    "src/web/api/bot.ts": "c461346ac1e1be1052e6f84940981ccf01c55f65e6afd85d84f066f266837a76",
+    "src/web/api/bot.test.ts": "19a148cc9bf460771e0f905dc78c745ab91f0fa8408a7eabcafac5deb2057140"
+  },
+  "baseline_git_commit": "2c1fc74fce812caaaa79b5e8566a7dd617c1e9ad",
+  "production_engine": {
+    "repository": "https://github.com/Slldyd2077/teamspeak-music-bot.git",
+    "branch": "codex/audio-production-compatible",
+    "commit": "9ea0a2e7600333cf6caf72eae3a4bc5a0e1248a6"
+  },
+  "general_engine": {
+    "branch": "merge/upstream-v1.12",
+    "commit": "165e8975ac3dcf1ca24b83c8b000c9f623112010"
+  }
+}

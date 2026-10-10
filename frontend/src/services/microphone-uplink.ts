@@ -118,10 +118,13 @@ export class MicrophoneUplink {
       }
       this.stream = stream
       track.addEventListener?.('ended', () => {
-        if (this.desired) void this.failPermanently('麦克风已被系统停用，请点击重新开启')
+        if (this.desired && generation === this.generation) {
+          void this.failPermanently('麦克风已被系统停用，请点击重新开启')
+        }
       }, { once: true })
       await this.connect(generation, false)
     } catch (error) {
+      if (!this.desired || generation !== this.generation) return
       await this.failPermanently(errorMessage(error, '无法开启麦克风'))
       throw error
     }
@@ -150,6 +153,7 @@ export class MicrophoneUplink {
   async stop(): Promise<void> {
     this.desired = false
     this.generation++
+    this.connecting = null
     this.clearReconnectTimer()
     await this.disposeConnection()
     if (this.stream) this.stopTracks(this.stream)
@@ -183,18 +187,18 @@ export class MicrophoneUplink {
     this.setState(reconnecting ? 'reconnecting' : 'connecting')
     const mimeType = this.dependencies.chooseMimeType()
     if (!mimeType) throw new Error('浏览器没有可用的实时音频编码器')
-    const preparedStream = await this.dependencies.prepareStream(this.stream!)
+    // The processor can allocate a graph before its asynchronous model load finishes.
     this.preparedStreamActive = true
+    const preparedStream = await this.dependencies.prepareStream(this.stream!)
     if (!this.desired || generation !== this.generation) {
-      await this.disposeConnection()
       return
     }
     const session = await this.dependencies.startSession(mimeType)
-    this.sessionId = session.sessionId
     if (!this.desired || generation !== this.generation) {
-      await this.disposeConnection()
+      await this.dependencies.stopSession(session.sessionId)
       return
     }
+    this.sessionId = session.sessionId
     const socket = this.dependencies.createSocket(session.uploadPath)
     this.socket = socket
 
