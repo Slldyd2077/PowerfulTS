@@ -11,6 +11,8 @@ const pkg = JSON.parse(
 
 export default defineConfig({
   plugins: [vue()],
+  // AudioWorkletGlobalScope has no `self.location`; retain import.meta.url.
+  worker: { format: 'es' },
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version ?? '0.0.0'),
   },

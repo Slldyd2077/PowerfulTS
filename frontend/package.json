@@ -9,12 +9,15 @@
   },
   "scripts": {
     "dev": "node scripts/package-watch-extension.mjs && vite",
-    "test:unit": "tsc -p tests/tsconfig.json && node --experimental-test-coverage --test dist/.voice-tests/tests/ts-nickname.test.js dist/.voice-tests/tests/voice-api.test.js dist/.voice-tests/tests/microphone-uplink.test.js dist/.voice-tests/tests/login-mobile-layout.test.js dist/.voice-tests/tests/voice-downlink-policy.test.js dist/.voice-tests/tests/polling-scheduler.test.js dist/.voice-tests/tests/theme-palette.test.js dist/.voice-tests/tests/watch-playback.test.js tests/watch-extension.test.mjs",
+    "test:unit": "tsc -p tests/tsconfig.json && node --experimental-test-coverage --test dist/.voice-tests/tests/ts-nickname.test.js dist/.voice-tests/tests/voice-api.test.js dist/.voice-tests/tests/microphone-uplink.test.js dist/.voice-tests/tests/microphone-processing.test.js dist/.voice-tests/tests/login-mobile-layout.test.js dist/.voice-tests/tests/voice-downlink-policy.test.js dist/.voice-tests/tests/polling-scheduler.test.js dist/.voice-tests/tests/theme-palette.test.js dist/.voice-tests/tests/watch-playback.test.js tests/watch-extension.test.mjs",
+    "test:voice-browser": "node tests/microphone-processing.browser.mjs",
+    "test:music-browser": "node tests/music-loudness.browser.mjs",
     "build": "node scripts/package-watch-extension.mjs && vue-tsc -b && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
+    "@jitsi/rnnoise-wasm": "0.2.1",
     "@types/qrcode": "^1.5.6",
     "axios": "^1.20.0",
     "element-plus": "^2.14.1",
@@ -28,6 +31,7 @@
     "@types/node": "^24.12.3",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vue/tsconfig": "^0.9.1",
+    "playwright": "1.64.0",
     "typescript": "~6.0.3",
     "vite": "^8.2.2",
     "vue-tsc": "^3.3.10"

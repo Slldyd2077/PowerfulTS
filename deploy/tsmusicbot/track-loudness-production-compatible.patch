@@ -1,0 +1,698 @@
+diff --git a/src/audio/player.ts b/src/audio/player.ts
+index 30e613d..05d741e 100644
+--- a/src/audio/player.ts
++++ b/src/audio/player.ts
+@@ -12,6 +12,8 @@ import {
+ } from "./realtime-voice-telemetry.js";
+ import type { Readable } from "node:stream";
+ import type { Logger } from "../logger.js";
++import { TrackLoudnessAnalyzer, calculateTrackGainDb, type LoudnessMeasurement, type TrackNormalizationStatus } from "./track-loudness.js";
++import type { LoudnessNormalizationConfig } from "../data/config.js";
+ 
+ const require = createRequire(import.meta.url);
+ const ffmpegPath: string | null = require("ffmpeg-static");
+@@ -102,6 +104,7 @@ export function cleanupTempDir(dir: string): void {
+ 
+ export interface FfmpegInputOptions {
+   realtime?: boolean;
++  trackGainDb?: number;
+ }
+ 
+ export function buildFfmpegArgs(
+@@ -147,7 +150,9 @@ export function buildFfmpegArgs(
+     );
+   }
+   if (seekSeconds > 0) args.push("-ss", String(seekSeconds));
+-  args.push("-i", url, "-f", "s16le", "-ar", "48000", "-ac", "2", "-acodec", "pcm_s16le", "-");
++  args.push("-i", url);
++  if (!options.realtime && Number.isFinite(options.trackGainDb)) args.push("-af", `volume=${options.trackGainDb}dB`);
++  args.push("-f", "s16le", "-ar", "48000", "-ac", "2", "-acodec", "pcm_s16le", "-");
+ 
+   return args;
+ }
+@@ -260,6 +265,7 @@ export function isValidSoundEffectUrl(
+ }
+ 
+ export interface AudioPlayerDependencies {
++  analyzeTrackLoudness?: (url: string, signal: AbortSignal) => Promise<LoudnessMeasurement>;
+   spawnSoundEffect?: (
+     command: string,
+     args: string[],
+@@ -420,6 +426,14 @@ export function isPcmFrameVoiced(frame: Buffer, peakThreshold = 256): boolean {
+ }
+ 
+ export class AudioPlayer extends EventEmitter {
++  private readonly loudnessAnalyzer = new TrackLoudnessAnalyzer();
++  private readonly analyzeTrackLoudness: (url: string, signal: AbortSignal) => Promise<LoudnessMeasurement>;
++  private loudnessSettings: LoudnessNormalizationConfig = { enabled: false, targetLufs: -18 };
++  private currentLoudnessSettings = { ...this.loudnessSettings };
++  private loudnessAbort: AbortController | null = null;
++  private trackAnalysisRequired = false;
++  private trackGainDb = 0;
++  private normalizationStatus: TrackNormalizationStatus = { state: "disabled", gainDb: 0 };
+   private ffmpeg: ChildProcess | null = null;
+   private encoder: Encoder;
+   private state: PlayerState = "idle";
+@@ -502,6 +516,8 @@ export class AudioPlayer extends EventEmitter {
+     this.encoder = createOpusEncoder();
+     this.logger = logger;
+     this.spawnSoundEffect = dependencies.spawnSoundEffect ?? spawn;
++    this.analyzeTrackLoudness = dependencies.analyzeTrackLoudness ?? ((url, signal) =>
++      this.loudnessAnalyzer.measure(getFfmpegCommand(), this.currentUrl, buildFfmpegArgs(url, 0), signal));
+   }
+ 
+   play(
+@@ -526,6 +542,10 @@ export class AudioPlayer extends EventEmitter {
+     this.spawnFailed = false;
+     this.emptyFrameAttempts = 0;
+     this.currentSongDuration = songDuration;
++    this.currentLoudnessSettings = { ...this.loudnessSettings };
++    this.trackGainDb = Number.isFinite(options.trackGainDb) ? options.trackGainDb! : 0;
++    this.trackAnalysisRequired = this.currentLoudnessSettings.enabled && !options.realtime && options.trackGainDb === undefined;
++    this.normalizationStatus = { state: options.realtime ? "unavailable" : this.trackAnalysisRequired ? "analyzing" : "disabled", gainDb: this.trackGainDb };
+ 
+     if (this.consecutiveFailures >= AudioPlayer.MAX_CONSECUTIVE_FAILURES) {
+       this.logger.error({ failures: this.consecutiveFailures }, "FFmpeg failures limit reached");
+@@ -539,7 +559,17 @@ export class AudioPlayer extends EventEmitter {
+       return;
+     }
+ 
+-    const args = buildFfmpegArgs(url, seekSeconds, options);
++    if (this.trackAnalysisRequired) {
++      this.state = "playing";
++      void this.prepareTrackLoudness(url, currentSessionId, () =>
++        this.spawnUrlPlayback(url, this.seekOffset, currentSessionId, options));
++      return;
++    }
++    this.spawnUrlPlayback(url, seekSeconds, currentSessionId, options);
++  }
++
++  private spawnUrlPlayback(url: string, seekSeconds: number, currentSessionId: number, options: FfmpegInputOptions): void {
++    const args = buildFfmpegArgs(url, seekSeconds, { ...options, trackGainDb: this.trackGainDb });
+ 
+     const ffmpegBin = getFfmpegCommand();
+     this.ffmpeg = spawn(ffmpegBin, args, { stdio: ["ignore", "pipe", "pipe"] });
+@@ -805,7 +835,12 @@ export class AudioPlayer extends EventEmitter {
+         this.emit("error", new Error(`PowerShell download exited ${code}`));
+         return;
+       }
+-      this.spawnFfmpegFromFile(tempFile, seekSeconds, sessionId);
++      if (this.trackAnalysisRequired) {
++        void this.prepareTrackLoudness(tempFile, sessionId, () =>
++          this.spawnFfmpegFromFile(tempFile, this.seekOffset, sessionId));
++      } else {
++        this.spawnFfmpegFromFile(tempFile, seekSeconds, sessionId);
++      }
+     });
+ 
+     ps.on("error", (err) => {
+@@ -835,7 +870,7 @@ export class AudioPlayer extends EventEmitter {
+       return;
+     }
+ 
+-    const args = buildFfmpegArgs(tempFile, seekSeconds);
++    const args = buildFfmpegArgs(tempFile, seekSeconds, { trackGainDb: this.trackGainDb });
+     const ffmpegBin = getFfmpegCommand();
+     this.ffmpeg = spawn(ffmpegBin, args, { stdio: ["ignore", "pipe", "pipe"] });
+ 
+@@ -902,6 +937,7 @@ export class AudioPlayer extends EventEmitter {
+ 
+     const currentSessionId = this.sessionId;
+     this.externalMode = true;
++    this.normalizationStatus = { state: "unavailable", gainDb: 0 };
+     this.externalStream = readable;
+     this.onExternalEnd = opts.onExternalEnd ?? null;
+     // Leave this.ffmpeg = null; clear currentUrl so seek() cannot respawn ffmpeg.
+@@ -991,6 +1027,10 @@ export class AudioPlayer extends EventEmitter {
+   stop(): void {
+     // 3. 递增 ID 是最有效的逻辑“隔离墙”
+     this.sessionId++; 
++    this.loudnessAbort?.abort();
++    this.loudnessAbort = null;
++    this.trackGainDb = 0;
++    this.normalizationStatus = { state: "disabled", gainDb: 0 };
+     this.frameLoopRunning = false;
+     
+     // 立即清空缓冲区，确保切歌瞬间静音 （
+@@ -1148,7 +1188,7 @@ export class AudioPlayer extends EventEmitter {
+ 
+       // R3-4: likewise gated on state==="playing" — a drained/EOF'd stream must
+       // not emit trackEnd while paused; end-detection resumes on resume().
+-      if (this.state === "playing" && !this.externalMode && !this.ffmpeg && this.pcmBuffer.length < PCM_FRAME_BYTES) {
++      if (this.state === "playing" && !this.externalMode && !this.ffmpeg && !this.loudnessAbort && !this.downloader && this.pcmBuffer.length < PCM_FRAME_BYTES) {
+         this.frameLoopRunning = false;
+         // Outer gate guarantees state==="playing"; end directly (no !=="idle" guard).
+         this.state = "idle";
+@@ -1338,14 +1378,53 @@ export class AudioPlayer extends EventEmitter {
+     // transport is delegated to the SpotifyController by the caller (Task 7).
+     if (this.externalMode) return;
+     if (this.currentUrl && Number.isFinite(seconds) && seconds >= 0) {
+-      this.play(this.currentUrl, seconds, this.currentSongDuration);
++      if (this.normalizationStatus.state === "analyzing") {
++        this.seekOffset = seconds;
++        return;
++      }
++      this.resumeTrack(this.currentUrl, seconds, this.currentSongDuration);
+     }
+   }
++  /** Resume the same track after a seek or refreshed CDN URL without changing its gain. */
++  resumeTrack(url: string, seconds: number, duration: number): void {
++    const status = this.getLoudnessNormalization();
++    this.play(url, seconds, duration, { trackGainDb: this.trackGainDb });
++    this.normalizationStatus = status;
++  }
+   pause(): void { if (this.state === "playing") this.state = "paused"; }
+   resume(): void { if (this.state === "paused") { this.state = "playing"; this.nextFrameTime = performance.now(); } }
+   resetFailures(): void { this.consecutiveFailures = 0; }
+   setVolume(vol: number): void { this.volume = Math.max(0, Math.min(100, vol)); }
+   getVolume(): number { return this.volume; }
++  setLoudnessNormalization(settings: LoudnessNormalizationConfig): void {
++    // Changing the setting applies to the next track, never to a playing song.
++    this.loudnessSettings = { ...settings };
++  }
++  getLoudnessNormalization(): TrackNormalizationStatus { return { ...this.normalizationStatus }; }
++
++  private async prepareTrackLoudness(input: string, sessionId: number, start: () => void): Promise<void> {
++    const controller = new AbortController();
++    this.loudnessAbort = controller;
++    this.normalizationStatus = { state: "analyzing", gainDb: 0 };
++    try {
++      const measured = await this.analyzeTrackLoudness(input, controller.signal);
++      if (controller.signal.aborted || this.sessionId !== sessionId) return;
++      this.trackGainDb = calculateTrackGainDb(measured, this.currentLoudnessSettings.targetLufs);
++      this.normalizationStatus = {
++        state: "applied", gainDb: this.trackGainDb,
++        ...(Number.isFinite(measured.integratedLufs) ? measured : {}),
++      };
++    } catch {
++      if (controller.signal.aborted || this.sessionId !== sessionId) return;
++      this.normalizationStatus = { state: "failed", gainDb: 0 };
++      this.logger.warn("Track loudness analysis failed; playing at original track gain");
++    }
++    if (this.loudnessAbort === controller) this.loudnessAbort = null;
++    if (controller.signal.aborted || this.sessionId !== sessionId) return;
++    const paused = this.state === "paused";
++    start();
++    if (paused) this.state = "paused";
++  }
+   /** Set the temporary voice-ducking gain (0=silent, 1=unchanged). */
+   setDuckingGain(gain: number, rampMs = 0): void {
+     if (!Number.isFinite(gain)) return;
+diff --git a/src/audio/track-loudness.test.ts b/src/audio/track-loudness.test.ts
+new file mode 100644
+index 0000000..f01b5ca
+--- /dev/null
++++ b/src/audio/track-loudness.test.ts
+@@ -0,0 +1,182 @@
++import { describe, it, expect, vi } from "vitest";
++import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { spawnSync } from "node:child_process";
++import { createServer } from "node:http";
++import pino from "pino";
++import { calculateTrackGainDb, parseLoudnessMeasurement, buildLoudnessAnalysisArgs } from "./track-loudness.js";
++import { buildFfmpegArgs, AudioPlayer, getFfmpegCommand } from "./player.js";
++import { TrackLoudnessAnalyzer } from "./track-loudness.js";
++
++describe("track loudness normalization", () => {
++  it("matches quiet and loud masters with one fixed gain for each whole track", () => {
++    const quiet = calculateTrackGainDb({ integratedLufs: -27, truePeakDb: -14 }, -18);
++    const loud = calculateTrackGainDb({ integratedLufs: -9, truePeakDb: -0.1 }, -18);
++    expect(quiet).toBe(9);
++    expect(loud).toBe(-9);
++    expect(-27 + quiet).toBe(-18);
++    expect(-9 + loud).toBe(-18);
++    const factor = 10 ** (quiet / 20);
++    expect((0.1 * factor) / (0.01 * factor)).toBeCloseTo(10, 12);
++  });
++  it("reduces the whole-track boost when peaks need headroom, rather than compressing the chorus", () => {
++    expect(calculateTrackGainDb({ integratedLufs: -27, truePeakDb: -3 }, -18)).toBe(2);
++    expect(calculateTrackGainDb({ integratedLufs: -60, truePeakDb: -50 }, -18)).toBe(12);
++    expect(calculateTrackGainDb({ integratedLufs: -Infinity, truePeakDb: -Infinity }, -18)).toBe(0);
++  });
++  it("parses measured input loudness, not loudnorm's dynamically adjusted output", () => {
++    expect(parseLoudnessMeasurement('log\n{"input_i":"-25.2","input_tp":"-6.3","output_i":"-18"}')).toEqual({ integratedLufs: -25.2, truePeakDb: -6.3 });
++    expect(() => parseLoudnessMeasurement('{"input_i":"NaN","input_tp":"0"}')).toThrow();
++    expect(() => parseLoudnessMeasurement('missing measurement')).toThrow();
++  });
++  it("analyzes the full stereo programme without seeking and discards the analysis audio", () => {
++    const args = buildLoudnessAnalysisArgs(buildFfmpegArgs('https://music.126.net/song', 0));
++    expect(args).not.toContain('-ss');
++    expect(args).not.toContain('-reconnect_at_eof');
++    expect(args.slice(-3)).toEqual(['-f', 'null', '-']);
++    expect(args[args.indexOf('-af') + 1]).toContain('loudnorm');
++    expect(args[args.indexOf('-af') + 1]).toContain('channel_layouts=stereo');
++  });
++  it("uses only a constant volume filter during playback, including seeking", () => {
++    const args = buildFfmpegArgs('/song.wav', 45, { trackGainDb: -8 });
++    expect(args[args.indexOf('-af') + 1]).toBe('volume=-8dB');
++    expect(args.join(' ')).not.toMatch(/loudnorm|dynaudnorm|compressor|limiter/);
++    expect(buildFfmpegArgs('/microphone', 0, { realtime: true, trackGainDb: 8 })).not.toContain('-af');
++  });
++});
++
++describe("player freezes loudness gain at track boundaries", () => {
++  function player(analyze: (url: string, signal: AbortSignal) => Promise<{ integratedLufs: number; truePeakDb: number }>) {
++    const p = new AudioPlayer(pino({ level: 'silent' }), { analyzeTrackLoudness: analyze });
++    const spawn = vi.spyOn(p as unknown as { spawnUrlPlayback: (...args: unknown[]) => void }, 'spawnUrlPlayback').mockImplementation(() => {});
++    p.setLoudnessNormalization({ enabled: true, targetLufs: -18 });
++    return { p, spawn };
++  }
++  it("setting changes, pauses and seeking do not change a playing song's gain", async () => {
++    const analyze = vi.fn(async () => ({ integratedLufs: -9, truePeakDb: -0.1 }));
++    const { p, spawn } = player(analyze);
++    try {
++      p.play('/first.wav');
++      await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(1));
++      expect(p.getLoudnessNormalization().gainDb).toBe(-9);
++      p.setLoudnessNormalization({ enabled: false, targetLufs: -23 });
++      p.pause(); p.resume();
++      p.seek(35);
++      expect(analyze).toHaveBeenCalledTimes(1);
++      expect(p.getLoudnessNormalization().gainDb).toBe(-9);
++      expect(spawn.mock.calls.at(-1)?.[3]).toEqual({ trackGainDb: -9 });
++      p.resumeTrack('/refreshed-cdn-url.wav', 42, 180);
++      expect(analyze).toHaveBeenCalledTimes(1);
++      expect(p.getLoudnessNormalization().gainDb).toBe(-9);
++      expect(spawn.mock.calls.at(-1)?.[3]).toEqual({ trackGainDb: -9 });
++      p.play('/second.wav');
++      expect(p.getLoudnessNormalization()).toEqual({ state: 'disabled', gainDb: 0 });
++    } finally { p.stop(); }
++  });
++  it("stopping cancels analysis and stale results cannot start playback", async () => {
++    let finish!: (value: { integratedLufs: number; truePeakDb: number }) => void;
++    let signal!: AbortSignal;
++    const { p, spawn } = player(async (_url, currentSignal) => {
++      signal = currentSignal;
++      return new Promise((resolve) => { finish = resolve });
++    });
++    p.play('/first.wav');
++    expect(p.getLoudnessNormalization().state).toBe('analyzing');
++    p.stop();
++    expect(signal.aborted).toBe(true);
++    finish({ integratedLufs: -9, truePeakDb: -0.1 });
++    await new Promise((resolve) => setImmediate(resolve));
++    expect(spawn).not.toHaveBeenCalled();
++  });
++  it("failed measurement plays the original gain and reports the failure", async () => {
++    const { p, spawn } = player(async () => { throw new Error('scan failed') });
++    try {
++      p.play('/first.wav');
++      await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(1));
++      expect(p.getLoudnessNormalization()).toEqual({ state: 'failed', gainDb: 0 });
++    } finally { p.stop(); }
++  });
++  it("an entrance-effect frame loop cannot advance the queue while track analysis is pending", async () => {
++    let finish!: (value: { integratedLufs: number; truePeakDb: number }) => void;
++    const { p } = player(async () => new Promise((resolve) => { finish = resolve }));
++    const ended = vi.fn();
++    p.on('trackEnd', ended);
++    p.play('/first.wav');
++    (p as unknown as { startFrameLoop(): void }).startFrameLoop();
++    await new Promise((resolve) => setTimeout(resolve, 80));
++    expect(ended).not.toHaveBeenCalled();
++    p.stop();
++    finish({ integratedLufs: -9, truePeakDb: -0.1 });
++  });
++});
++
++it("real FFmpeg equalizes two tracks while preserving the quiet/chorus ratio within each", async () => {
++  const dir = mkdtempSync(join(tmpdir(), 'tsmusic-loudness-test-'));
++  const analyzer = new TrackLoudnessAnalyzer();
++  const command = getFfmpegCommand();
++  const peaks: number[] = [];
++  const sourceRms: number[] = [];
++  function rms(pcm: Buffer, start: number, end: number) {
++    let energy = 0;
++    for (let i = start; i < end; i++) energy += (pcm.readInt16LE(i * 4) / 32768) ** 2;
++    return Math.sqrt(energy / (end - start));
++  }
++  try {
++    for (const level of [0.12, 0.6]) {
++      const pcm = Buffer.alloc(8 * 48000 * 4);
++      for (let i = 0; i < 8 * 48000; i++) {
++        const amplitude = i < 4 * 48000 ? level / 4 : level;
++        const value = Math.round(amplitude * Math.sin(2 * Math.PI * 1000 * i / 48000) * 32767);
++        pcm.writeInt16LE(value, i * 4); pcm.writeInt16LE(value, i * 4 + 2);
++      }
++      const file = join(dir, `${level}.s16le`);
++      writeFileSync(file, pcm);
++      const input = ['-nostats', '-f', 's16le', '-ar', '48000', '-ac', '2', '-i', file];
++      const wave = join(dir, `${level}.wav`);
++      expect(spawnSync(command, [...input, '-y', wave], { stdio: 'ignore' }).status).toBe(0);
++      const measured = await analyzer.measure(command, wave, buildFfmpegArgs(wave, 0), new AbortController().signal);
++      const gain = calculateTrackGainDb(measured, -18);
++      const result = spawnSync(command, buildFfmpegArgs(wave, 0, { trackGainDb: gain }), { maxBuffer: 4 * 1024 * 1024 });
++      expect(result.status).toBe(0);
++      const rendered = result.stdout;
++      const quiet = rms(rendered, 48000, 3 * 48000);
++      const chorus = rms(rendered, 5 * 48000, 7 * 48000);
++      expect(20 * Math.log10(chorus / quiet)).toBeCloseTo(20 * Math.log10(4), 1);
++      peaks.push(chorus);
++      sourceRms.push(rms(pcm, 5 * 48000, 7 * 48000));
++      expect(chorus / rms(pcm, 5 * 48000, 7 * 48000)).toBeCloseTo(10 ** (gain / 20), 3);
++    }
++    expect(20 * Math.log10(sourceRms[1]! / sourceRms[0]!)).toBeGreaterThan(13);
++    expect(Math.abs(20 * Math.log10(peaks[1]! / peaks[0]!))).toBeLessThan(0.2);
++  } finally { rmSync(dir, { recursive: true, force: true }); }
++}, 20_000);
++
++it('finishes full-file HTTP loudness analysis at EOF without replaying the source', async () => {
++  let requests = 0;
++  const pcm = Buffer.alloc(4 * 48000 * 4);
++  for (let i = 0; i < 4 * 48000; i++) {
++    const value = Math.round(Math.sin(2 * Math.PI * 1000 * i / 48000) * 6000);
++    pcm.writeInt16LE(value, i * 4); pcm.writeInt16LE(value, i * 4 + 2);
++  }
++  const header = Buffer.alloc(44);
++  header.write('RIFF'); header.writeUInt32LE(pcm.length + 36, 4); header.write('WAVEfmt ', 8);
++  header.writeUInt32LE(16, 16); header.writeUInt16LE(1, 20); header.writeUInt16LE(2, 22);
++  header.writeUInt32LE(48000, 24); header.writeUInt32LE(192000, 28);
++  header.writeUInt16LE(4, 32); header.writeUInt16LE(16, 34); header.write('data', 36); header.writeUInt32LE(pcm.length, 40);
++  const wave = Buffer.concat([header, pcm]);
++  const server = createServer((_request, response) => {
++    requests++;
++    response.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': wave.length });
++    response.end(wave);
++  });
++  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
++  try {
++    const address = server.address() as { port: number };
++    const url = `http://127.0.0.1:${address.port}/whole-track.wav`;
++    const analyzer = new TrackLoudnessAnalyzer();
++    const measured = await analyzer.measure(getFfmpegCommand(), url, buildFfmpegArgs(url, 0), AbortSignal.timeout(8000));
++    expect(Number.isFinite(measured.integratedLufs)).toBe(true);
++    expect(requests).toBe(1);
++  } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
++}, 10_000);
+diff --git a/src/audio/track-loudness.ts b/src/audio/track-loudness.ts
+new file mode 100644
+index 0000000..0184c40
+--- /dev/null
++++ b/src/audio/track-loudness.ts
+@@ -0,0 +1,88 @@
++import { spawn } from "node:child_process";
++
++export interface LoudnessMeasurement {
++  integratedLufs: number;
++  truePeakDb: number;
++}
++
++export interface TrackNormalizationStatus {
++  state: "disabled" | "analyzing" | "applied" | "failed" | "unavailable";
++  gainDb: number;
++  integratedLufs?: number;
++  truePeakDb?: number;
++}
++
++/** One gain for the whole programme. Peak headroom takes precedence over target loudness. */
++export function calculateTrackGainDb(measured: LoudnessMeasurement, targetLufs: number): number {
++  if (measured.integratedLufs === -Infinity && measured.truePeakDb === -Infinity) return 0;
++  if (!Number.isFinite(measured.integratedLufs) || !Number.isFinite(measured.truePeakDb) || !Number.isFinite(targetLufs)) {
++    throw new Error("Invalid track loudness measurement");
++  }
++  return Math.min(targetLufs - measured.integratedLufs, -1 - measured.truePeakDb, 12);
++}
++
++export function parseLoudnessMeasurement(stderr: string): LoudnessMeasurement {
++  const json = stderr.match(/\{\s*"input_i"[^}]+\}/g)?.at(-1);
++  if (!json) throw new Error("Track loudness measurement missing");
++  const data = JSON.parse(json) as Record<string, unknown>;
++  if (![data.input_i, data.input_tp].every((value) => typeof value === "string" || typeof value === "number")) {
++    throw new Error("Invalid track loudness measurement");
++  }
++  const measured = {
++    integratedLufs: Number(data.input_i),
++    truePeakDb: Number(data.input_tp),
++  };
++  // FFmpeg prints silent programmes as "-inf", which Number does not parse.
++  if (data.input_i === "-inf" && data.input_tp === "-inf") {
++    return { integratedLufs: -Infinity, truePeakDb: -Infinity };
++  }
++  calculateTrackGainDb(measured, -18);
++  return measured;
++}
++
++export function buildLoudnessAnalysisArgs(playbackArgs: string[]): string[] {
++  const outputStart = playbackArgs.lastIndexOf("-f");
++  if (outputStart < 0) throw new Error("Playback output format missing");
++  const input = playbackArgs.slice(0, outputStart);
++  // Analysis must finish at the real EOF. Playback's CDN recovery policy can
++  // otherwise keep reconnecting after a complete file and suppress the JSON summary.
++  const reconnectAtEof = input.indexOf("-reconnect_at_eof");
++  if (reconnectAtEof >= 0) input.splice(reconnectAtEof, 2);
++  return [
++    "-nostdin", ...input,
++    "-vn", "-sn", "-dn", "-map", "0:a:0",
++    "-af", "aformat=sample_rates=48000:channel_layouts=stereo,loudnorm=I=-18:TP=-1:LRA=11:print_format=json",
++    "-f", "null", "-",
++  ];
++}
++
++/** Full-file BS.1770 measurement, cached by exact source URL and never adjusted while playing. */
++export class TrackLoudnessAnalyzer {
++  private readonly cache = new Map<string, { measured: LoudnessMeasurement; expires: number }>();
++
++  async measure(command: string, cacheKey: string, playbackArgs: string[], signal: AbortSignal): Promise<LoudnessMeasurement> {
++    signal.throwIfAborted();
++    const cached = this.cache.get(cacheKey);
++    if (cached && cached.expires > Date.now()) return cached.measured;
++    const measured = await new Promise<LoudnessMeasurement>((resolve, reject) => {
++      let tail = "";
++      const child = spawn(command, buildLoudnessAnalysisArgs(playbackArgs), {
++        stdio: ["ignore", "ignore", "pipe"],
++        signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
++        killSignal: "SIGKILL",
++      });
++      child.stderr.on("data", (chunk: Buffer) => { tail = (tail + chunk.toString()).slice(-16384); });
++      // Spawn errors can contain signed URLs; expose a fixed diagnostic only.
++      child.once("error", () => reject(new Error("Track loudness analysis interrupted or unavailable")));
++      child.once("close", (code) => {
++        if (code !== 0) { reject(new Error("Track loudness analysis failed")); return; }
++        try { resolve(parseLoudnessMeasurement(tail)); } catch (error) { reject(error); }
++      });
++    });
++    signal.throwIfAborted();
++    this.cache.delete(cacheKey);
++    this.cache.set(cacheKey, { measured, expires: Date.now() + 15 * 60_000 });
++    if (this.cache.size > 64) this.cache.delete(this.cache.keys().next().value!);
++    return measured;
++  }
++}
+diff --git a/src/bot/instance.ts b/src/bot/instance.ts
+index 15b8ce3..30b33e8 100644
+--- a/src/bot/instance.ts
++++ b/src/bot/instance.ts
+@@ -163,6 +163,7 @@ export interface BotStatus {
+   effectiveDuration?: number;
+   /** Decoder backlog for latency-sensitive live voice and ordinary media. */
+   audioPipeline: PlaybackDiagnostics;
++  loudnessNormalization?: ReturnType<AudioPlayer["getLoudnessNormalization"]>;
+   liveVoice: RealtimeVoiceTelemetry;
+ }
+ 
+@@ -255,6 +256,7 @@ export class BotInstance extends EventEmitter {
+     };
+     this.voiceServerScope = { ...this.configuredVoiceServerScope };
+     this.queue = new PlayQueue();
++    this.player.setLoudnessNormalization?.(this.config.loudnessNormalization ?? { enabled: false, targetLufs: -18 });
+ 
+     // Restore persisted per-bot player settings (#125): volume + play mode
+     // survive restarts. getPlayerSettings returns validated values (the in-memory
+@@ -704,6 +706,11 @@ export class BotInstance extends EventEmitter {
+     this.voiceDucking.updateSettings(settings);
+   }
+ 
++  updateLoudnessNormalization(settings: BotConfig["loudnessNormalization"]): void {
++    this.config.loudnessNormalization = { ...settings };
++    this.player.setLoudnessNormalization(settings);
++  }
++
+   private _startIdlePoller(): void {
+     // 每 30 秒检查一次频道人数
+     const poll = async () => {
+@@ -2069,6 +2076,7 @@ export class BotInstance extends EventEmitter {
+       effectiveDuration: this.effectiveDuration,
+       clientId: this.tsClient.getClientId(),
+       audioPipeline,
++      loudnessNormalization: this.player.getLoudnessNormalization?.(),
+       liveVoice: visibleRealtimeVoiceTelemetry(
+         audioPipeline.mode,
+         this.liveVoiceTelemetry,
+diff --git a/src/data/config.test.ts b/src/data/config.test.ts
+index 62deb52..f81939c 100644
+--- a/src/data/config.test.ts
++++ b/src/data/config.test.ts
+@@ -55,6 +55,17 @@ describe("config", () => {
+     });
+   });
+ 
++  it("preserves loudness settings and restores defaults for legacy or invalid config", () => {
++    const dir = makeTmpDir();
++    const path = join(dir, 'loudness.json');
++    for (const raw of [null, [], 'on', { enabled: 'yes', targetLufs: -99 }, {}]) {
++      writeFileSync(path, JSON.stringify({ loudnessNormalization: raw }));
++      expect(loadConfig(path).loudnessNormalization).toEqual({ enabled: false, targetLufs: -18 });
++    }
++    writeFileSync(path, JSON.stringify({ loudnessNormalization: { enabled: true, targetLufs: -23 } }));
++    expect(loadConfig(path).loudnessNormalization).toEqual({ enabled: true, targetLufs: -23 });
++  });
++
+   it("fills voiceDucking defaults for legacy and partial configs", () => {
+     const dir = makeTmpDir();
+     const legacyPath = join(dir, "legacy.json");
+diff --git a/src/data/config.ts b/src/data/config.ts
+index 898a5bc..f52cd67 100644
+--- a/src/data/config.ts
++++ b/src/data/config.ts
+@@ -60,6 +60,11 @@ export interface VoiceDuckingConfig {
+   volumePercent: number;
+ }
+ 
++export interface LoudnessNormalizationConfig {
++  enabled: boolean;
++  targetLufs: number;
++}
++
+ /**
+  * Providers gated by `enabledProviders`. Not listed here:
+  *  - "local"   → governed by the existing `localAudioEnabled` flag
+@@ -121,6 +126,7 @@ export interface BotConfig {
+   autoPauseOnEmpty: boolean;
+   /** Lower music volume while voice from another client is being received. */
+   voiceDucking: VoiceDuckingConfig;
++  loudnessNormalization: LoudnessNormalizationConfig;
+   idleTimeoutMinutes: number;
+   /** Enable uploading and playback of server-stored local audio files. */
+   localAudioEnabled: boolean;
+@@ -188,6 +194,7 @@ export function getDefaultConfig(): BotConfig {
+       enabled: false,
+       volumePercent: 30,
+     },
++    loudnessNormalization: { enabled: false, targetLufs: -18 },
+     idleTimeoutMinutes: 0,
+     localAudioEnabled: true,
+     savedQueuesEnabled: false,
+@@ -399,6 +406,12 @@ export function loadConfig(path: string): BotConfig {
+     // directly by the audio path. Only a plain-object block with correctly
+     // typed, finite and in-range fields may override the safe defaults.
+     const rawVoiceDucking = partial.voiceDucking;
++    const rawLoudness = partial.loudnessNormalization;
++    const loudnessNormalization: LoudnessNormalizationConfig = {
++      enabled: typeof rawLoudness?.enabled === "boolean" ? rawLoudness.enabled : false,
++      targetLufs: typeof rawLoudness?.targetLufs === "number" && Number.isFinite(rawLoudness.targetLufs)
++        && rawLoudness.targetLufs >= -24 && rawLoudness.targetLufs <= -14 ? rawLoudness.targetLufs : -18,
++    };
+     const partialVoiceDucking =
+       rawVoiceDucking !== null &&
+       typeof rawVoiceDucking === "object" &&
+@@ -458,6 +471,7 @@ export function loadConfig(path: string): BotConfig {
+       savedQueuesEnabled,
+       playKeepsQueue,
+       voiceDucking,
++      loudnessNormalization,
+       defaultPlatform: defaultPlatformPref,
+     };
+   }
+diff --git a/src/web/api/bot.test.ts b/src/web/api/bot.test.ts
+index dd111dd..87fc051 100644
+--- a/src/web/api/bot.test.ts
++++ b/src/web/api/bot.test.ts
+@@ -28,6 +28,10 @@ function makeFakeBot() {
+     idleTimeoutCalls: [] as number[],
+     autoPauseCalls: [] as boolean[],
+     voiceDuckingCalls: [] as VoiceDuckingConfig[],
++    loudnessCalls: [] as BotConfig["loudnessNormalization"][],
++    updateLoudnessNormalization(settings: BotConfig["loudnessNormalization"]) {
++      this.loudnessCalls.push({ ...settings });
++    },
+     updateIdleTimeout(minutes: number) {
+       this.idleTimeoutCalls.push(minutes);
+     },
+@@ -99,6 +103,25 @@ describe("bot router /settings", () => {
+     expect(res.body.voiceDucking).toEqual({ enabled: false, volumePercent: 30 });
+   });
+ 
++  it("persists loudness settings and applies them to all bots at the next track boundary", async () => {
++    const result = await request(app).post('/api/bot/settings').set('Cookie', cookie)
++      .send({ loudnessNormalization: { enabled: true } });
++    expect(result.status).toBe(200);
++    expect(result.body.loudnessNormalization).toEqual({ enabled: true, targetLufs: -18 });
++    expect(JSON.parse(readFileSync(configPath, 'utf8')).loudnessNormalization).toEqual({ enabled: true, targetLufs: -18 });
++    for (const bot of fakeBots) expect(bot.loudnessCalls).toEqual([{ enabled: true, targetLufs: -18 }]);
++    const target = await request(app).post('/api/bot/settings').set('Cookie', cookie)
++      .send({ loudnessNormalization: { targetLufs: -23 } });
++    expect(target.body.loudnessNormalization).toEqual({ enabled: true, targetLufs: -23 });
++  });
++
++  it.each([null, [], { enabled: 'yes' }, { targetLufs: -50 }, { targetLufs: 0 }])('rejects malformed loudness settings %j', async (value) => {
++    const result = await request(app).post('/api/bot/settings').set('Cookie', cookie)
++      .send({ loudnessNormalization: value });
++    expect(result.status).toBe(400);
++    expect(config.loudnessNormalization).toEqual({ enabled: false, targetLufs: -18 });
++  });
++
+   it("POST /settings safely partial-merges, persists and hot-applies voiceDucking", async () => {
+     const enable = await request(app)
+       .post("/api/bot/settings")
+diff --git a/src/web/api/bot.ts b/src/web/api/bot.ts
+index c0a0bd6..74088d7 100644
+--- a/src/web/api/bot.ts
++++ b/src/web/api/bot.ts
+@@ -72,6 +72,7 @@ export function createBotRouter(
+       idleTimeoutMinutes: config.idleTimeoutMinutes ?? 0,
+       autoPauseOnEmpty: config.autoPauseOnEmpty,
+       voiceDucking: config.voiceDucking,
++      loudnessNormalization: config.loudnessNormalization ?? { enabled: false, targetLufs: -18 },
+       localAudioEnabled: config.localAudioEnabled,
+       savedQueuesEnabled: config.savedQueuesEnabled,
+       playKeepsQueue: config.playKeepsQueue,
+@@ -92,6 +93,7 @@ export function createBotRouter(
+       autoPauseOnEmpty,
+       localAudioEnabled,
+       voiceDucking,
++      loudnessNormalization,
+       guestMode,
+       adminGroups,
+     } = req.body;
+@@ -104,6 +106,24 @@ export function createBotRouter(
+ 
+     const hasAutoPause = typeof autoPauseOnEmpty === "boolean";
+     const hasLocalAudioEnabled = typeof localAudioEnabled === "boolean";
++    const hasLoudness = loudnessNormalization !== undefined;
++    if (hasLoudness && (
++      !loudnessNormalization || typeof loudnessNormalization !== "object" || Array.isArray(loudnessNormalization)
++      || (loudnessNormalization.enabled !== undefined && typeof loudnessNormalization.enabled !== "boolean")
++      || (loudnessNormalization.targetLufs !== undefined && (
++        typeof loudnessNormalization.targetLufs !== "number" || !Number.isFinite(loudnessNormalization.targetLufs)
++        || loudnessNormalization.targetLufs < -24 || loudnessNormalization.targetLufs > -14
++      ))
++    )) {
++      res.status(400).json({ error: "Invalid loudnessNormalization settings" });
++      return;
++    }
++    if (hasLoudness) {
++      config.loudnessNormalization = {
++        enabled: loudnessNormalization.enabled ?? config.loudnessNormalization?.enabled ?? false,
++        targetLufs: loudnessNormalization.targetLufs ?? config.loudnessNormalization?.targetLufs ?? -18,
++      };
++    }
+ 
+     if (hasIdle) config.idleTimeoutMinutes = idleTimeoutMinutes;
+     if (hasAutoPause) config.autoPauseOnEmpty = autoPauseOnEmpty;
+@@ -274,12 +294,14 @@ export function createBotRouter(
+       if (hasIdle) bot.updateIdleTimeout(config.idleTimeoutMinutes);
+       if (hasAutoPause) bot.updateAutoPause(config.autoPauseOnEmpty);
+       if (hasVoiceDucking) bot.updateVoiceDucking(config.voiceDucking);
++      if (hasLoudness) bot.updateLoudnessNormalization(config.loudnessNormalization);
+     }
+ 
+     res.json({
+       idleTimeoutMinutes: config.idleTimeoutMinutes ?? 0,
+       autoPauseOnEmpty: config.autoPauseOnEmpty,
+       voiceDucking: config.voiceDucking,
++      loudnessNormalization: config.loudnessNormalization ?? { enabled: false, targetLufs: -18 },
+       localAudioEnabled: config.localAudioEnabled,
+       savedQueuesEnabled: config.savedQueuesEnabled,
+       playKeepsQueue: config.playKeepsQueue,

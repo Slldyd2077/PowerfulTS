@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
+import axios from 'axios'
 import { useMusicStore } from '@/stores/music'
 import type { BotProfile } from '@/api/music'
 
@@ -33,6 +34,7 @@ const SWITCHES: { key: keyof BotProfile; label: string; hint: string }[] = [
 const activeCount = computed(() => {
   let n = music.botSettings.autoPauseOnEmpty ? 1 : 0
   if (music.botSettings.voiceDucking?.enabled) n++
+  if (music.botSettings.loudnessNormalization?.enabled) n++
   if (music.followEnabled) n++
   const prof = music.activeBotProfile
   if (prof) for (const s of SWITCHES) if (prof[s.key]) n++
@@ -118,6 +120,20 @@ async function saveDuckVolume() {
 }
 
 const followBusy = ref(false)
+const loudnessBusy = ref(false)
+async function toggleLoudness(enabled: boolean) {
+  if (loudnessBusy.value) return
+  loudnessBusy.value = true
+  try {
+    await music.saveBotSettings({ loudnessNormalization: { ...music.botSettings.loudnessNormalization, enabled } })
+    ElMessage.success('已保存，从下一首歌起生效')
+  } catch (error) {
+    const detail = axios.isAxiosError(error) ? error.response?.data?.detail : ''
+    ElMessage.error(detail || '响度均衡设置失败')
+  } finally {
+    loudnessBusy.value = false
+  }
+}
 async function toggleFollow(val: boolean) {
   if (followBusy.value) return
   followBusy.value = true
@@ -276,6 +292,26 @@ async function onRemoveAvatar() {
       <div class="create-actions">
         <button class="submit-btn" :disabled="globalBusy" @click="saveGlobal">{{ globalBusy ? '保存中…' : '保存下线时长' }}</button>
       </div>
+    </section>
+
+    <section class="bh-section">
+      <div class="bh-section-title">逐曲响度均衡（机器人音乐输出）</div>
+      <button
+        type="button" role="switch" class="switch-row"
+        aria-label="逐曲响度均衡"
+        :aria-checked="!!music.botSettings.loudnessNormalization?.enabled"
+        :class="{ on: !!music.botSettings.loudnessNormalization?.enabled, busy: loudnessBusy }"
+        :disabled="loudnessBusy || !music.botSettings.loudnessNormalization?.supported"
+        @click="toggleLoudness(!music.botSettings.loudnessNormalization?.enabled)"
+      >
+        <span class="field-text">
+          <span class="field-label">平衡不同歌曲的音量</span>
+          <span class="field-hint">先分析整首歌，再使用固定增益；保留曲内轻重变化，网页与原版客户端都生效。</span>
+        </span>
+        <span class="switch-track"><span class="switch-knob"></span></span>
+      </button>
+      <p class="warn-line">从下一首起生效。首次分析会增加开播等待；不处理麦克风和实时直播音频。</p>
+      <p v-if="!music.botSettings.loudnessNormalization?.supported" class="warn-line">当前机器人引擎未确认支持，需要应用响度均衡引擎补丁并重建引擎。</p>
     </section>
 
     <!-- 语音闪避（全局） -->

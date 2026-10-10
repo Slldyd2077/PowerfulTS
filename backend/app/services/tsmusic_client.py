@@ -125,6 +125,29 @@ class TSMusicUnavailable(RuntimeError):
     """
 
 
+class LoudnessNormalizationUnsupported(ValueError):
+    """The playback engine cannot confirm track loudness normalization support."""
+
+
+def _parse_loudness_normalization(raw: object) -> dict:
+    supported = isinstance(raw, dict) and isinstance(raw.get("enabled"), bool)
+    if not supported:
+        return {"supported": False, "enabled": False, "targetLufs": -18}
+    target = raw.get("targetLufs", -18)
+    if isinstance(target, bool) or not isinstance(target, (int, float)) or not -24 <= target <= -14:
+        target = -18
+    return {"supported": True, "enabled": raw["enabled"], "targetLufs": target}
+
+
+def _track_loudness_status(raw: object) -> dict | None:
+    if not isinstance(raw, dict) or raw.get("state") not in {"disabled", "analyzing", "applied", "failed", "unavailable"}:
+        return None
+    gain = raw.get("gainDb", 0)
+    if isinstance(gain, bool) or not isinstance(gain, (int, float)) or not -120 <= gain <= 12:
+        gain = 0
+    return {"state": raw["state"], "gainDb": gain}
+
+
 def _parse_voice_ducking(raw: object) -> dict:
     """解析上游 voiceDucking 块，非法/缺失时回落上游默认（关，30%）。"""
     if not isinstance(raw, dict):
@@ -730,6 +753,7 @@ class TSMusicClient:
                 "vip": cs.get("vip"),
                 "audioPipeline": _audio_pipeline_diagnostics(bot.get("audioPipeline")),
                 "liveVoice": _live_voice_diagnostics(bot.get("liveVoice")),
+                "loudnessNormalization": _track_loudness_status(bot.get("loudnessNormalization")),
             }
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("TSMusicBot 状态获取失败: %s", exc)
@@ -864,20 +888,21 @@ class TSMusicClient:
     )
 
     async def get_bot_settings(self) -> dict:
-        """全局 bot 行为设置：空闲下线分钟 + 空频道自动暂停 + 语音闪避。
+        """全局 bot 行为设置：空闲下线、空频道暂停、语音闪避和逐曲响度均衡。
 
-        仅回传这三项；guestMode / adminGroups 属上游自身权限体系，PowerfulTS 不代理。
+        仅回传上述音频/行为设置；guestMode / adminGroups 属上游权限体系，不代理。
         """
         await self._ensure_login()
         try:
             data = self._json(await self._request("GET", "/api/bot/settings"))
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("TSMusicBot 读取 bot 设置失败: %s", exc)
-            return {"idleTimeoutMinutes": 0, "autoPauseOnEmpty": False, "voiceDucking": {"enabled": False, "volumePercent": 30}}
+            return {"idleTimeoutMinutes": 0, "autoPauseOnEmpty": False, "voiceDucking": {"enabled": False, "volumePercent": 30}, "loudnessNormalization": _parse_loudness_normalization(None)}
         return {
             "idleTimeoutMinutes": data.get("idleTimeoutMinutes", 0),
             "autoPauseOnEmpty": bool(data.get("autoPauseOnEmpty", False)),
             "voiceDucking": _parse_voice_ducking(data.get("voiceDucking")),
+            "loudnessNormalization": _parse_loudness_normalization(data.get("loudnessNormalization")),
         }
 
     async def get_bot_settings_checked(self) -> dict:
@@ -892,6 +917,7 @@ class TSMusicClient:
             "idleTimeoutMinutes": data.get("idleTimeoutMinutes", 0),
             "autoPauseOnEmpty": bool(data.get("autoPauseOnEmpty", False)),
             "voiceDucking": _parse_voice_ducking(data.get("voiceDucking")),
+            "loudnessNormalization": _parse_loudness_normalization(data.get("loudnessNormalization")),
         }
 
     async def set_bot_settings(
@@ -899,6 +925,7 @@ class TSMusicClient:
         idle_timeout_minutes: int | None = None,
         auto_pause_on_empty: bool | None = None,
         voice_ducking: dict | None = None,
+        loudness_normalization: dict | None = None,
     ) -> dict:
         """更新全局 bot 行为设置（仅透传非 None 字段，未传项上游保持不变）。"""
         await self._ensure_login()
@@ -916,13 +943,42 @@ class TSMusicClient:
                 block["volumePercent"] = volume
             if block:
                 payload["voiceDucking"] = block
+        if loudness_normalization:
+            current = await self.get_bot_settings_checked()
+            if not current["loudnessNormalization"]["supported"]:
+                raise LoudnessNormalizationUnsupported("请升级 TSMusicBot 播放引擎；当前引擎不支持逐曲响度均衡")
+            block = {}
+            if "enabled" in loudness_normalization:
+                enabled = loudness_normalization["enabled"]
+                if not isinstance(enabled, bool):
+                    raise ValueError("Invalid loudness normalization enabled value")
+                block["enabled"] = enabled
+            if "targetLufs" in loudness_normalization:
+                target = loudness_normalization["targetLufs"]
+                if isinstance(target, bool) or not isinstance(target, (int, float)) or not -24 <= target <= -14:
+                    raise ValueError("Invalid loudness target")
+                block["targetLufs"] = target
+            if block:
+                payload["loudnessNormalization"] = block
         if not payload:
             return await self.get_bot_settings()
-        data = self._json(await self._request("POST", "/api/bot/settings", json=payload))
+        response = await self._request("POST", "/api/bot/settings", json=payload)
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, dict):
+            raise ValueError("TSMusicBot settings response is not an object")
+        normalization = _parse_loudness_normalization(data.get("loudnessNormalization"))
+        if "loudnessNormalization" in payload and (
+            not normalization["supported"] or any(
+                normalization[key] != value for key, value in payload["loudnessNormalization"].items()
+            )
+        ):
+            raise LoudnessNormalizationUnsupported("TSMusicBot 未确认响度均衡设置生效，请升级播放引擎")
         return {
             "idleTimeoutMinutes": data.get("idleTimeoutMinutes", 0),
             "autoPauseOnEmpty": bool(data.get("autoPauseOnEmpty", False)),
             "voiceDucking": _parse_voice_ducking(data.get("voiceDucking")),
+            "loudnessNormalization": normalization,
         }
 
     async def get_bot_profile(self, bot_id: str | None = None) -> dict:

@@ -385,6 +385,7 @@ test('releases prepared capture when stopped during async stream preparation', a
   await waitFor(() => harness.captureRequests === 1)
 
   await harness.uplink.stop()
+  assert.equal(harness.preparedReleases, 1, 'cancel model initialization immediately')
   harness.releasePrepare()
   await starting
 
@@ -392,6 +393,32 @@ test('releases prepared capture when stopped during async stream preparation', a
   assert.equal(harness.stream.track.stopCalls, 1)
   assert.equal(harness.preparedReleases, 1)
   assert.deepEqual(harness.stoppedSessions, [])
+})
+
+test('a canceled neural initialization does not surface a microphone failure', async () => {
+  let rejectPrepare!: (error: Error) => void
+  const stream = new FakeStream()
+  const errors: string[] = []
+  const uplink = new MicrophoneUplink({
+    acquireStream: async () => stream as unknown as MediaStream,
+    prepareStream: async () => new Promise<MediaStream>((_resolve, reject) => { rejectPrepare = reject }),
+    releasePreparedStream: () => { rejectPrepare(new Error('麦克风处理已取消')) },
+    chooseMimeType: () => 'audio/webm;codecs=opus',
+    startSession: async () => { throw new Error('should never open a session') },
+    stopSession: async () => {},
+    createSocket: () => { throw new Error('should never open a socket') },
+    createRecorder: () => { throw new Error('should never create a recorder') },
+    isRecoveryAllowed: () => true,
+    setTimer: () => 1, clearTimer: () => {},
+    onStateChange: () => {}, onWarning: () => {}, onError: (message) => errors.push(message),
+  })
+  const starting = uplink.start()
+  await waitFor(() => !!rejectPrepare)
+  await uplink.stop()
+  await starting
+  assert.deepEqual(errors, [])
+  assert.equal(uplink.state, 'idle')
+  assert.equal(stream.track.stopCalls, 1)
 })
 
 test('releases prepared capture and stops the session when socket creation fails', async () => {

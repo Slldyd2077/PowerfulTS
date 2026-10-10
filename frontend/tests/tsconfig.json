@@ -13,6 +13,7 @@
     "noEmit": false
   },
   "include": [
+    "./microphone-processing.test.ts",
     "./ts-nickname.test.ts",
     "./voice-api.test.ts",
     "../src/services/microphone-uplink.ts",
