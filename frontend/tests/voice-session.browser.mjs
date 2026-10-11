@@ -16,6 +16,20 @@ try {
   const counts = { joins: 0, stops: 0, downlinks: 0, microphones: 0, chunks: 0, downlinkCloses: 0 }
   let online = false
   await context.addInitScript(() => {
+    const NativeDecoder = window.AudioDecoder
+    if (NativeDecoder) window.AudioDecoder = class extends NativeDecoder {
+      static isConfigSupported(config) { return NativeDecoder.isConfigSupported(config) }
+      constructor(options) { super(options); this.voiceTestError = options.error }
+      decode(chunk) {
+        if (window.voiceTestFailDecoder) {
+          window.voiceTestFailDecoder = false
+          this.close()
+          this.voiceTestError(new Error('forced runtime decoder failure'))
+          return
+        }
+        super.decode(chunk)
+      }
+    }
     window.voiceTestContexts = []
     window.voiceTestAnalysers = []
     const OriginalContext = window.AudioContext
@@ -133,6 +147,10 @@ try {
   assert.equal(counts.microphones, 0)
   assert.equal(await page.evaluate(() => window.voiceTestTracks.length), 0)
   await receivesTone()
+  await page.evaluate(() => { window.voiceTestFailDecoder = true })
+  await page.getByText('兼容模式已启用：当前设备使用 WASM 解码频道语音。', { exact: true }).waitFor()
+  await receivesTone()
+  console.log('PASS runtime WebCodecs failure falls back to WASM and audible decoded PCM continues')
   await page.locator('.leave-button').click()
   await page.getByRole('button', { name: '加入通话', exact: false }).waitFor()
   // Re-enable the mic explicitly; listen-only intentionally saves the mute preference.
