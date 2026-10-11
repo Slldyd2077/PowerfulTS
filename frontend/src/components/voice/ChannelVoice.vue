@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import type { OpusDecoderWebWorker as WasmOpusDecoder } from 'opus-decoder'
@@ -29,6 +30,7 @@ import {
   microphoneConstraints,
 } from '@/services/microphone-processing-settings'
 import denoiseWorkletUrl from '@/workers/microphone-denoise-worklet.ts?worker&url'
+import { loadVoiceAudioPreferences, saveVoiceAudioPreferences } from '@/services/voice-preferences'
 
 const emit = defineEmits<{ (e: 'session-change'): void }>()
 
@@ -50,6 +52,8 @@ type WasmSpeakerDecoder = {
 type SpeakerDecoder = NativeSpeakerDecoder | WasmSpeakerDecoder
 
 const auth = useAuthStore()
+const route = useRoute()
+const preferences = loadVoiceAudioPreferences()
 // 通话身份由后端按登录账号开，前端只需要知道它开好了没有。
 const voiceBotId = ref('')
 const listening = ref(false)
@@ -59,8 +63,9 @@ const microphoneState = ref<MicrophoneUplinkState>('idle')
 const microphoneLive = computed(() => microphoneState.value === 'live')
 const activeSpeakers = ref(0)
 const speakingIds = ref<number[]>([])
-const outputVolume = ref(85)
-const microphoneVolume = ref(100)
+const outputVolume = ref(preferences.outputVolume)
+const microphoneVolume = ref(preferences.microphoneVolume)
+const microphoneEnabled = ref(preferences.microphoneEnabled)
 const microphoneProcessing = ref(loadMicrophoneProcessing())
 const processingStatus = ref<MicrophoneProcessingStatus>({ mode: 'idle', message: '' })
 const captureSettings = ref<MediaTrackSettings>({})
@@ -116,8 +121,13 @@ const displayName = computed(() => auth.nickname || '你')
 
 const inputDevices = ref<MediaDeviceInfo[]>([])
 const outputDevices = ref<MediaDeviceInfo[]>([])
-const selectedInput = ref('')
-const selectedOutput = ref('')
+const selectedInput = ref(preferences.selectedInput)
+const selectedOutput = ref(preferences.selectedOutput)
+watch([outputVolume, microphoneVolume, selectedInput, selectedOutput, microphoneEnabled], () => {
+  saveVoiceAudioPreferences({ outputVolume: outputVolume.value, microphoneVolume: microphoneVolume.value,
+    selectedInput: selectedInput.value, selectedOutput: selectedOutput.value,
+    microphoneEnabled: microphoneEnabled.value })
+})
 // setSinkId on AudioContext is Chromium-only; hide the picker where it is absent.
 const canChooseOutput = typeof AudioContext !== 'undefined'
   && 'setSinkId' in AudioContext.prototype
@@ -545,11 +555,16 @@ async function refreshDevices() {
     const devices = await navigator.mediaDevices.enumerateDevices()
     inputDevices.value = devices.filter((d) => d.kind === 'audioinput')
     outputDevices.value = devices.filter((d) => d.kind === 'audiooutput')
-    if (selectedInput.value && !inputDevices.value.some((d) => d.deviceId === selectedInput.value)) {
+    // IDs may be hidden before permission; validate saved choices only with a labelled device list.
+    if (selectedInput.value && inputDevices.value.some((d) => d.label)
+      && !inputDevices.value.some((d) => d.deviceId === selectedInput.value)) {
       selectedInput.value = ''
+      await onInputDeviceChange()
     }
-    if (selectedOutput.value && !outputDevices.value.some((d) => d.deviceId === selectedOutput.value)) {
+    if (selectedOutput.value && outputDevices.value.some((d) => d.label)
+      && !outputDevices.value.some((d) => d.deviceId === selectedOutput.value)) {
       selectedOutput.value = ''
+      await applyOutputDevice()
     }
   } catch {
     /* 权限未授予时枚举可能失败，忽略即可 */
@@ -610,9 +625,18 @@ function describeMicrophoneError(error: unknown): string {
 const microphoneUplink = new MicrophoneUplink({
   acquireStream: async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: microphoneConstraints(microphoneProcessing.value, selectedInput.value),
-      })
+      let stream: MediaStream
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: microphoneConstraints(microphoneProcessing.value, selectedInput.value),
+        })
+      } catch (error) {
+        if (!selectedInput.value || !(error instanceof DOMException)
+          || !['OverconstrainedError', 'NotFoundError'].includes(error.name)) throw error
+        // A saved device can disappear while IDs are still hidden before permission.
+        selectedInput.value = ''
+        stream = await navigator.mediaDevices.getUserMedia({ audio: microphoneConstraints(microphoneProcessing.value) })
+      }
       microphoneTrack = stream.getAudioTracks()[0] ?? null
       return stream
     } catch (error) {
@@ -676,6 +700,7 @@ async function stopMicrophone(message?: string) {
  * muted instead of dropping you out of it.
  */
 const joining = ref(false)
+let disposed = false
 
 async function joinCall() {
   if (joining.value) return
@@ -685,8 +710,13 @@ async function joinCall() {
     // Unlock playback while the original tap still owns user activation.
     // It also prevents creating a server-side voice identity on an unsupported device.
     await ensureAudioPipeline()
+    if (disposed) return
     // 后端按登录账号开通话身份：以你自己的昵称进服务器，挂断就离开。
     const session = await openVoiceSession()
+    if (disposed) {
+      await closeVoiceSession().catch(() => {})
+      return
+    }
     voiceBotId.value = session.botId
     // 新一轮通话，上一轮记住的「刚切到哪个频道」作废。
     clearPendingChannel()
@@ -710,7 +740,7 @@ async function joinCall() {
     emit('session-change')
     return
   }
-  await startMicrophone()
+  if (microphoneEnabled.value) await startMicrophone()
 }
 
 async function leaveCall() {
@@ -728,8 +758,10 @@ async function leaveCall() {
 
 async function toggleMicrophone() {
   if (microphoneState.value !== 'idle') {
+    microphoneEnabled.value = false
     await stopMicrophone()
   } else {
+    microphoneEnabled.value = true
     await startMicrophone()
   }
 }
@@ -753,6 +785,8 @@ function resumeAudioAfterForeground() {
 // 有人进出频道、或重连后 clid 变了，都要把保存的音量重新对应上去。
 watch(roommates, pushAllSpeakerGains)
 
+onActivated(() => { void refreshDevices() })
+
 onMounted(() => {
   void refreshDevices()
   navigator.mediaDevices?.addEventListener?.('devicechange', refreshDevices)
@@ -762,6 +796,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
   navigator.mediaDevices?.removeEventListener?.('devicechange', refreshDevices)
   document.removeEventListener('visibilitychange', resumeAudioAfterForeground)
   window.removeEventListener('pageshow', resumeAudioAfterForeground)
@@ -933,9 +968,64 @@ onBeforeUnmount(() => {
       建议使用耳机；网页通话时不要让同一设备上的 TeamSpeak 客户端同时进入该频道。
     </div>
   </section>
+  <Teleport to="body">
+    <aside v-if="listening && route.name !== 'Voice'" class="ongoing-call" aria-label="当前网页通话">
+      <RouterLink :to="{ name: 'Voice' }" class="ongoing-call-link">
+        {{ listenState === 'reconnecting' ? '通话正在重连' : '网页通话进行中' }}
+      </RouterLink>
+      <span class="ongoing-call-status" role="status">{{ microphoneStatusText }}</span>
+      <button type="button" :disabled="processingBusy" @click="toggleMicrophone">
+        {{ microphoneState === 'idle' ? '开启麦克风' : '静音' }}
+      </button>
+      <button type="button" class="ongoing-call-leave" @click="leaveCall">挂断</button>
+    </aside>
+  </Teleport>
 </template>
 
 <style scoped>
+.ongoing-call {
+  position: fixed;
+  right: max(18px, env(safe-area-inset-right));
+  bottom: max(18px, env(safe-area-inset-bottom));
+  z-index: 2000;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 36px);
+  box-sizing: border-box;
+  padding: 12px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-card);
+  color: var(--text-primary);
+  font-size: .8em;
+}
+.ongoing-call-link { color: var(--color-success); font-weight: 650; }
+.ongoing-call-status { color: var(--text-secondary); }
+.ongoing-call button {
+  min-height: 40px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.ongoing-call button:disabled { opacity: .5; cursor: wait; }
+.ongoing-call .ongoing-call-leave { color: var(--color-danger); }
+@media (max-width: 768px) {
+  .ongoing-call {
+    left: max(14px, env(safe-area-inset-left));
+    right: max(14px, env(safe-area-inset-right));
+    bottom: calc(82px + env(safe-area-inset-bottom));
+    max-width: none;
+    padding: 10px 12px;
+  }
+  .ongoing-call-status { flex-basis: 100%; }
+  .ongoing-call button { min-height: 44px; }
+}
 .voice-panel {
   position: relative;
   display: grid;

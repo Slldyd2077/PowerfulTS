@@ -4,12 +4,14 @@ import { useVoiceChannels } from '@/composables/useVoiceChannels'
 import { useWatchRoom } from '@/composables/useWatchRoom'
 import { applyPlayback, playbackPosition } from '@/services/watch-playback'
 import { useAuthStore } from '@/stores/auth'
+import { loadWatchPreferences, saveWatchPreferences } from '@/services/voice-preferences'
 
 const { botCid, botOnline, currentChannel } = useVoiceChannels()
 const auth = useAuthStore()
 const { connected, joining, error, peerId, room, isOwner, isHost, localStream, remoteStream,
   sharingPending, serverOffset, join, leave, startSync, startScreen, stopShare, publish, transferHost, setReady, pauseRoom, setOptions } = useWatchRoom()
-const source = ref<'direct' | 'site'>('site')
+const preferences = loadWatchPreferences()
+const source = ref(preferences.source)
 const url = ref('')
 const video = ref<HTMLVideoElement | null>(null)
 const extensionReady = ref(false)
@@ -19,9 +21,13 @@ const needsPlay = ref(false)
 const autoplayBlocked = ref(false)
 const buffering = ref(false)
 const nextHost = ref('')
-const waitForMembers = ref(true)
-const allowMemberPause = ref(true)
-const live = ref(false)
+const waitForMembers = ref(preferences.waitForMembers)
+const allowMemberPause = ref(preferences.allowMemberPause)
+const live = ref(preferences.live)
+watch([source, waitForMembers, allowMemberPause, live], () => {
+  saveWatchPreferences({ source: source.value, waitForMembers: waitForMembers.value,
+    allowMemberPause: allowMemberPause.value, live: live.value })
+})
 const share = computed(() => room.value.share)
 const ownerName = computed(() => room.value.peers.find(peer => peer.id === share.value?.owner)?.nickname)
 const hostName = computed(() => room.value.peers.find(peer => peer.id === room.value.host)?.nickname)

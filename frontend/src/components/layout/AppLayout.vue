@@ -44,7 +44,10 @@ const pageTitle = computed(() => PAGE_TITLES[String(route.name)] ?? 'PowerfulTS'
       <main class="layout-content">
         <router-view v-slot="{ Component, route }">
           <transition name="page" mode="out-in">
-            <component :is="Component" :key="route.path" />
+            <!-- Only cache voice: navigation keeps audio alive; logout destroys the layout. -->
+            <KeepAlive :key="auth.token ?? ''" include="VoiceCallView">
+              <component :is="Component" :key="route.name === 'Voice' ? 'Voice' : route.path" />
+            </KeepAlive>
           </transition>
         </router-view>
       </main>

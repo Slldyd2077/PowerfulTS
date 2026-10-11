@@ -1,11 +1,18 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onActivated, onDeactivated, ref } from 'vue'
 import ChannelVoice from '@/components/voice/ChannelVoice.vue'
 import ChannelBrowser from '@/components/voice/ChannelBrowser.vue'
 import EntrySoundPanel from '@/components/voice/EntrySoundPanel.vue'
 import WatchRoomPanel from '@/components/voice/WatchRoomPanel.vue'
 
 const browser = ref<InstanceType<typeof ChannelBrowser> | null>(null)
+const pageActive = ref(true)
+
+defineOptions({ name: 'VoiceCallView' })
+
+// Cache the call, but let video sharing and page panels leave and refresh as before.
+onActivated(() => { pageActive.value = true })
+onDeactivated(() => { pageActive.value = false })
 
 // 加入/挂断会立刻改变「你在哪个频道」，不等 5 秒轮询。
 function onSessionChange() {
@@ -25,8 +32,8 @@ function onSessionChange() {
     <div class="voice-body">
       <div class="voice-column">
         <ChannelVoice @session-change="onSessionChange" />
-        <WatchRoomPanel />
-        <EntrySoundPanel />
+        <WatchRoomPanel v-if="pageActive" />
+        <EntrySoundPanel v-if="pageActive" />
 
         <section class="voice-guide">
           <h2>怎么用</h2>
@@ -34,6 +41,7 @@ function onSessionChange() {
             <li><b>加入通话</b> —— 你会以自己的昵称出现在频道里，一个按钮同时开始收听和麦克风；进去之后可以随时点「静音」只听不说。</li>
             <li><b>选频道</b> —— 在右边点一个频道就能过去，你听到的也随之切换；带 🔒 的频道会让你输密码。</li>
             <li><b>挂断</b> —— 立刻离开服务器，不会占着频道位置。</li>
+            <li><b>切换页面</b> —— 通话会继续，其他页面的悬浮通话栏也可以静音或挂断。</li>
           </ol>
           <p class="tip">
             <span>建议戴耳机</span>
@@ -47,7 +55,7 @@ function onSessionChange() {
       </div>
 
       <div class="voice-column">
-        <ChannelBrowser ref="browser" />
+        <ChannelBrowser v-if="pageActive" ref="browser" />
       </div>
     </div>
   </div>
