@@ -13,6 +13,7 @@
     "noEmit": false
   },
   "include": [
+    "./voice-preferences.test.ts",
     "./microphone-processing.test.ts",
     "./ts-nickname.test.ts",
     "./voice-api.test.ts",

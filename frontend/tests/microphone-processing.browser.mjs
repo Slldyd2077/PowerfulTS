@@ -137,6 +137,7 @@ try {
   assert.equal(microphoneStarts, 1, 'gate changes do not reconnect the microphone')
   await ui.getByRole('combobox', { name: '背景降噪', exact: true }).press('ArrowDown')
   await ui.getByRole('option', { name: '浏览器基础降噪（省电）', exact: true }).click()
+  await ui.getByText('浏览器基础降噪运行中', { exact: true }).waitFor()
   await ui.getByRole('button', { name: '麦克风发送中 · 点击静音', exact: false }).waitFor()
   assert.equal(microphoneStarts, 2, 'mode switch rebuilds capture')
   assert.equal(await ui.getByRole('checkbox', { name: '键盘与停顿噪声抑制' }).isDisabled(), true)
