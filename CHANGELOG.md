@@ -1,3 +1,15 @@
+## v1.1.3 (2026-10-11)
+
+### Feat
+
+- **audio**: add RNNoise microphone processing and track loudness controls
+
+### Fix
+
+- **voice**: 站内切换页面时保留网页通话，增加可返回、静音和挂断的悬浮通话栏；登出释放麦克风。
+- **settings**: 保存收听音量、麦克风音量、输入输出设备、静音选择和一起看常用选项；保存的麦克风不可用时回退到系统默认设备。
+- **deploy**: Compose 默认固定为 1.1.3，增加现有 systemd 后端生产环境使用的前端 Compose 配置。
+
 ## v1.1.2 (2026-10-09)
 
 ### Fix
