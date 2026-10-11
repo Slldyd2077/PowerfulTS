@@ -3,9 +3,15 @@ import { onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useTsPlaylistStore } from '@/stores/ts_playlist'
-import type { TsPlaylistSong } from '@/api/ts_playlist'
+import { useMusicStore } from '@/stores/music'
+import type { TsPlaylist, TsPlaylistSong } from '@/api/ts_playlist'
 
 const ts = useTsPlaylistStore()
+const music = useMusicStore()
+const brokenCovers = ref(new Set<string>())
+function playlistCover(playlist: TsPlaylist) {
+  return [playlist.coverDataUrl, playlist.coverUrl].find((url) => url && !brokenCovers.value.has(url)) || ''
+}
 const { playlists, currentSongs, expandedId, loadingSongs } = storeToRefs(ts)
 
 const coverInput = ref<HTMLInputElement | null>(null)
@@ -64,9 +70,11 @@ async function onDelete(id: number, name: string) {
 }
 
 async function onPlayAll(id: number) {
+  if (music.enqueueProgress.running) return
   try {
     const res = await ts.playAll(id)
     if (res.enqueued === 0) ElMessage.warning('没有可播放的曲目（可能平台未登录或版权限制）')
+    else if (res.enqueued < res.total) ElMessage.warning(`已加入 ${res.enqueued} 首，${res.total - res.enqueued} 首失败`)
     else ElMessage.success(`已加入 ${res.enqueued} 首`)
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '播放失败')
@@ -136,7 +144,7 @@ async function onRemoveSong(song: TsPlaylistSong) {
       <div v-for="pl in playlists" :key="pl.id" class="pl-item">
         <div class="pl-row" @click="ts.toggleExpand(pl.id)">
           <div class="pl-cover" :title="'点击更换封面'" @click.stop="pickCover(pl.id)">
-            <img v-if="pl.coverDataUrl" :src="pl.coverDataUrl" :alt="pl.name" />
+            <img v-if="playlistCover(pl)" :key="playlistCover(pl)" :src="playlistCover(pl)" :alt="pl.name" loading="lazy" referrerpolicy="no-referrer" @error="brokenCovers.add(($event.target as HTMLImageElement).getAttribute('src') || '')" />
             <span v-else class="pl-cover-fallback">♪</span>
           </div>
           <div class="pl-info">
@@ -144,7 +152,7 @@ async function onRemoveSong(song: TsPlaylistSong) {
             <span class="pl-count">{{ pl.songCount || 0 }} 首</span>
           </div>
           <div class="pl-actions" @click.stop>
-            <button class="mini primary" @click="onPlayAll(pl.id)">▶ 播放</button>
+            <button class="mini primary" :disabled="music.enqueueProgress.running" @click="onPlayAll(pl.id)">▶ 播放</button>
             <button class="mini" @click="onRename(pl.id, pl.name)">改名</button>
             <button class="mini danger" @click="onDelete(pl.id, pl.name)">删除</button>
             <svg class="pl-arrow" :class="{ open: expandedId === pl.id }" viewBox="0 0 16 16" width="14" height="14">

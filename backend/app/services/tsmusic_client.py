@@ -19,6 +19,7 @@ from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import InvalidStatus
 
 from . import app_setting
+from .playlist_cover import latest_song_cover
 
 if TYPE_CHECKING:
     from .bot_player_state import BotPlayerStateStore
@@ -1118,6 +1119,7 @@ class TSMusicClient:
         params: dict[str, str] | None = None,
         cache_meta: bool = False,
         bot_id: str | None = None,
+        timeout: float | None = None,
     ) -> dict:
         """统一代理 TSMusicBot 列表端点，返回 {ok, unsupported, data, error}。
 
@@ -1132,7 +1134,8 @@ class TSMusicClient:
             if platform:
                 q["platform"] = platform
             q["botId"] = self._bid(bot_id)
-            resp = await self._request("GET", path, params=q)
+            options = {"timeout": timeout} if timeout is not None else {}
+            resp = await self._request("GET", path, params=q, **options)
             if resp.status_code == 501:
                 return {"ok": False, "unsupported": True, "data": [], "error": "not supported"}
             if resp.status_code >= 400:
@@ -1154,8 +1157,28 @@ class TSMusicClient:
     async def playlist_songs(self, playlist_id: str, platform: str | None = None, bot_id: str | None = None) -> dict:
         """歌单内歌曲（per-bot；缓存元数据，供入队后队列回填）。B 站时 playlist_id 为收藏夹 id，返回夹内视频。"""
         return await self._fetch_list(
-            f"/api/music/playlist/{playlist_id}", "songs", platform, cache_meta=True, bot_id=bot_id
+            f"/api/music/playlist/{playlist_id}", "songs", platform, cache_meta=True, bot_id=bot_id,
+            timeout=120.0,
         )
+
+    async def playlist_cover(self, playlist_id: str, platform: str, bot_id: str | None = None, songs_only: bool = False) -> dict:
+        """补列表缺失的封面；已设置的封面优先，失败或不支持详情时回退曲目封面。"""
+        if not songs_only and platform != "bilibili":
+            try:
+                await self._ensure_login()
+                resp = await self._request("GET", f"/api/music/playlist/{playlist_id}/detail",
+                                           params={"platform": platform, "botId": self._bid(bot_id)})
+                if resp.status_code < 400:
+                    data = self._json(resp)
+                    nested = data.get("data")
+                    detail = data.get("playlist") or (nested.get("playlist") if isinstance(nested, dict) else {})
+                    cover = latest_song_cover([detail]) if isinstance(detail, dict) else ""
+                    if cover:
+                        return {"coverUrl": cover, "fallbackCoverUrl": ""}
+            except (httpx.HTTPError, ValueError):
+                logger.debug("歌单 %s 详情封面不可用", playlist_id)
+        result = await self.playlist_songs(playlist_id, platform, bot_id)
+        return {"coverUrl": "", "fallbackCoverUrl": latest_song_cover(result.get("data") or [])}
 
     async def recommend_songs(self, platform: str, bot_id: str | None = None) -> dict:
         """每日推荐（per-bot）。B 站上游不支持。"""
@@ -1179,7 +1202,7 @@ class TSMusicClient:
     async def enqueue_songs(self, songs: list[dict], platform: str | None = None, bot_id: str | None = None) -> dict:
         """批量入队（循环 add + 并发上限 + 失败容忍），供前端「整单播放」。"""
         await self._ensure_login()
-        target = list(songs)[:50]  # 上限保护，避免超大歌单打爆队列
+        target = list(songs)
         if not target:
             return {"ok": True, "enqueued": 0, "failed": 0}
 
@@ -1204,14 +1227,17 @@ class TSMusicClient:
                         "POST",
                         f"/api/player/{bid}/add", json=payload
                     )
-                    if resp.status_code >= 400 or self._json(resp).get("error"):
+                    result = self._json(resp)
+                    if resp.status_code >= 400 or result.get("error") or "cannot play" in str(result.get("message", "")).lower():
                         return False
                     self._cache_meta(song, song_platform)
                     return True
                 except (httpx.HTTPError, ValueError):
                     return False
 
-        results = await asyncio.gather(*(_one(s) for s in target))
+        results = []
+        for offset in range(0, len(target), 4):
+            results.extend(await asyncio.gather(*(_one(s) for s in target[offset:offset + 4])))
         ok_count = sum(1 for r in results if r)
         if ok_count:
             await self.persist_player_state(bid)

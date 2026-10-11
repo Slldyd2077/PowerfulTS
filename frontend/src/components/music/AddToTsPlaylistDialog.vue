@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus'
 import { useTsPlaylistStore } from '@/stores/ts_playlist'
 import type { Song } from '@/api/music'
 
-const props = defineProps<{ visible: boolean; song: Song | null }>()
+const props = defineProps<{ visible: boolean; song: Song | null; songs?: Song[]; title?: string }>()
 const emit = defineEmits<{ (e: 'update:visible', v: boolean): void }>()
 
 const ts = useTsPlaylistStore()
@@ -24,7 +24,7 @@ watch(
 )
 
 async function onConfirm() {
-  if (!props.song) return
+  if (submitting.value || (!props.song && !props.songs?.length)) return
   const newName = newPlaylistName.value.trim()
   submitting.value = true
   try {
@@ -32,23 +32,37 @@ async function onConfirm() {
     if (newName) {
       const p = await ts.createPlaylist(newName)
       pid = p.id
+      selectedId.value = pid
+      newPlaylistName.value = ''
     }
     if (pid == null) {
       ElMessage.warning('请选择一个歌单，或填写新歌单名称')
       return
     }
-    await ts.addSong(pid, props.song)
-    ElMessage.success('已收藏到 TS 歌单')
+    if (props.songs?.length) {
+      const result = await ts.addSongs(pid, props.songs)
+      const message = `已收藏 ${result.added} 首，跳过 ${result.skipped} 首重复曲目${result.failed ? `，${result.failed} 首失败` : ''}`
+      if (result.failed) ElMessage.warning(message)
+      else ElMessage.success(message)
+    } else if (props.song) {
+      await ts.addSong(pid, props.song)
+      ElMessage.success('已收藏到 TS 歌单')
+    }
     emit('update:visible', false)
   } catch (e: unknown) {
     const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-    ElMessage.error(typeof detail === 'string' ? detail : '收藏失败')
+    if (props.songs?.length) {
+      ElMessage.error(`收藏中断，已处理 ${ts.importProgress.processed}/${ts.importProgress.total} 首${typeof detail === 'string' ? `（${detail}）` : ''}；可以重试，重复歌曲会自动跳过`)
+    } else {
+      ElMessage.error(typeof detail === 'string' ? detail : '收藏失败，请重试')
+    }
   } finally {
     submitting.value = false
   }
 }
 
 function close() {
+  if (submitting.value) return
   emit('update:visible', false)
 }
 </script>
@@ -61,7 +75,11 @@ function close() {
         <button class="dlg-close" @click="close">×</button>
       </div>
       <div class="dlg-body">
-        <p class="dlg-song">{{ props.song?.name }} · {{ props.song?.artist }}</p>
+        <p class="dlg-song">{{ props.songs?.length ? `${props.title} · ${props.songs.length} 首` : `${props.song?.name} · ${props.song?.artist}` }}</p>
+        <div v-if="props.songs?.length && ts.importProgress.total" class="import-progress" role="status" aria-live="polite">
+          <progress :value="ts.importProgress.processed" :max="ts.importProgress.total || 1"></progress>
+          <span>收藏进度 {{ ts.importProgress.processed }}/{{ ts.importProgress.total }} · 已添加 {{ ts.importProgress.added }} 首</span>
+        </div>
         <div class="dlg-list">
           <label
             v-for="pl in ts.playlists"
@@ -69,7 +87,7 @@ function close() {
             class="dlg-item"
             :class="{ active: selectedId === pl.id }"
           >
-            <input type="radio" :value="pl.id" v-model="selectedId" />
+            <input type="radio" :value="pl.id" v-model="selectedId" :disabled="submitting" />
             <span class="dlg-item-name">{{ pl.name }}</span>
             <span class="dlg-item-count">{{ pl.songCount || 0 }}</span>
           </label>
@@ -80,17 +98,20 @@ function close() {
           v-model.trim="newPlaylistName"
           placeholder="或新建歌单（填写名称）"
           maxlength="128"
+          :disabled="submitting"
         />
       </div>
       <div class="dlg-foot">
-        <button class="dlg-btn" @click="close">取消</button>
-        <button class="dlg-btn primary" :disabled="submitting" @click="onConfirm">收藏</button>
+        <button class="dlg-btn" :disabled="submitting" @click="close">取消</button>
+        <button class="dlg-btn primary" :disabled="submitting" @click="onConfirm">{{ submitting ? '收藏中…' : '收藏' }}</button>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+.import-progress { display: grid; gap: 8px; margin-bottom: 12px; font-size: 0.8em; color: var(--text-secondary); }
+.import-progress progress { width: 100%; accent-color: var(--color-primary); }
 .dlg-overlay {
   position: fixed;
   inset: 0;

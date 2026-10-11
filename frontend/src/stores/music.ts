@@ -22,6 +22,7 @@ import {
   getAuthStatus as apiGetAuthStatus,
   getMyPlaylists as apiGetMyPlaylists,
   getPlaylistSongs as apiGetPlaylistSongs,
+  getPlaylistCover as apiGetPlaylistCover,
   getRecommendSongs as apiGetRecommendSongs,
   getPersonalFm as apiGetPersonalFm,
   getBilibiliPopular as apiGetBilibiliPopular,
@@ -141,8 +142,49 @@ export const useMusicStore = defineStore('music', () => {
   const playlistSongs = ref<Record<string, Song[]>>({})
   const myLoading = ref<Record<string, boolean>>({})
   const myUnsupported = ref<Record<string, boolean>>({})
+  let libraryGeneration = 0
+  const pendingCovers = new Set<string>()
+  const coverJobs: { playlistId: string; platform: string; botId: string; generation: number; songsOnly: boolean; key: string }[] = []
+  let activeCoverRequests = 0
+
+  function fetchPlaylistCover(playlistId: string, platform: string, songsOnly = false) {
+    const botId = libraryBotId.value
+    if (!botId) return
+    const key = `${libraryGeneration}:${botId}:${platform}:${playlistId}:${songsOnly}`
+    if (pendingCovers.has(key)) return
+    pendingCovers.add(key)
+    coverJobs.push({ playlistId, platform, botId, generation: libraryGeneration, songsOnly, key })
+    pumpCoverJobs()
+  }
+
+  function pumpCoverJobs() {
+    while (activeCoverRequests < 2 && coverJobs.length) {
+      const job = coverJobs.shift()!
+      if (job.generation !== libraryGeneration) { pendingCovers.delete(job.key); continue }
+      activeCoverRequests++
+      void apiGetPlaylistCover(job.playlistId, job.platform, job.botId, job.songsOnly).then((result) => {
+        if (job.generation !== libraryGeneration || job.botId !== libraryBotId.value) return
+        myPlaylists.value = { ...myPlaylists.value, [job.platform]: (myPlaylists.value[job.platform] || []).map((playlist) =>
+          playlist.id === job.playlistId ? {
+            ...playlist,
+            coverUrl: result.coverUrl || playlist.coverUrl,
+            fallbackCoverUrl: result.fallbackCoverUrl || playlist.fallbackCoverUrl,
+          } : playlist,
+        ) }
+      }).catch(() => {
+        // 封面加载失败保留占位图，歌单和点播继续可用。
+      }).finally(() => {
+        activeCoverRequests--
+        pendingCovers.delete(job.key)
+        pumpCoverJobs()
+      })
+    }
+  }
 
   function clearLibraryData() {
+    libraryGeneration++
+    coverJobs.length = 0
+    pendingCovers.clear()
     platformStatus.value = {}
     myPlaylists.value = {}
     myRecommend.value = {}
@@ -403,19 +445,24 @@ export const useMusicStore = defineStore('music', () => {
   /** 用户歌单（自建+收藏） */
   async function fetchMyPlaylists(platform: string) {
     const key = `${platform}:playlists`
+    const generation = libraryGeneration
     myLoading.value = { ...myLoading.value, [key]: true }
     try {
       const res = await apiGetMyPlaylists(platform, libraryBotId.value)
+      if (generation !== libraryGeneration) return
       if (res.unsupported) {
         myUnsupported.value = { ...myUnsupported.value, [key]: true }
         myPlaylists.value = { ...myPlaylists.value, [platform]: [] }
       } else {
-        myPlaylists.value = { ...myPlaylists.value, [platform]: (res.data as Playlist[]) || [] }
+        myPlaylists.value = { ...myPlaylists.value, [platform]: ((res.data as Playlist[]) || []).map((playlist) => ({ ...playlist, platform })) }
+        for (const playlist of myPlaylists.value[platform] || []) {
+          if (!playlist.coverUrl?.trim() && playlist.songCount !== 0) fetchPlaylistCover(playlist.id, platform)
+        }
       }
     } catch {
       // 失败不写状态（保持 undefined），允许重试（切走再切回 / 重新展开触发）
     } finally {
-      myLoading.value = { ...myLoading.value, [key]: false }
+      if (generation === libraryGeneration) myLoading.value = { ...myLoading.value, [key]: false }
     }
   }
 
@@ -428,11 +475,11 @@ export const useMusicStore = defineStore('music', () => {
       if (res.unsupported) {
         myUnsupported.value = { ...myUnsupported.value, [key]: true }
         playlistSongs.value = { ...playlistSongs.value, [playlistId]: [] }
+      } else if (res.ok) {
+        playlistSongs.value = { ...playlistSongs.value, [playlistId]: ((res.data as Song[]) || []).map((song) => ({ ...song, platform: song.platform || platform })) }
       } else {
-        playlistSongs.value = { ...playlistSongs.value, [playlistId]: (res.data as Song[]) || [] }
+        throw new Error(res.error || '读取歌单失败，请重试')
       }
-    } catch {
-      // 失败保持 undefined，允许重试
     } finally {
       myLoading.value = { ...myLoading.value, [key]: false }
     }
@@ -491,11 +538,40 @@ export const useMusicStore = defineStore('music', () => {
     }
   }
 
-  /** 整单/批量入队（后端循环 add，最多 50 首） */
-  async function enqueueAll(songs: Song[], platform?: string) {
-    const res = await apiEnqueueSongs(platform, songs, activeBotId.value)
-    await fetchQueue()
-    return res
+  const enqueueProgress = ref({ running: false, processed: 0, total: 0, enqueued: 0, failed: 0, error: '' })
+
+  /** 分批入队，每批刷新列表；固定目标 Bot，切换页面或 Bot 不会把剩余歌曲发到其他实例。 */
+  async function enqueueAll(songs: Song[], platform?: string, startFirst = false) {
+    if (enqueueProgress.value.running) throw new Error('已有歌单正在加入队列，请等待完成')
+    const botId = activeBotId.value
+    if (!botId) throw new Error('请先选择一个 Bot')
+    const target = [...songs]
+    enqueueProgress.value = { running: true, processed: 0, total: target.length, enqueued: 0, failed: 0, error: '' }
+    try {
+      if (startFirst && target.length) {
+        const first = target[0]!
+        const result = await apiPlay(`id:${first.id}`, false, first.platform || platform, first, botId)
+        if (result.error || /cannot play/i.test(result.message || '')) enqueueProgress.value.failed++
+        else enqueueProgress.value.enqueued++
+        enqueueProgress.value.processed++
+        if (activeBotId.value === botId) { await fetchNowplaying(); await fetchQueue() }
+      }
+      for (let offset = startFirst ? 1 : 0; offset < target.length; offset += 4) {
+        const batch = target.slice(offset, offset + 4)
+        const result = await apiEnqueueSongs(platform, batch, botId)
+        if (!result.ok) throw new Error('加入队列失败，请检查机器人连接')
+        enqueueProgress.value.enqueued += result.enqueued
+        enqueueProgress.value.failed += result.failed
+        enqueueProgress.value.processed += batch.length
+        if (activeBotId.value === botId) await fetchQueue()
+      }
+      return { ok: true, enqueued: enqueueProgress.value.enqueued, failed: enqueueProgress.value.failed }
+    } catch (error) {
+      enqueueProgress.value.error = `处理已暂停（${enqueueProgress.value.processed}/${target.length}），当前批次结果未确认，请检查队列后重试`
+      throw error
+    } finally {
+      enqueueProgress.value.running = false
+    }
   }
 
   // ── bot 实例管理 ──
@@ -785,6 +861,7 @@ export const useMusicStore = defineStore('music', () => {
     bilibiliPopular,
     bilibiliPopularLoaded,
     playlistSongs,
+    enqueueProgress,
     myLoading,
     myUnsupported,
     search,
@@ -806,6 +883,7 @@ export const useMusicStore = defineStore('music', () => {
     fetchOwnPlatformStatus,
     fetchMyPlaylists,
     fetchPlaylistSongs,
+    fetchPlaylistCover,
     fetchRecommend,
     fetchPersonalFm,
     fetchBilibiliPopular,

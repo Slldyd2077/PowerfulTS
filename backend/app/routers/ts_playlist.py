@@ -9,20 +9,20 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.database import get_db
 from ..deps import AccountDep, TsmusicDep
 from ..routers.music import OwnedBotId
-from ..services.ts_playlist_service import TsPlaylistService, _PLATFORMS, _SONG_ID_RE
+from ..services.ts_playlist_service import TsPlaylistService, valid_song_key
 
 router = APIRouter(prefix="/ts-playlists", tags=["ts-playlist"])
 DbDep = Annotated[AsyncSession, Depends(get_db)]
 
 
 def _check_song_key(platform: str | None, song_id: str | None) -> tuple[str, str]:
-    if not platform or platform not in _PLATFORMS or not song_id or not _SONG_ID_RE.match(song_id):
+    if not platform or not song_id or not valid_song_key(platform, song_id):
         raise HTTPException(status_code=400, detail="platform/songId 不合法")
     return platform, song_id
 
@@ -53,6 +53,21 @@ class SongAdd(BaseModel):
     duration: int | None = None
     coverUrl: str | None = Field(default=None, max_length=512)
     vip: bool | None = None
+
+    @field_validator("name", "artist", "album", mode="before")
+    @classmethod
+    def bound_metadata(cls, value):
+        return str(value or "")[:255]
+
+    @field_validator("coverUrl", mode="before")
+    @classmethod
+    def bound_cover(cls, value):
+        # 平台签名封面 URL 可超过数据库字段长度；封面不影响收藏和重放。
+        return value if isinstance(value, str) and len(value) <= 512 else None
+
+
+class SongsAdd(BaseModel):
+    songs: list[dict] = Field(min_length=1, max_length=50)
 
 
 class SongUpdate(BaseModel):
@@ -118,6 +133,22 @@ async def add_song(playlist_id: int, body: SongAdd, account: AccountDep, db: DbD
     if not ok:
         raise HTTPException(status_code=status, detail=msg)
     return {"success": True, "message": msg}
+
+
+@router.post("/{playlist_id}/songs/batch")
+async def add_songs(playlist_id: int, body: SongsAdd, account: AccountDep, db: DbDep):
+    songs = []
+    invalid = 0
+    for song in body.songs:
+        try:
+            songs.append(SongAdd.model_validate(song).model_dump())
+        except ValidationError:
+            invalid += 1
+    result = await TsPlaylistService(db).add_songs(account.id, playlist_id, songs)
+    if result is None:
+        raise HTTPException(status_code=404, detail="歌单不存在")
+    result["failed"] += invalid
+    return result
 
 
 @router.delete("/{playlist_id}/songs")

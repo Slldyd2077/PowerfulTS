@@ -35,6 +35,7 @@ from ..services.entry_sound import (
 from ..services.tsmusic_client import TSMusicClient, TSMusicUnavailable, LoudnessNormalizationUnsupported
 from ..services.voice_bot import VoiceBotError
 from ..services.voice_exclusivity import NATIVE_TS_PREEMPTED_CLOSE_CODE
+from ..services.ts_nickname import ts_nickname_error
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/music", tags=["music"])
@@ -1154,6 +1155,18 @@ async def my_playlist_songs(
     return await tsmusic.playlist_songs(playlist_id, platform, bot_id=bot_id)
 
 
+@router.get("/my/playlist/{playlist_id}/cover")
+async def my_playlist_cover(
+    playlist_id: str, platform: str, tsmusic: TsmusicDep, _account: AccountDep,
+    bot_id: LibraryBotId, songs_only: bool = Query(default=False, alias="songsOnly"),
+):
+    if not _PLAYLIST_ID_RE.fullmatch(playlist_id):
+        raise HTTPException(status_code=400, detail="invalid playlist_id")
+    if platform not in {"netease", "qq", "bilibili", "kugou"}:
+        raise HTTPException(status_code=400, detail="invalid platform")
+    return await tsmusic.playlist_cover(playlist_id, platform, bot_id, songs_only)
+
+
 @router.get("/my/recommend/songs")
 async def my_recommend_songs(platform: str, tsmusic: TsmusicDep, _account: AccountDep, bot_id: LibraryBotId):
     """每日推荐（per-bot）。"""
@@ -1179,12 +1192,12 @@ async def my_bilibili_popular(
 
 class EnqueueRequest(BaseModel):
     platform: str | None = Field(default=None, description="音源平台 netease/qq/bilibili")
-    songs: list[dict] = Field(description="歌曲列表 [{id,...}]，最多取前 50 首")
+    songs: list[dict] = Field(description="歌曲列表 [{id,...}]，前端分批提交并展示进度")
 
 
 @router.post("/my/enqueue")
 async def my_enqueue(body: EnqueueRequest, request: Request, tsmusic: TsmusicDep, account: AccountDep, bot_id: OwnedBotId = None):
-    """批量入队（整单播放）：后端循环 add，并发上限 4，上限 50 首，单首失败容忍。整批只跟随一次。"""
+    """批量入队：并发上限 4，单首失败容忍。整批只跟随一次。"""
     result = await tsmusic.enqueue_songs(body.songs, platform=body.platform, bot_id=bot_id)
     await _ensure_follow(request, tsmusic, account, bot_id)
     return result
@@ -1224,8 +1237,8 @@ def _check_bot_id(bot_id: str) -> None:
 
 class BotCreate(BaseModel):
     name: str = Field(min_length=1, max_length=64)
-    nickname: str = Field(min_length=1, max_length=64)
-    serverAddress: str = Field(min_length=1, description="TS 服务器地址（TSMusicBot 在 docker 时用 host.docker.internal）")
+    nickname: str | None = Field(default=None, max_length=64)
+    serverAddress: str = Field(default="127.0.0.1", min_length=1, description="TS 服务器地址")
     serverPort: int = Field(default=9987, ge=1, le=65535)
     defaultChannel: str = ""
     channelPassword: str = ""
@@ -1307,8 +1320,12 @@ async def list_bots(tsmusic: TsmusicDep, account: AccountDep, db: AsyncSession =
 @router.post("/bots")
 async def create_bot(body: BotCreate, tsmusic: TsmusicDep, account: AccountDep, db: AsyncSession = Depends(get_db)):
     """创建 bot 并记录 owner（identity 自动生成，不自动连接）。"""
+    name = body.name.strip()
+    if error := ts_nickname_error(name):
+        raise HTTPException(status_code=400, detail=error.replace("TS 昵称", "Bot 名称"))
+    payload = {**body.model_dump(), "name": name, "nickname": name}
     try:
-        result = await tsmusic.create_bot(body.model_dump())
+        result = await tsmusic.create_bot(payload)
     except (httpx.HTTPError, ValueError):
         raise HTTPException(status_code=502, detail="TSMusicBot 不可达，请确认其 Docker 容器在运行")
     bot_id = str(result.get("id") or "")
@@ -1340,6 +1357,11 @@ async def update_bot(
     _check_bot_id(bot_id)
     await _check_bot_owner(db, account.id, bot_id)
     payload = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "name" in payload or "nickname" in payload:
+        name = payload.get("name", payload.get("nickname", "")).strip()
+        if error := ts_nickname_error(name):
+            raise HTTPException(status_code=400, detail=error.replace("TS 昵称", "Bot 名称"))
+        payload.update(name=name, nickname=name)
     if not payload:
         raise HTTPException(status_code=400, detail="没有要更新的字段")
     result = await tsmusic.update_bot(bot_id, payload)
