@@ -5,6 +5,7 @@ export interface MicrophoneProcessingSettings {
   echoCancellation: boolean
   autoGainControl: boolean
   keyboardSuppression: boolean
+  voiceActivityDetection: boolean
   voiceThreshold: number
 }
 
@@ -14,6 +15,7 @@ export const DEFAULT_MICROPHONE_PROCESSING: Readonly<MicrophoneProcessingSetting
   echoCancellation: true,
   autoGainControl: true,
   keyboardSuppression: true,
+  voiceActivityDetection: true,
   voiceThreshold: 0.6,
 }
 
@@ -27,6 +29,7 @@ export function normalizeMicrophoneProcessing(value: unknown): MicrophoneProcess
     echoCancellation: typeof saved.echoCancellation === 'boolean' ? saved.echoCancellation : defaults.echoCancellation,
     autoGainControl: typeof saved.autoGainControl === 'boolean' ? saved.autoGainControl : defaults.autoGainControl,
     keyboardSuppression: typeof saved.keyboardSuppression === 'boolean' ? saved.keyboardSuppression : defaults.keyboardSuppression,
+    voiceActivityDetection: typeof saved.voiceActivityDetection === 'boolean' ? saved.voiceActivityDetection : defaults.voiceActivityDetection,
     voiceThreshold: typeof saved.voiceThreshold === 'number' && Number.isFinite(saved.voiceThreshold)
       ? Math.min(0.9, Math.max(0.1, saved.voiceThreshold)) : defaults.voiceThreshold,
   }

@@ -15,6 +15,48 @@ test('falls back to the Safari audio/mp4 recorder format', () => {
   assert.equal(selected, 'audio/mp4')
 })
 
+test('a recorder that stops emitting after going live is recovered instead of staying falsely live', async () => {
+  const h = createHarness()
+  const starting = h.uplink.start()
+  await waitFor(() => h.sockets.length === 1)
+  h.sockets[0]!.open()
+  await starting
+  h.recorders[0]!.emitChunk()
+  h.runNextTimer()
+  await waitFor(() => h.uplink.state === 'reconnecting')
+  assert.equal(h.recorders[0]!.state, 'inactive')
+  await h.uplink.stop()
+})
+
+test('foreground recovery disposes a stalled recorder before opening its replacement', async () => {
+  const h = createHarness()
+  const starting = h.uplink.start()
+  await waitFor(() => h.sockets.length === 1)
+  h.sockets[0]!.open()
+  await starting
+  h.recorders[0]!.emitChunk()
+  h.recorders[0]!.state = 'paused'
+  const recovering = h.uplink.recover()
+  await waitFor(() => h.sockets.length === 2)
+  assert.equal(h.recorders[0]!.state, 'inactive')
+  assert.equal(h.sockets[0]!.readyState, 3)
+  h.sockets[1]!.open()
+  await recovering
+  await h.uplink.stop()
+})
+
+test('foreground events during first-chunk verification do not replace a healthy starting recorder', async () => {
+  const h = createHarness()
+  const starting = h.uplink.start()
+  await waitFor(() => h.sockets.length === 1)
+  h.sockets[0]!.open()
+  await starting
+  await h.uplink.recover()
+  assert.equal(h.sessionStarts, 1)
+  assert.equal(h.recorders[0]!.state, 'recording')
+  await h.uplink.stop()
+})
+
 class FakeTrack {
   readyState: MediaStreamTrackState = 'live'
   stopCalls = 0

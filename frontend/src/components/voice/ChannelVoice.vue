@@ -24,6 +24,7 @@ import {
   resolveVoiceDownlinkCloseAction,
 } from '@/services/voice-downlink-policy'
 import { MicrophoneProcessing, type MicrophoneProcessingStatus } from '@/services/microphone-processing'
+import { resumeVoiceAudio, voiceAudioTimeout } from '@/services/audio-context-state'
 import {
   MICROPHONE_PROCESSING_KEY,
   normalizeMicrophoneProcessing,
@@ -68,6 +69,9 @@ const microphoneVolume = ref(preferences.microphoneVolume)
 const microphoneEnabled = ref(preferences.microphoneEnabled)
 const microphoneProcessing = ref(loadMicrophoneProcessing())
 const processingStatus = ref<MicrophoneProcessingStatus>({ mode: 'idle', message: '' })
+const microphoneSpeaking = ref(false)
+const audioNeedsRecovery = ref(false)
+const recoveringAudio = ref(false)
 const captureSettings = ref<MediaTrackSettings>({})
 const changingProcessing = ref(false)
 const processingBusy = computed(() => changingProcessing.value
@@ -158,12 +162,13 @@ let reconnectAttempt = 0
 let listenGeneration = 0
 const decoders = new Map<number, SpeakerDecoder>()
 let WasmDecoderCtor: typeof import('opus-decoder').OpusDecoderWebWorker | null = null
+let decoderFallback: Promise<void> | null = null
 
 let microphoneTrack: MediaStreamTrack | null = null
 const microphoneProcessor = new MicrophoneProcessing(denoiseWorkletUrl, (status) => {
   processingStatus.value = status
   captureSettings.value = microphoneTrack?.getSettings() ?? {}
-})
+}, (speaking) => { microphoneSpeaking.value = speaking })
 
 function websocketUrl(path: string): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -238,8 +243,13 @@ function getSpeakerDecoder(clientId: number): SpeakerDecoder {
     return speaker
   }
   const decoder = new AudioDecoder({
-    output: (frame) => deliverWebCodecsPcm(clientId, frame),
-    error: (error) => console.warn(`TS voice decoder ${clientId} failed`, error),
+    output: (frame) => {
+      if (decoders.get(clientId)?.decoder !== decoder) { frame.close(); return }
+      deliverWebCodecsPcm(clientId, frame)
+    },
+    error: () => {
+      if (decoders.get(clientId)?.decoder === decoder) void useWasmAfterDecoderFailure()
+    },
   })
   decoder.configure({ codec: 'opus', sampleRate: 48000, numberOfChannels: 2 })
   const speaker: NativeSpeakerDecoder = {
@@ -249,12 +259,33 @@ function getSpeakerDecoder(clientId: number): SpeakerDecoder {
   return speaker
 }
 
+function useWasmAfterDecoderFailure(): Promise<void> {
+  if (decoderFallback) return decoderFallback
+  const generation = listenGeneration
+  const operation = (async () => {
+    const module = await voiceAudioTimeout(import('opus-decoder'), '兼容解码器加载超时')
+    if (generation !== listenGeneration || !listening.value) return
+    WasmDecoderCtor = module.OpusDecoderWebWorker
+    closeDecoders()
+    decoderBackend.value = 'wasm'
+  })().catch(() => {
+    if (generation !== listenGeneration) return
+    listenError.value = '频道音频解码失败，请点击恢复声音或重新加入通话'
+    audioNeedsRecovery.value = true
+  })
+  decoderFallback = operation
+  void operation.finally(() => { if (decoderFallback === operation) decoderFallback = null })
+  return operation
+}
+
 function decodeWasmPacket(speaker: WasmSpeakerDecoder, clientId: number, packet: Uint8Array) {
   if (speaker.pending > 24) return
   speaker.pending++
   speaker.chain = speaker.chain
     .then(async () => {
+      if (decoders.get(clientId) !== speaker) return
       const decoded = await speaker.decoder.decodeFrame(packet)
+      if (decoders.get(clientId) !== speaker) return
       if (!decoded.samplesDecoded || !decoded.channelData.length) return
       if (decoded.errors.length) {
         console.warn(`TS voice WASM decoder ${clientId} reported errors`, decoded.errors)
@@ -320,14 +351,20 @@ async function ensureAudioPipeline() {
     throw new Error('当前浏览器缺少实时音频能力，请升级浏览器')
   }
   if (audioContext && workletNode && outputGain) {
-    await audioContext.resume()
+    await resumeVoiceAudio(audioContext)
     return
   }
 
   // Must happen before the first await: iOS only unlocks playback while the
   // original tap still owns user activation.
   audioContext = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 })
-  const resumePromise = audioContext.resume()
+  const context = audioContext
+  const resumePromise = resumeVoiceAudio(context)
+  // Decoder loading must not leave a rejected resume promise unobserved.
+  void resumePromise.catch(() => {})
+  context.onstatechange = () => {
+    if (audioContext === context && listening.value) audioNeedsRecovery.value = context.state !== 'running'
+  }
 
   const Decoder = globalThis.AudioDecoder
   let webCodecsSupported = false
@@ -344,27 +381,29 @@ async function ensureAudioPipeline() {
     if (typeof WebAssembly === 'undefined' || typeof Worker === 'undefined') {
       throw new Error('当前浏览器无法加载 Opus 兼容解码器，请升级浏览器')
     }
-    const module = await import('opus-decoder')
+    const module = await voiceAudioTimeout(import('opus-decoder'), '兼容解码器加载超时')
     WasmDecoderCtor = module.OpusDecoderWebWorker
     // Fail before opening a server-side voice identity if this browser cannot
     // actually start the worker/WASM decoder (CSP and old WebViews can block it).
     const probe = new WasmDecoderCtor({ forceStereo: true, sampleRate: 48000 })
-    await probe.ready
-    await probe.free()
+    try { await voiceAudioTimeout(probe.ready, '兼容解码器启动超时') }
+    finally { void probe.free().catch(() => {}) }
     decoderBackend.value = 'wasm'
   }
 
-  await audioContext.audioWorklet.addModule(
+  if (audioContext !== context || (context.state as string) === 'closed') throw new Error('通话音频已取消')
+  await voiceAudioTimeout(context.audioWorklet.addModule(
     new URL('../../workers/voice-player-worklet.js', import.meta.url),
-  )
-  workletNode = new AudioWorkletNode(audioContext, 'voice-player', {
+  ), '频道音频线程加载超时')
+  if (audioContext !== context || (context.state as string) === 'closed') throw new Error('通话音频已取消')
+  workletNode = new AudioWorkletNode(context, 'voice-player', {
     numberOfInputs: 0,
     numberOfOutputs: 1,
     outputChannelCount: [2],
   })
-  outputGain = audioContext.createGain()
+  outputGain = context.createGain()
   outputGain.gain.value = outputVolume.value / 100
-  workletNode.connect(outputGain).connect(audioContext.destination)
+  workletNode.connect(outputGain).connect(context.destination)
   if (selectedOutput.value) await applyOutputDevice()
   workletNode.port.onmessage = (event) => {
     if (event.data?.type !== 'activity') return
@@ -373,7 +412,8 @@ async function ensureAudioPipeline() {
   }
   pushAllSpeakerGains()
   await resumePromise
-  await audioContext.resume()
+  await resumeVoiceAudio(context)
+  audioNeedsRecovery.value = false
 }
 
 /** 断线后自动续上；失败原因写进 listenError 并让面板一直显示，不再无声重连。 */
@@ -396,7 +436,9 @@ function scheduleReconnect(generation: number, reason: string) {
 }
 
 function connectionsMayRecover(): boolean {
-  return document.visibilityState === 'visible' && navigator.onLine !== false
+  // An explicitly joined call may reconnect in the background; OS suspension
+  // is handled by the foreground recovery path rather than a visibility ban.
+  return navigator.onLine !== false && (document.visibilityState === 'visible' || listening.value)
 }
 
 async function failListening(message: string) {
@@ -433,12 +475,24 @@ function connectDownlink(generation: number): Promise<void> {
       downlinkSocket = socket
       let opened = false
       let healthyTimer = 0
+      const openTimer = window.setTimeout(() => {
+        if (opened || generation !== listenGeneration) return
+        reject(new Error('频道语音连接超时，请检查手机网络后重试'))
+        socket.close()
+      }, 10000)
 
       socket.onmessage = (event) => {
-        if (event.data instanceof ArrayBuffer) decodeVoicePacket(event.data)
+        if (downlinkSocket !== socket || generation !== listenGeneration) return
+        if (event.data instanceof ArrayBuffer) {
+          try { decodeVoicePacket(event.data) } catch (error) {
+            listenError.value = errorText(error, '频道音频解码失败，请点击恢复声音')
+            audioNeedsRecovery.value = true
+          }
+        }
       }
       socket.onopen = () => {
         opened = true
+        window.clearTimeout(openTimer)
         listenError.value = ''
         listenState.value = 'live'
         // open 本身不算成功（上游还没连），否则每次重连都会把计数清零，
@@ -448,9 +502,10 @@ function connectDownlink(generation: number): Promise<void> {
       }
       socket.onerror = () => socket.close()
       socket.onclose = (event) => {
+        window.clearTimeout(openTimer)
         if (healthyTimer) window.clearTimeout(healthyTimer)
         if (downlinkSocket === socket) downlinkSocket = null
-        closeDecoders()
+        if (generation === listenGeneration) closeDecoders()
         if (!listening.value || generation !== listenGeneration) {
           if (!opened) resolve()
           return
@@ -486,9 +541,10 @@ async function startListening() {
   const generation = ++listenGeneration
   try {
     await ensureAudioPipeline()
+    if (!listening.value || generation !== listenGeneration) return
     await connectDownlink(generation)
   } catch (error) {
-    await failListening(errorText(error, '频道语音连接失败'))
+    if (generation === listenGeneration) await failListening(errorText(error, '频道语音连接失败'))
   }
 }
 
@@ -505,6 +561,7 @@ async function stopListening() {
   outputGain?.disconnect()
   workletNode = null
   outputGain = null
+  audioNeedsRecovery.value = false
   if (audioContext) await audioContext.close().catch(() => {})
   audioContext = null
 }
@@ -589,7 +646,7 @@ async function prepareMicrophoneStream(stream: MediaStream): Promise<MediaStream
 }
 
 async function releasePreparedMicrophoneStream() {
-  await microphoneProcessor.release()
+  await microphoneProcessor.release(true)
   microphoneTrack = null
   captureSettings.value = {}
 }
@@ -598,8 +655,9 @@ async function onProcessingChange() {
   saveMicrophoneProcessing()
   if (microphoneState.value === 'idle') return
   changingProcessing.value = true
+  microphoneProcessor.unlock(true)
   try {
-    await stopMicrophone()
+    await stopMicrophone(undefined, true)
     await startMicrophone()
   } finally {
     changingProcessing.value = false
@@ -653,6 +711,7 @@ const microphoneUplink = new MicrophoneUplink({
     stream, { mimeType, audioBitsPerSecond: 64000 },
   ) as unknown as MicrophoneRecorder,
   isRecoveryAllowed: connectionsMayRecover,
+  isProcessingRunning: () => microphoneProcessor.running,
   setTimer: (callback, delayMs) => window.setTimeout(callback, delayMs),
   clearTimer: (timer) => window.clearTimeout(timer),
   onStateChange: (state) => { microphoneState.value = state },
@@ -673,7 +732,8 @@ async function applyOutputDevice() {
 // Switching devices mid-call has to rebuild the capture chain to take effect.
 async function onInputDeviceChange() {
   if (microphoneState.value === 'idle') return
-  await stopMicrophone()
+  microphoneProcessor.unlock(true)
+  await stopMicrophone(undefined, true)
   await startMicrophone()
 }
 
@@ -685,12 +745,14 @@ async function startMicrophone() {
   }
   try {
     await microphoneUplink.start()
+    if (audioContext) await resumeVoiceAudio(audioContext).catch(() => { audioNeedsRecovery.value = true })
     void refreshDevices()
   } catch { /* controller reports a user-actionable error and releases capture */ }
 }
 
-async function stopMicrophone(message?: string) {
+async function stopMicrophone(message?: string, keepUnlocked = false) {
   await microphoneUplink.stop()
+  if (!keepUnlocked) await microphoneProcessor.release()
   if (message) ElMessage.warning(message)
 }
 
@@ -702,9 +764,11 @@ async function stopMicrophone(message?: string) {
 const joining = ref(false)
 let disposed = false
 
-async function joinCall() {
+async function joinCall(listenOnly = false) {
   if (joining.value) return
   joining.value = true
+  if (listenOnly) microphoneEnabled.value = false
+  if (microphoneEnabled.value) microphoneProcessor.unlock()
   listenError.value = ''
   try {
     // Unlock playback while the original tap still owns user activation.
@@ -762,14 +826,17 @@ async function toggleMicrophone() {
     await stopMicrophone()
   } else {
     microphoneEnabled.value = true
+    microphoneProcessor.unlock()
     await startMicrophone()
   }
 }
 
 function resumeAudioAfterForeground() {
   if (!connectionsMayRecover()) return
-  if (listening.value) void audioContext?.resume()
-  void microphoneProcessor.resume()?.catch(() => {})
+  if (listening.value && audioContext) void resumeVoiceAudio(audioContext).then(() => {
+    audioNeedsRecovery.value = false
+  }).catch(() => { audioNeedsRecovery.value = true })
+  void microphoneProcessor.resume()?.catch(() => { audioNeedsRecovery.value = true })
   if (listening.value && listenState.value === 'reconnecting' && !reconnectTimer && !downlinkSocket) {
     void connectDownlink(listenGeneration).catch((error) => {
       if (listening.value) scheduleReconnect(listenGeneration, errorText(error, '频道语音重连失败'))
@@ -777,6 +844,32 @@ function resumeAudioAfterForeground() {
   }
   void microphoneUplink.recover()
   void refreshDevices()
+}
+
+async function recoverCallAudio() {
+  if (!listening.value || recoveringAudio.value) return
+  recoveringAudio.value = true
+  // Both resume calls must be made during this tap, before transport cleanup awaits.
+  microphoneProcessor.unlock(true)
+  const playback = ensureAudioPipeline()
+  const capture = microphoneProcessor.resume()
+  void capture?.catch(() => {})
+  try {
+    await playback
+    await capture
+    closeDecoders()
+    if (microphoneEnabled.value) {
+      // A live-but-muted capture track can survive a phone interruption forever.
+      // Reacquire capture on this explicit recovery action, keeping the unlocked graph.
+      await stopMicrophone(undefined, true)
+      await startMicrophone()
+    }
+    resumeAudioAfterForeground()
+    audioNeedsRecovery.value = false
+  } catch (error) {
+    audioNeedsRecovery.value = true
+    listenError.value = errorText(error, '音频恢复失败，请重新加入通话')
+  } finally { recoveringAudio.value = false }
 }
 
 // 直接关标签页时没有机会调 leaveCall，但下行 WebSocket 会随页面一起断开，
@@ -838,13 +931,20 @@ onBeforeUnmount(() => {
         class="join-button"
         type="button"
         :disabled="joining || listenState === 'connecting'"
-        @click="joinCall"
+        @click="joinCall()"
       >
         <span class="button-icon">◖</span>
         {{ joining ? '正在进入服务器…' : listenState === 'connecting' ? '正在加入…' : '加入通话' }}
       </button>
+      <button v-if="!listening" class="mic-toggle" type="button" :disabled="joining" @click="joinCall(true)">
+        只收听（不开麦克风）
+      </button>
       <button v-else class="leave-button" type="button" @click="leaveCall">
         <span class="button-icon">■</span> 挂断
+      </button>
+
+      <button v-if="listening" class="mic-toggle" type="button" :disabled="recoveringAudio" @click="recoverCallAudio">
+        {{ recoveringAudio ? '正在恢复…' : '恢复声音与麦克风' }}
       </button>
 
       <button
@@ -901,6 +1001,15 @@ onBeforeUnmount(() => {
 
     <fieldset class="processing-settings" :disabled="processingBusy">
       <legend>麦克风音频增强</legend>
+      <label class="processing-switch">
+        <input v-model="microphoneProcessing.voiceActivityDetection" type="checkbox" :disabled="microphoneProcessing.mode !== 'rnnoise'" @change="onKeyboardSuppressionChange">
+        <span>智能 VAD 人声检测（静音时不占用语音避让）</span>
+      </label>
+      <p v-if="microphoneLive && processingStatus.mode === 'rnnoise'" class="setting-hint" role="status">
+        {{ microphoneSpeaking ? '检测到人声' : '等待人声' }}
+      </p>
+      <p v-if="audioNeedsRecovery" class="setting-hint" role="alert">音频被手机系统暂停，请点击“恢复声音与麦克风”。</p>
+      <p class="setting-hint">只收听不会申请或占用麦克风。开启麦克风可能让 Android 切换蓝牙通话路由；静音会释放音轨。后台通话受浏览器和系统省电限制，中断后可回到页面恢复。</p>
       <label class="setting" for="voice-noise-mode">
         <span class="setting-label">背景降噪</span>
         <el-select id="voice-noise-mode" v-model="microphoneProcessing.mode" aria-label="背景降噪" :disabled="processingBusy" @change="onProcessingChange">

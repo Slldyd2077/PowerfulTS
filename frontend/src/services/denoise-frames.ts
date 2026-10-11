@@ -15,17 +15,22 @@ export class DenoiseFrames {
   private gain = 0
   private keyboardSuppression: boolean
   private threshold: number
+  private vad: boolean
   private readonly denoise: (frame: Float32Array) => number
 
-  constructor(denoise: (frame: Float32Array) => number, keyboardSuppression: boolean, threshold: number) {
+  constructor(denoise: (frame: Float32Array) => number, keyboardSuppression: boolean, threshold: number, vad = false) {
     this.denoise = denoise
     this.keyboardSuppression = keyboardSuppression
     this.threshold = threshold
+    this.vad = vad
   }
 
-  configure(keyboardSuppression: boolean, threshold: number) {
+  get speaking() { return this.hold > 0 }
+
+  configure(keyboardSuppression: boolean, threshold: number, vad = this.vad) {
     this.keyboardSuppression = keyboardSuppression
     this.threshold = threshold
+    this.vad = vad
   }
 
   process(input: Float32Array | undefined, output: Float32Array) {
@@ -38,12 +43,13 @@ export class DenoiseFrames {
       const probability = this.denoise(this.frame)
       if (probability >= this.threshold) this.hold = HOLD_FRAMES
       else this.hold = Math.max(0, this.hold - 1)
-      const target = !this.keyboardSuppression || this.hold > 0 ? 1 : 0
+      const gated = this.keyboardSuppression || this.vad
+      const target = !gated || this.hold > 0 ? 1 : 0
       const smoothing = target > this.gain ? ATTACK : RELEASE
       for (let j = 0; j < FRAME_SIZE; j++) {
         this.gain += (target - this.gain) * smoothing
         const sample = this.frame[j]! / PCM_SCALE
-        this.output[j] = Math.max(-1, Math.min(1, sample * (this.keyboardSuppression ? this.gain : 1)))
+        this.output[j] = Math.max(-1, Math.min(1, sample * (gated ? this.gain : 1)))
       }
       this.inputCount = 0
       this.outputIndex = 0
