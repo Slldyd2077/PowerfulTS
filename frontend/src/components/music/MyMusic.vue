@@ -20,11 +20,17 @@ const myPlatforms = [
 
 // 歌单封面失败回退（切换平台时 clear，让新平台封面重新尝试）
 const brokenCovers = reactive(new Set<string>())
-function onCoverError(url?: string) {
+function playlistCover(playlist: Playlist) {
+  return [playlist.coverUrl, playlist.fallbackCoverUrl].find((url) => url?.trim() && !brokenCovers.has(url)) || ''
+}
+function onCoverError(event: Event, playlist: Playlist) {
+  const url = (event.target as HTMLImageElement).getAttribute('src') || ''
   if (url) brokenCovers.add(url)
+  if (!playlist.fallbackCoverUrl) music.fetchPlaylistCover(playlist.id, playlist.platform || active.value, true)
 }
 
 const expandedPlaylist = ref<string | null>(null)
+const loadingPlaylistAction = ref(false)
 const showTsTab = ref(false)
 const openSections = reactive<Record<string, boolean>>({ playlists: true, recommend: false, fm: false, biliPopular: true })
 
@@ -88,25 +94,40 @@ async function togglePlaylist(pl: Playlist) {
   }
   expandedPlaylist.value = pl.id
   if (music.playlistSongs[pl.id] === undefined) {
-    await music.fetchPlaylistSongs(pl.id, active.value)
+    try {
+      await music.fetchPlaylistSongs(pl.id, active.value)
+    } catch (e) {
+      ElMessage.error(e instanceof Error ? e.message : '读取歌单失败，请重试')
+    }
   }
 }
 
-/** 整单加入队列（后端循环 add，上限 50 首） */
-async function playAllPlaylist(pl: Playlist) {
+/** 整单入队或收藏；加载前固定平台，避免长请求期间切换平台导致来源错误。 */
+async function playlistAction(pl: Playlist, favorite = false) {
+  if (loadingPlaylistAction.value || music.enqueueProgress.running) return
+  const platform = active.value
+  loadingPlaylistAction.value = true
   try {
     if (music.playlistSongs[pl.id] === undefined) {
-      await music.fetchPlaylistSongs(pl.id, active.value)
+      await music.fetchPlaylistSongs(pl.id, platform)
     }
-    const songs = music.playlistSongs[pl.id] || []
+    const songs = (music.playlistSongs[pl.id] || []).map((song) => ({ ...song, platform: song.platform || platform }))
     if (songs.length === 0) {
       ElMessage.warning('该歌单暂无可播放的歌曲')
       return
     }
-    const res = await music.enqueueAll(songs, active.value)
-    ElMessage.success(`已加入 ${res.enqueued} 首到队列${res.failed ? `（${res.failed} 首失败）` : ''}`)
+    if (favorite) {
+      ts.openPlaylistFavorite(songs, pl.name)
+      return
+    }
+    const res = await music.enqueueAll(songs, platform)
+    const message = `已加入 ${res.enqueued} 首到队列${res.failed ? `（${res.failed} 首失败）` : ''}`
+    if (res.failed) ElMessage.warning(message)
+    else ElMessage.success(message)
   } catch (e: unknown) {
-    ElMessage.error(e instanceof Error ? e.message : '整单播放失败')
+    ElMessage.error(e instanceof Error ? e.message : '歌单处理失败')
+  } finally {
+    loadingPlaylistAction.value = false
   }
 }
 
@@ -165,6 +186,9 @@ async function handlePlay(song: Song, queued = false) {
     </div>
 
     <div class="my-content">
+      <div v-if="loadingPlaylistAction && !music.enqueueProgress.running" class="loading-row" role="status">
+        <EqualizerBars class="loading-eq" :active="true" /><span>正在读取歌单，请稍候…</span>
+      </div>
       <!-- TS 歌单（独立于 4 平台，无需登录） -->
       <TsPlaylists v-if="showTsTab" />
       <!-- B站：收藏夹（登录后）+ 热门视频 -->
@@ -185,12 +209,14 @@ async function handlePlay(song: Song, queued = false) {
               <div v-for="pl in playlists" :key="pl.id" class="playlist-item">
                 <div class="playlist-row" :class="{ expanded: expandedPlaylist === pl.id }" @click="togglePlaylist(pl)">
                   <img
-                    v-if="pl.coverUrl && !brokenCovers.has(pl.coverUrl)"
-                    :src="pl.coverUrl"
+                    v-if="playlistCover(pl)"
+                    :key="playlistCover(pl)"
+                    :src="playlistCover(pl)"
+                    :alt="pl.name"
                     class="pl-cover"
                     loading="lazy"
                     referrerpolicy="no-referrer"
-                    @error="onCoverError(pl.coverUrl)"
+                    @error="onCoverError($event, pl)"
                   />
                   <span v-else class="pl-cover pl-cover--fallback" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 17V7l8-1.5v7" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.5" cy="17" r="2"/><circle cx="14" cy="15" r="2"/></svg>
@@ -199,7 +225,8 @@ async function handlePlay(song: Song, queued = false) {
                     <span class="pl-name">{{ pl.name }}</span>
                     <span class="pl-count">{{ pl.songCount || 0 }} 个视频</span>
                   </div>
-                  <button class="pl-enqueue" title="整单加入队列" @click.stop="playAllPlaylist(pl)">
+                  <button class="pl-enqueue" title="整单收藏到 TS 歌单" :disabled="loadingPlaylistAction || music.enqueueProgress.running || ts.importProgress.running" @click.stop="playlistAction(pl, true)">♡</button>
+                  <button class="pl-enqueue" title="整单加入队列" :disabled="loadingPlaylistAction || music.enqueueProgress.running" @click.stop="playlistAction(pl)">
                     <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
                   </button>
                   <svg class="pl-arrow" :class="{ open: expandedPlaylist === pl.id }" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -262,12 +289,14 @@ async function handlePlay(song: Song, queued = false) {
               <div v-for="pl in playlists" :key="pl.id" class="playlist-item">
                 <div class="playlist-row" :class="{ expanded: expandedPlaylist === pl.id }" @click="togglePlaylist(pl)">
                   <img
-                    v-if="pl.coverUrl && !brokenCovers.has(pl.coverUrl)"
-                    :src="pl.coverUrl"
+                    v-if="playlistCover(pl)"
+                    :key="playlistCover(pl)"
+                    :src="playlistCover(pl)"
+                    :alt="pl.name"
                     class="pl-cover"
                     loading="lazy"
                     referrerpolicy="no-referrer"
-                    @error="onCoverError(pl.coverUrl)"
+                    @error="onCoverError($event, pl)"
                   />
                   <span v-else class="pl-cover pl-cover--fallback" aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 17V7l8-1.5v7" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.5" cy="17" r="2"/><circle cx="14" cy="15" r="2"/></svg>
@@ -276,7 +305,8 @@ async function handlePlay(song: Song, queued = false) {
                     <span class="pl-name">{{ pl.name }}</span>
                     <span class="pl-count">{{ pl.songCount || 0 }} 首</span>
                   </div>
-                  <button class="pl-enqueue" title="整单加入队列" @click.stop="playAllPlaylist(pl)">
+                  <button class="pl-enqueue" title="整单收藏到 TS 歌单" :disabled="loadingPlaylistAction || music.enqueueProgress.running || ts.importProgress.running" @click.stop="playlistAction(pl, true)">♡</button>
+                  <button class="pl-enqueue" title="整单加入队列" :disabled="loadingPlaylistAction || music.enqueueProgress.running" @click.stop="playlistAction(pl)">
                     <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
                   </button>
                   <svg class="pl-arrow" :class="{ open: expandedPlaylist === pl.id }" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>

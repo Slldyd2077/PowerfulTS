@@ -7,8 +7,10 @@ import MyMusic from '@/components/music/MyMusic.vue'
 import LiveAudioShare from '@/components/music/LiveAudioShare.vue'
 import AddToTsPlaylistDialog from '@/components/music/AddToTsPlaylistDialog.vue'
 import { useTsPlaylistStore } from '@/stores/ts_playlist'
+import { useMusicStore } from '@/stores/music'
 
 const ts = useTsPlaylistStore()
+const music = useMusicStore()
 </script>
 
 <template>
@@ -20,6 +22,11 @@ const ts = useTsPlaylistStore()
       </div>
     </div>
 
+    <div v-if="music.enqueueProgress.total" class="queue-progress" role="status" aria-live="polite">
+      <progress :value="music.enqueueProgress.processed" :max="music.enqueueProgress.total"></progress>
+      <span>{{ music.enqueueProgress.running ? '正在加入队列' : '队列处理' }} {{ music.enqueueProgress.processed }}/{{ music.enqueueProgress.total }} · 已添加 {{ music.enqueueProgress.enqueued }} 首<span v-if="music.enqueueProgress.failed"> · {{ music.enqueueProgress.failed }} 首失败</span></span>
+      <span v-if="music.enqueueProgress.error">{{ music.enqueueProgress.error }}</span>
+    </div>
     <div class="music-grid">
       <div class="music-main">
         <LiveAudioShare />
@@ -34,11 +41,13 @@ const ts = useTsPlaylistStore()
       </div>
     </div>
 
-    <AddToTsPlaylistDialog :visible="ts.favoriteVisible" :song="ts.favoriteSong" @update:visible="ts.favoriteVisible = $event" />
+    <AddToTsPlaylistDialog :visible="ts.favoriteVisible" :song="ts.favoriteSong" :songs="ts.favoriteSongs" :title="ts.favoriteTitle" @update:visible="ts.favoriteVisible = $event" />
   </div>
 </template>
 
 <style scoped>
+.queue-progress { display: grid; gap: 6px; color: var(--text-secondary); font-size: 0.82em; }
+.queue-progress progress { width: 100%; accent-color: var(--color-primary); }
 .music-view {
   display: flex;
   flex-direction: column;

@@ -11,6 +11,7 @@ import re
 from typing import TYPE_CHECKING
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,7 +25,15 @@ logger = logging.getLogger(__name__)
 # 来源平台白名单（出处 + 播放路由）
 _PLATFORMS = {"netease", "qq", "bilibili", "kugou"}
 # song_id 格式校验（防 TSMusicBot 侧解析异常；router 复用同一常量，避免定义漂移）
-_SONG_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_SONG_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+_KUGOU_SONG_ID_RE = re.compile(r"[A-Za-z0-9_-]+(?:\|[0-9]+\|[0-9]+)?")
+
+
+def valid_song_key(platform: str, song_id: str) -> bool:
+    if platform not in _PLATFORMS or not 1 <= len(song_id) <= 64:
+        return False
+    pattern = _KUGOU_SONG_ID_RE if platform == "kugou" else _SONG_ID_RE
+    return pattern.fullmatch(song_id) is not None
 
 
 class TsPlaylistService:
@@ -58,8 +67,18 @@ class TsPlaylistService:
                     )
                 )
             ).scalar() or 0
-            out.append(self._serialize_playlist(p, cnt))
+            out.append(self._serialize_playlist(p, cnt, await self._latest_cover(p.id)))
         return out
+
+    async def _latest_cover(self, playlist_id: int) -> str:
+        cover = (await self.db.execute(
+            select(TsPlaylistSong.cover_url).where(
+                TsPlaylistSong.playlist_id == playlist_id,
+                TsPlaylistSong.cover_url.is_not(None),
+                func.trim(TsPlaylistSong.cover_url) != "",
+            ).order_by(TsPlaylistSong.added_at.desc(), TsPlaylistSong.id.desc()).limit(1)
+        )).scalar()
+        return str(cover or "").strip()
 
     async def create_playlist(self, account_id: int, name: str, description: str | None) -> dict:
         p = TsPlaylist(account_id=account_id, name=name, description=description)
@@ -85,7 +104,7 @@ class TsPlaylistService:
                 select(func.count(TsPlaylistSong.id)).where(TsPlaylistSong.playlist_id == p.id)
             )
         ).scalar() or 0
-        return self._serialize_playlist(p, cnt)
+        return self._serialize_playlist(p, cnt, await self._latest_cover(p.id))
 
     async def delete_playlist(self, account_id: int, playlist_id: int) -> bool:
         p = await self._get_owned(account_id, playlist_id)
@@ -124,7 +143,7 @@ class TsPlaylistService:
             return False, "歌单不存在", 404
         platform = str(song.get("platform") or "").strip()
         song_id = str(song.get("songId") or song.get("id") or "").strip()
-        if platform not in _PLATFORMS or not _SONG_ID_RE.match(song_id):
+        if not valid_song_key(platform, song_id):
             return False, "platform/songId 不合法", 400
         item = TsPlaylistSong(
             playlist_id=playlist_id,
@@ -144,6 +163,37 @@ class TsPlaylistService:
             await self.db.rollback()
             return False, "该歌曲已在歌单中", 409
         return True, "已收藏", 201
+
+    async def add_songs(self, account_id: int, playlist_id: int, songs: list[dict]) -> dict | None:
+        """只保存元数据，不解析播放地址；一批一个事务，重复曲目由唯一键跳过。"""
+        if await self._get_owned(account_id, playlist_id) is None:
+            return None
+        last_sort = (await self.db.execute(
+            select(func.max(TsPlaylistSong.sort_order)).where(TsPlaylistSong.playlist_id == playlist_id)
+        )).scalar()
+        values = []
+        failed = 0
+        for song in songs:
+            platform = str(song.get("platform") or "").strip()
+            song_id = str(song.get("songId") or song.get("id") or "").strip()
+            if not valid_song_key(platform, song_id):
+                failed += 1
+                continue
+            values.append(dict(
+                playlist_id=playlist_id, platform=platform, song_id=song_id,
+                name=str(song.get("name") or "")[:255] or f"App {song_id}",
+                artist=str(song.get("artist") or "")[:255], album=song.get("album"),
+                duration=song.get("duration"), cover_url=song.get("coverUrl"), vip=song.get("vip"),
+                sort_order=(last_sort if last_sort is not None else -1) + len(values) + 1,
+            ))
+        added = 0
+        if values:
+            result = await self.db.execute(insert(TsPlaylistSong).values(values).on_conflict_do_nothing(
+                index_elements=["playlist_id", "platform", "song_id"]
+            ).returning(TsPlaylistSong.id))
+            added = len(result.all())
+            await self.db.commit()
+        return {"added": added, "skipped": len(values) - added, "failed": failed}
 
     async def remove_song(
         self, account_id: int, playlist_id: int, platform: str, song_id: str
@@ -251,12 +301,13 @@ class TsPlaylistService:
         }
 
     @staticmethod
-    def _serialize_playlist(p: TsPlaylist, song_count: int) -> dict:
+    def _serialize_playlist(p: TsPlaylist, song_count: int, cover_url: str = "") -> dict:
         return {
             "id": p.id,
             "name": p.name,
             "description": p.description,
             "coverDataUrl": p.cover_data_url,
+            "coverUrl": cover_url,
             "songCount": song_count,
             "createdAt": p.created_at.isoformat() if p.created_at else None,
         }

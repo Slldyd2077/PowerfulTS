@@ -367,6 +367,7 @@ export interface Playlist {
   id: string
   name: string
   coverUrl?: string
+  fallbackCoverUrl?: string
   songCount?: number
   platform?: string
 }
@@ -394,11 +395,19 @@ export async function getMyPlaylists(platform: string, botId?: string): Promise<
   return data
 }
 
+/** 歌单封面补全（per-bot）；无需阻塞歌单列表。 */
+export async function getPlaylistCover(playlistId: string, platform: string, botId: string, songsOnly = false): Promise<{ coverUrl: string; fallbackCoverUrl: string }> {
+  const { data } = await apiClient.get(`/music/my/playlist/${playlistId}/cover`, {
+    params: { platform, botId, songsOnly }, timeout: 150000,
+  })
+  return data
+}
+
 /** 歌单内歌曲（per-bot） */
 export async function getPlaylistSongs(playlistId: string, platform: string, botId?: string): Promise<PlaylistResult> {
   const params: Record<string, string> = { platform }
   if (botId) params.botId = botId
-  const { data } = await apiClient.get(`/music/my/playlist/${playlistId}/songs`, { params })
+  const { data } = await apiClient.get(`/music/my/playlist/${playlistId}/songs`, { params, timeout: 130000 })
   return data
 }
 
@@ -426,9 +435,9 @@ export async function getBilibiliPopular(limit = 20, botId?: string): Promise<Pl
   return data
 }
 
-/** 批量入队（整单播放）；后端循环 add 最多 50 首，单独放宽超时到 30s */
+/** 小批量入队；超时覆盖连接、解析、持久化和频道跟随。 */
 export async function enqueueSongs(platform: string | undefined, songs: Song[], botId?: string): Promise<EnqueueResult> {
-  const { data } = await apiClient.post('/music/my/enqueue', { platform, songs }, { timeout: 30000, params: botId ? { botId } : undefined })
+  const { data } = await apiClient.post('/music/my/enqueue', { platform, songs }, { timeout: 90000, params: botId ? { botId } : undefined })
   return data
 }
 

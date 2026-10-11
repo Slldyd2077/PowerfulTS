@@ -9,9 +9,9 @@ import {
   uploadTsPlaylistCover,
   getTsPlaylistSongs,
   addSongToTsPlaylist,
+  addSongsToTsPlaylist,
   removeSongFromTsPlaylist,
   updateTsPlaylistSong,
-  playTsPlaylist,
 } from '@/api/ts_playlist'
 import type { TsPlaylist, TsPlaylistSong } from '@/api/ts_playlist'
 import { useMusicStore } from './music'
@@ -91,6 +91,28 @@ export const useTsPlaylistStore = defineStore('ts-playlist', () => {
     return res
   }
 
+  const importProgress = ref({ running: false, processed: 0, total: 0, added: 0, skipped: 0, failed: 0 })
+  async function addSongs(playlistId: number, songs: Song[]) {
+    if (importProgress.value.running) throw new Error('正在收藏歌单，请等待完成')
+    const target = [...songs]
+    importProgress.value = { running: true, processed: 0, total: target.length, added: 0, skipped: 0, failed: 0 }
+    try {
+      for (let offset = 0; offset < target.length; offset += 50) {
+        const batch = target.slice(offset, offset + 50)
+        const result = await addSongsToTsPlaylist(playlistId, batch)
+        importProgress.value.added += result.added
+        importProgress.value.skipped += result.skipped
+        importProgress.value.failed += result.failed
+        importProgress.value.processed += batch.length
+        await fetchPlaylists()
+        if (expandedId.value === playlistId) await fetchSongs(playlistId)
+      }
+      return { ...importProgress.value }
+    } finally {
+      importProgress.value.running = false
+    }
+  }
+
   async function removeSong(playlistId: number, platform: string, songId: string) {
     await removeSongFromTsPlaylist(playlistId, platform, songId)
     await fetchPlaylists()
@@ -116,17 +138,16 @@ export const useTsPlaylistStore = defineStore('ts-playlist', () => {
     }
   }
 
-  /** 整单播放（后端逐首跨平台 add 到当前 active bot 队列）。返回 {enqueued,total} 供组件提示。 */
+  /** 整单播放：首曲开始播放，其余分批入队并显示进度。 */
   async function playAll(id: number): Promise<{ enqueued: number; total: number }> {
     const music = useMusicStore()
     if (!music.activeBotId) {
       ElMessage.warning('请先在「TS Bot」面板创建一个 Bot')
       return { enqueued: 0, total: 0 }
     }
-    const res = await playTsPlaylist(id, music.activeBotId)
-    await music.fetchNowplaying()
-    await music.fetchQueue()
-    return res
+    const { songs } = await getTsPlaylistSongs(id)
+    const res = await music.enqueueAll(songs, undefined, true)
+    return { ...res, total: songs.length }
   }
 
   /** 单首播放（复用 music 跨平台链）。VIP/版权/未登录等失败显式提示，不静默吞。 */
@@ -156,8 +177,21 @@ export const useTsPlaylistStore = defineStore('ts-playlist', () => {
   // ── 收藏弹窗（全局：搜索结果 / 平台歌单歌曲都调 openFavorite 打开同一个弹窗）──
   const favoriteVisible = ref(false)
   const favoriteSong = ref<Song | null>(null)
+  const favoriteSongs = ref<Song[]>([])
+  const favoriteTitle = ref('')
   function openFavorite(song: Song) {
+    if (importProgress.value.running) return
     favoriteSong.value = song
+    favoriteSongs.value = []
+    favoriteTitle.value = ''
+    favoriteVisible.value = true
+  }
+  function openPlaylistFavorite(songs: Song[], title: string) {
+    if (importProgress.value.running) return
+    importProgress.value = { running: false, processed: 0, total: songs.length, added: 0, skipped: 0, failed: 0 }
+    favoriteSong.value = null
+    favoriteSongs.value = [...songs]
+    favoriteTitle.value = title
     favoriteVisible.value = true
   }
   function closeFavorite() {
@@ -177,12 +211,17 @@ export const useTsPlaylistStore = defineStore('ts-playlist', () => {
     fetchSongs,
     toggleExpand,
     addSong,
+    addSongs,
+    importProgress,
     removeSong,
     updateSongNote,
     playAll,
     playSong,
     favoriteVisible,
     favoriteSong,
+    favoriteSongs,
+    favoriteTitle,
+    openPlaylistFavorite,
     openFavorite,
     closeFavorite,
   }

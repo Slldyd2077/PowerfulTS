@@ -7,6 +7,7 @@ export interface TsPlaylist {
   name: string
   description?: string | null
   coverDataUrl?: string | null
+  coverUrl?: string
   songCount?: number
   createdAt?: string
 }
@@ -74,6 +75,13 @@ export async function addSongToTsPlaylist(
     duration: song.duration,
     coverUrl: song.coverUrl,
     vip: song.vip,
+  })
+  return data
+}
+
+export async function addSongsToTsPlaylist(playlistId: number, songs: Song[]): Promise<{ added: number; skipped: number; failed: number }> {
+  const { data } = await apiClient.post(`/ts-playlists/${playlistId}/songs/batch`, {
+    songs: songs.map((song) => ({ ...song, songId: song.id })),
   })
   return data
 }

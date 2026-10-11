@@ -7,6 +7,7 @@ import { shareBot, unshareBot, getMyShares, updateBot, getBotConfig, type MyShar
 import { getFriends, type Friend } from '@/api/social'
 import BotBehaviorPanel from './BotBehaviorPanel.vue'
 import { usePolling } from '@/composables/usePolling'
+import { tsNicknameError } from '@/services/ts-nickname'
 
 const music = useMusicStore()
 
@@ -17,8 +18,8 @@ const showCreate = ref(false)
 const creating = ref(false)
 const form = ref<BotCreate>({
   name: '',
-  nickname: 'PowerfulTS',
-  serverAddress: 'host.docker.internal',
+  nickname: '',
+  serverAddress: '127.0.0.1',
   serverPort: 9987,
   defaultChannel: '',
   channelPassword: '',
@@ -46,21 +47,23 @@ async function chooseBot(id: string) {
 
 function resetForm() {
   form.value = {
-    name: '', nickname: 'PowerfulTS', serverAddress: 'host.docker.internal',
+    name: '', nickname: '', serverAddress: '127.0.0.1',
     serverPort: 9987, defaultChannel: '', channelPassword: '', serverPassword: '',
   }
 }
 
 async function submitCreate() {
+  if (creating.value) return
   errors.value = {}
-  if (!form.value.name.trim()) errors.value.name = '必填'
-  if (!form.value.nickname.trim()) errors.value.nickname = '必填'
+  const nameError = tsNicknameError(form.value.name)
+  if (nameError) errors.value.name = nameError.replace('TS 昵称', 'Bot 名称')
   if (!form.value.serverAddress.trim()) errors.value.serverAddress = '必填'
   if (Object.keys(errors.value).length) return
   creating.value = true
   try {
     // 创建后不自动 start（start 是异步 TS 连接，语义分离更清晰）
-    const created = await music.createBot({ ...form.value })
+    const name = form.value.name.trim()
+    const created = await music.createBot({ ...form.value, name, nickname: name })
     ElMessage.success(`Bot「${created.name}」已创建，请在列表点「启动」连接 TS`)
     showCreate.value = false
     resetForm()
@@ -188,10 +191,13 @@ async function onEdit(b: BotInfo) {
 }
 
 async function submitEdit() {
-  if (!editTarget.value) return
+  if (!editTarget.value || editBusy.value) return
+  const nameError = tsNicknameError(editForm.value.name)
+  if (nameError) { ElMessage.error(nameError.replace('TS 昵称', 'Bot 名称')); return }
   editBusy.value = true
   try {
-    await updateBot(editTarget.value.id, editForm.value)
+    const name = editForm.value.name.trim()
+    await updateBot(editTarget.value.id, { ...editForm.value, name, nickname: name })
     ElMessage.success('已更新，连接类参数需重启 bot 生效')
     showEdit.value = false
     await music.fetchBots()
@@ -200,6 +206,10 @@ async function submitEdit() {
   } finally {
     editBusy.value = false
   }
+}
+
+function unlockConnectionField(event: FocusEvent) {
+  (event.target as HTMLInputElement).readOnly = false
 }
 
 // bot 名查（共享列表展示用）
@@ -309,41 +319,42 @@ onMounted(() => {
     <button v-if="hasBots && !showCreate" class="add-btn" @click="showCreate = true">+ 新建 Bot</button>
     <button v-else-if="!hasBots && !showCreate" class="add-btn" @click="showCreate = true">+ 新建第一个 Bot</button>
 
-    <div v-if="showCreate" class="create-form">
+    <form v-if="showCreate" class="create-form" autocomplete="off" @submit.prevent="submitCreate">
       <div class="field">
         <label>Bot 名称 *</label>
-        <input v-model="form.name" :class="{ err: errors.name }" />
+        <input v-model="form.name" name="music-bot-label" autocomplete="off" :class="{ err: errors.name }" />
+        <small v-if="errors.name" class="field-hint">{{ errors.name }}</small>
+        <small v-else class="field-hint">TS 中显示此名称，3–30 个字符</small>
       </div>
-      <div class="field">
-        <label>TS 昵称 *</label>
-        <input v-model="form.nickname" :class="{ err: errors.nickname }" />
-      </div>
+      <details class="advanced-settings">
+        <summary>高级设置</summary>
       <div class="field">
         <label>TS 服务器地址 *</label>
-        <input v-model="form.serverAddress" :class="{ err: errors.serverAddress }" placeholder="host.docker.internal" />
+        <input v-model="form.serverAddress" name="music-bot-host" autocomplete="off" :class="{ err: errors.serverAddress }" placeholder="127.0.0.1" />
       </div>
       <div class="field">
         <label>语音端口（UDP）</label>
-        <input v-model.number="form.serverPort" type="number" />
+        <input v-model.number="form.serverPort" type="number" min="1" max="65535" name="music-bot-udp" autocomplete="off" />
         <small class="field-hint">TS3 / TS6 默认 9987；请填写服务器语音端口</small>
       </div>
       <div class="field">
         <label>默认频道</label>
-        <input v-model="form.defaultChannel" placeholder="留空进服务器根频道" />
+        <input v-model="form.defaultChannel" name="music-bot-channel" autocomplete="off" readonly @focus="unlockConnectionField" data-lpignore="true" data-1p-ignore placeholder="留空进服务器根频道" />
       </div>
       <div class="field">
         <label>频道密码</label>
-        <input v-model="form.channelPassword" type="password" />
+        <input v-model="form.channelPassword" name="music-bot-channel-secret" type="password" autocomplete="new-password" readonly @focus="unlockConnectionField" data-lpignore="true" data-1p-ignore />
       </div>
       <div class="field">
         <label>服务器密码</label>
-        <input v-model="form.serverPassword" type="password" />
+        <input v-model="form.serverPassword" name="music-bot-server-secret" type="password" autocomplete="new-password" readonly @focus="unlockConnectionField" data-lpignore="true" data-1p-ignore />
       </div>
+      </details>
       <div class="create-actions">
-        <button class="mini-btn mini-btn--ghost" @click="showCreate = false">取消</button>
-        <button class="submit-btn" :disabled="creating" @click="submitCreate">{{ creating ? '创建中…' : '创建' }}</button>
+        <button type="button" class="mini-btn mini-btn--ghost" @click="showCreate = false; resetForm()">取消</button>
+        <button type="submit" class="submit-btn" :disabled="creating">{{ creating ? '创建中…' : '创建' }}</button>
       </div>
-    </div>
+    </form>
 
     <!-- 我的共享（owner 管理：撤销） -->
     <div v-if="myShares.length" class="my-shares">
@@ -390,20 +401,22 @@ onMounted(() => {
 
     <!-- 编辑 bot 配置 -->
     <el-dialog v-model="showEdit" :title="`编辑「${editTarget?.name}」`" width="360" append-to-body>
-      <div class="create-form" style="margin-top:0">
-        <div class="field"><label>Bot 名称</label><input v-model="editForm.name" /></div>
-        <div class="field"><label>TS 昵称</label><input v-model="editForm.nickname" /></div>
-        <div class="field"><label>TS 服务器地址</label><input v-model="editForm.serverAddress" placeholder="host.docker.internal" /></div>
+      <form class="create-form" style="margin-top:0" autocomplete="off" @submit.prevent="submitEdit">
+        <div class="field"><label>Bot 名称（TS 昵称）</label><input v-model="editForm.name" name="music-bot-edit-label" autocomplete="off" /></div>
+        <details class="advanced-settings">
+          <summary>高级设置</summary>
+        <div class="field"><label>TS 服务器地址</label><input v-model="editForm.serverAddress" name="music-bot-edit-host" autocomplete="off" placeholder="127.0.0.1" /></div>
         <div class="field">
           <label>语音端口（UDP）</label>
           <input v-model.number="editForm.serverPort" type="number" />
           <small class="field-hint">TS3 / TS6 默认 9987；请填写服务器语音端口</small>
         </div>
-        <div class="field"><label>默认频道</label><input v-model="editForm.defaultChannel" placeholder="留空进根频道" /></div>
-        <div class="field"><label>频道密码</label><input v-model="editForm.channelPassword" type="password" placeholder="留空不改" /></div>
-        <div class="field"><label>服务器密码</label><input v-model="editForm.serverPassword" type="password" placeholder="留空不改" /></div>
+        <div class="field"><label>默认频道</label><input v-model="editForm.defaultChannel" name="music-bot-edit-channel" autocomplete="off" readonly @focus="unlockConnectionField" data-lpignore="true" data-1p-ignore placeholder="留空进根频道" /></div>
+        <div class="field"><label>频道密码</label><input v-model="editForm.channelPassword" name="music-bot-edit-channel-secret" type="password" autocomplete="new-password" readonly @focus="unlockConnectionField" data-lpignore="true" data-1p-ignore placeholder="留空不改" /></div>
+        <div class="field"><label>服务器密码</label><input v-model="editForm.serverPassword" name="music-bot-edit-server-secret" type="password" autocomplete="new-password" readonly @focus="unlockConnectionField" data-lpignore="true" data-1p-ignore placeholder="留空不改" /></div>
+        </details>
         <p class="warn-line" style="font-size:0.62em;color:var(--text-muted);margin:0">连接类参数（地址/端口/昵称/频道）需先停止 bot 再改才生效</p>
-      </div>
+      </form>
       <template #footer>
         <button class="mini-btn mini-btn--ghost" @click="showEdit = false">取消</button>
         <button class="submit-btn" :disabled="editBusy" @click="submitEdit">{{ editBusy ? '保存中…' : '保存' }}</button>
@@ -416,6 +429,8 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.advanced-settings .field { margin-top: 8px; }
+.advanced-settings summary { cursor: pointer; font-size: 0.75em; color: var(--text-secondary); margin-bottom: 8px; }
 .bot-manager {
   border-top: 1px solid var(--border-subtle);
   padding-top: 12px;
