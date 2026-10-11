@@ -21,10 +21,10 @@
 PowerfulTS 的安装包不捆绑 TS3 / TS6 服务端或 TSMusicBot。需预先部署：
 
 - TS3 / TS6：开启 ServerQuery，配置读取频道 / 客户端、验证码私聊以及所需频道写操作权限。TS3 raw TCP 通常 10011，TS6 SSH 通常 10022，TS6 官方配置默认关闭 SSH Query，需要 `TSSERVER_QUERY_SSH_ENABLED=true`。限制 Query 端口访问范围；SSH 模式需核验可信主机公钥。完整步骤见 [TS6 指南](ts6-server.md)。
-- TSMusicBot：现有生产服务器使用[生产兼容分支的固定提交 `9ea0a2e`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/9ea0a2e7600333cf6caf72eae3a4bc5a0e1248a6)，包含逐曲响度均衡，保留已验收的 TS 连接层。核对完整提交 `9ea0a2e7600333cf6caf72eae3a4bc5a0e1248a6` 后构建。
-- [通用定制分支的固定提交 `165e897`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/165e8975ac3dcf1ca24b83c8b000c9f623112010) 同步上游 v1.15.2，并已包含相同响度算法及 CDN 恢复适配。现有生产部署切换其 TS 连接层前，必须另外验证真实连接、音乐和网页语音。
+- TSMusicBot：现有生产服务器使用[生产兼容分支的固定提交 `5b19d35`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/5b19d35213da516769a9c5efa6aed1972af54af8)，包含逐曲响度均衡，保留已验收的 TS 连接层。核对完整提交 `5b19d35213da516769a9c5efa6aed1972af54af8` 后构建。
+- [通用定制分支的固定提交 `7be9a33`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/7be9a339375e3a53d7fb859c049976d4cf6a2504) 同步上游 v1.15.2，并已包含相同响度算法及 CDN 恢复适配。现有生产部署切换其 TS 连接层前，必须另外验证真实连接、音乐和网页语音。
 
-两条分支都保留 PowerfulTS 的 per-bot 音源及平台账号隔离、网页双向语音、语音闪避与入场音效接口。通用分支 `merge/upstream-v1.12` 中的 `v1.12` 是历史名称。线上兼容分支 `codex/audio-production-compatible` 基于已核对的历史源码 `2c1fc74`；部署代码与上述兼容提交的 `src/` 一致。
+两条分支都保留 PowerfulTS 的 per-bot 音源及平台账号隔离、网页双向语音、语音闪避与入场音效接口。通用分支 `merge/upstream-v1.12` 中的 `v1.12` 是历史名称。线上兼容分支 `codex/audio-production-compatible` 基于已核对的历史源码 `2c1fc74`，新提交包含逐曲响度和网页 VAD 发送修复。线上采用增量部署，另外保留既有响度预分析优化，源码范围与校验值见[手机语音部署记录](voice-deployment-2026-10-11.md)。
 
 逐曲响度均衡已保存到引擎仓库，更新到上述提交无需重复应用补丁。后续同步上游时保留整曲分析、固定增益、设置及状态接口，并运行[响度回归检查](track-loudness-normalization.md)。保留实际配置和数据卷中的启用设置；只升级 PowerfulTS 面板不会升级外部引擎。固定源码提交、部署证据及回退见[本次部署记录](audio-deployment-2026-10-10.md)。
 

@@ -8,6 +8,7 @@ export type MicrophoneUplinkState =
 
 export interface MicrophoneSocket {
   readonly readyState: number
+  readonly bufferedAmount?: number
   onopen: (() => void) | null
   onclose: ((event: CloseEvent) => void) | null
   onerror: (() => void) | null
@@ -40,6 +41,7 @@ export interface MicrophoneUplinkDependencies {
   createSocket(path: string): MicrophoneSocket
   createRecorder(stream: MediaStream, mimeType: string): MicrophoneRecorder
   isRecoveryAllowed(): boolean
+  isProcessingRunning?(): boolean
   setTimer(callback: () => void, delayMs: number): TimerHandle
   clearTimer(timer: TimerHandle): void
   onStateChange(state: MicrophoneUplinkState): void
@@ -90,6 +92,7 @@ export class MicrophoneUplink {
   private reconnectTimer: TimerHandle | null = null
   private firstChunkTimer: TimerHandle | null = null
   private connecting: Promise<void> | null = null
+  private disconnecting: Promise<void> | null = null
   private currentState: MicrophoneUplinkState = 'idle'
 
   constructor(dependencies: MicrophoneUplinkDependencies) {
@@ -122,6 +125,14 @@ export class MicrophoneUplink {
           void this.failPermanently('麦克风已被系统停用，请点击重新开启')
         }
       }, { once: true })
+      track.addEventListener?.('mute', () => {
+        if (this.desired && generation === this.generation) {
+          void this.handleDisconnect('麦克风被手机系统暂停，请回到页面恢复')
+        }
+      })
+      track.addEventListener?.('unmute', () => {
+        if (this.desired && generation === this.generation) void this.recover()
+      })
       await this.connect(generation, false)
     } catch (error) {
       if (!this.desired || generation !== this.generation) return
@@ -132,7 +143,11 @@ export class MicrophoneUplink {
 
   async recover(): Promise<void> {
     if (!this.desired || !this.dependencies.isRecoveryAllowed()) return
+    if (this.disconnecting) await this.disconnecting
+    if (!this.desired) return
     if (this.isHealthy() || this.connecting || this.reconnectTimer) return
+    await this.disposeConnection()
+    if (!this.desired) return
     await this.connect(this.generation, true).catch((error) => {
       this.scheduleReconnect(errorMessage(error, '麦克风重连失败'))
     })
@@ -261,6 +276,10 @@ export class MicrophoneUplink {
   private handleChunk(event: BlobEvent, socket: MicrophoneSocket, generation: number): void {
     if (!this.desired || generation !== this.generation || !event.data.size) return
     if (this.socket !== socket || socket.readyState !== SOCKET_OPEN) return
+    if ((socket.bufferedAmount ?? 0) > 256 * 1024) {
+      void this.handleDisconnect('手机网络上传积压，正在恢复实时语音')
+      return
+    }
     try {
       socket.send(event.data)
     } catch {
@@ -268,18 +287,34 @@ export class MicrophoneUplink {
       return
     }
     if (this.currentState !== 'live') {
-      this.clearFirstChunkTimer()
       this.reconnectAttempt = 0
       this.setState('live')
     }
+    // timeslice delivery can stop after Android lock/background or a recorder failure.
+    // Encoded silence still counts; VAD must not cause needless reconnections.
+    this.clearFirstChunkTimer()
+    this.firstChunkTimer = this.dependencies.setTimer(() => {
+      this.firstChunkTimer = null
+      if (this.desired && generation === this.generation && this.socket === socket) {
+        void this.handleDisconnect('麦克风录音已中断，正在恢复')
+      }
+    }, 10000)
   }
 
   private async handleDisconnect(reason: string): Promise<void> {
     if (!this.desired) return
-    await this.disposeConnection()
-    if (!this.desired) return
-    this.dependencies.onWarning(reason)
-    this.scheduleReconnect(reason)
+    if (this.disconnecting) return this.disconnecting
+    const generation = this.generation
+    const operation = (async () => {
+      await this.disposeConnection()
+      if (!this.desired || generation !== this.generation) return
+      this.dependencies.onWarning(reason)
+      this.scheduleReconnect(reason)
+    })()
+    this.disconnecting = operation
+    try { await operation } finally {
+      if (this.disconnecting === operation) this.disconnecting = null
+    }
   }
 
   private scheduleReconnect(reason: string): void {
@@ -333,8 +368,10 @@ export class MicrophoneUplink {
 
   private isHealthy(): boolean {
     const track = this.stream?.getAudioTracks()[0]
-    return this.currentState === 'live'
+    return (this.currentState === 'live' || this.currentState === 'verifying')
       && track?.readyState === 'live'
+      && !track.muted
+      && (this.dependencies.isProcessingRunning?.() ?? true)
       && this.socket?.readyState === SOCKET_OPEN
       && this.recorder?.state === 'recording'
   }

@@ -7,7 +7,7 @@ declare class AudioWorkletProcessor {
   readonly port: MessagePort
 }
 interface DenoiseOptions {
-  processorOptions: { keyboardSuppression: boolean; voiceThreshold: number }
+  processorOptions: { keyboardSuppression: boolean; voiceThreshold: number; voiceActivityDetection: boolean }
 }
 declare function registerProcessor(name: string, processor: new (options: DenoiseOptions) => AudioWorkletProcessor): void
 
@@ -17,12 +17,13 @@ class MicrophoneDenoiseProcessor extends AudioWorkletProcessor {
   private framePointer = 0
   private frames: DenoiseFrames | null = null
   private destroyed = false
+  private reportSamples = 0
 
   constructor(options: DenoiseOptions) {
     super()
     this.port.onmessage = ({ data }) => {
       if (data?.type === 'destroy') this.destroy()
-      if (data?.type === 'configure') this.frames?.configure(data.keyboardSuppression, data.voiceThreshold)
+      if (data?.type === 'configure') this.frames?.configure(data.keyboardSuppression, data.voiceThreshold, data.voiceActivityDetection)
     }
     try {
       if (sampleRate !== 48000) throw new Error('RNNoise requires 48 kHz')
@@ -37,7 +38,7 @@ class MicrophoneDenoiseProcessor extends AudioWorkletProcessor {
         const probability = module._rnnoise_process_frame(this.state, this.framePointer, this.framePointer)
         frame.set(module.HEAPF32.subarray(offset, offset + 480))
         return probability
-      }, options.processorOptions.keyboardSuppression, options.processorOptions.voiceThreshold)
+      }, options.processorOptions.keyboardSuppression, options.processorOptions.voiceThreshold, options.processorOptions.voiceActivityDetection)
       this.port.postMessage({ type: 'ready' })
     } catch (error) {
       this.port.postMessage({ type: 'error', message: String(error) })
@@ -49,7 +50,14 @@ class MicrophoneDenoiseProcessor extends AudioWorkletProcessor {
     if (this.destroyed) return false
     try {
       const output = outputs[0]?.[0]
-      if (output) this.frames?.process(inputs[0]?.[0], output)
+      if (output) {
+        this.frames?.process(inputs[0]?.[0], output)
+        this.reportSamples += output.length
+        if (this.reportSamples >= 4800) {
+          this.reportSamples = 0
+          this.port.postMessage({ type: 'voice-activity', speaking: this.frames?.speaking === true })
+        }
+      }
       return true
     } catch (error) {
       this.port.postMessage({ type: 'error', message: String(error) })

@@ -7,6 +7,13 @@ import {
 } from '../src/services/microphone-processing-settings.js'
 import { DenoiseFrames } from '../src/services/denoise-frames.js'
 import { MicrophoneProcessing, type MicrophoneProcessingStatus } from '../src/services/microphone-processing.js'
+import { resumeVoiceAudio } from '../src/services/audio-context-state.js'
+
+test('a blocked mobile resume times out with an actionable message', async () => {
+  const context = { state: 'suspended', resume: () => new Promise<void>(() => {}) } as unknown as AudioContext
+  await assert.rejects(resumeVoiceAudio(context, 5), /恢复声音/)
+  await assert.rejects(resumeVoiceAudio({ state: 'suspended', resume: async () => {} } as unknown as AudioContext), /系统中断/)
+})
 
 test('invalid saved preferences restore safe defaults and clamp the voice threshold', () => {
   assert.deepEqual(normalizeMicrophoneProcessing(null), DEFAULT_MICROPHONE_PROCESSING)
@@ -15,6 +22,25 @@ test('invalid saved preferences restore safe defaults and clamp the voice thresh
   assert.equal(normalizeMicrophoneProcessing({ voiceThreshold: -1 }).voiceThreshold, 0.1)
   assert.equal(normalizeMicrophoneProcessing({ voiceThreshold: NaN }).voiceThreshold, 0.6)
   assert.equal(normalizeMicrophoneProcessing({ mode: 'off', keyboardSuppression: false }).mode, 'off')
+})
+
+test('VAD gates neural non-speech even when optional keyboard suppression is disabled', () => {
+  const dsp = new DenoiseFrames(() => 0, false, 0.6, true)
+  const output = new Float32Array(960)
+  dsp.process(new Float32Array(960).fill(0.5), output)
+  assert.ok(output.every((sample) => sample === 0))
+  assert.equal(dsp.speaking, false)
+})
+
+test('microphone context is unlocked synchronously and reused after permission awaits', async () => {
+  const h = audioHarness()
+  try {
+    h.processor.unlock()
+    assert.equal(h.contexts.length, 1)
+    await h.processor.prepare(h.stream, { ...DEFAULT_MICROPHONE_PROCESSING }, 100)
+    assert.equal(h.contexts.length, 1)
+    assert.equal(h.contexts[0]!.state, 'running')
+  } finally { await h.restore() }
 })
 
 test('capture retains browser noise suppression until the neural processor is ready', () => {

@@ -3,16 +3,32 @@ import { chromium } from 'playwright'
 
 // Production UI with real browser audio capture and mocked backend transports.
 const origin = process.env.VOICE_TEST_APP_ORIGIN || 'http://127.0.0.1:18185'
+// Generated 20 ms, 48 kHz stereo 440 Hz tone encoded with libopus; no external media.
+const tone = Buffer.from('/LSZP2G+qRqin9MSWFJ30paN0OaiFvkxRJtDINcT6XJmAnB357AQ80JKYTWEFGCbadT8yPscrpq0VCE2RQ8xd4qew7mUIXO1ajpBr0JkIRVDXFUX+kPWjnFMOhG0e0fjZcGyrpFWfY6pWrf+LIPJ8n/7Jb4zMZFL/GI8n0zvXEEw8Lr+yKfFGOPgjBDcgx+RV8BBE3LlEtufsmeQMbJcLyd2GwQqSjHqaOEIOUXw3a4X98Q6L2NOHZnMslWjVNkpW8FCaqe7O7NqLtnuVSu4qE7Gudh9ZCoBzB0ky3jmZ6aTwZxckv68Rv3nygq8RvzJ2ZL5j1xidK1EWwZmduOlOIh4IxsBOiHPo+qqXRDn0FyJoM9Rn0BkXqkSng3mZuviv9OSQNkdSoY3kQYj0SONiCeH6Fo0UDhOpKN8/DRCnKRjrc76+Ft/Ly+XE+0H1Qn2b8MblKxYlXXI6uVeIXQuO+qgbZX1+qnEpdJallj/Ua2oKBmYBsA2Ts3//+BttJJ/I2BbbQ==', 'base64')
+const voicePacket = Buffer.concat([Buffer.from([1, 5, 0, 12, 3, 192]), tone])
 const browser = await chromium.launch({
   headless: true,
   ...(process.env.VOICE_TEST_BROWSER ? { executablePath: process.env.VOICE_TEST_BROWSER } : {}),
-  args: ['--autoplay-policy=no-user-gesture-required', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
+  args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
 })
 try {
   const context = await browser.newContext({ permissions: ['microphone'], viewport: { width: 1360, height: 1000 } })
   const counts = { joins: 0, stops: 0, downlinks: 0, microphones: 0, chunks: 0, downlinkCloses: 0 }
   let online = false
   await context.addInitScript(() => {
+    window.voiceTestContexts = []
+    window.voiceTestAnalysers = []
+    const OriginalContext = window.AudioContext
+    window.AudioContext = class extends OriginalContext {
+      constructor(options) { super(options); window.voiceTestContexts.push(this) }
+      createGain() {
+        const gain = super.createGain()
+        const analyser = this.createAnalyser()
+        gain.connect(analyser)
+        window.voiceTestAnalysers.push(analyser)
+        return gain
+      }
+    }
     if (!sessionStorage.getItem('voice-test-initialized')) {
       localStorage.setItem('session_token', 'voice-test-only')
       localStorage.setItem('voice_audio_preferences_v1', JSON.stringify({ outputVolume: 0, microphoneVolume: 150,
@@ -55,7 +71,10 @@ try {
     if (path === '/api/music/voice/watch/ticket') body = { path: '/test-watch', iceServers: [] }
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) })
   })
-  await context.routeWebSocket('**/test-downlink', socket => { socket.onClose(() => { counts.downlinkCloses++ }) })
+  await context.routeWebSocket('**/test-downlink', socket => {
+    const timer = setInterval(() => socket.send(voicePacket), 20)
+    socket.onClose(() => { clearInterval(timer); counts.downlinkCloses++ })
+  })
   await context.routeWebSocket('**/test-uplink/*', socket => { socket.onMessage(() => { counts.chunks++ }) })
   await context.routeWebSocket('**/test-watch', socket => {
     socket.send(JSON.stringify({ type: 'welcome', peerId: 'test-peer' }))
@@ -65,6 +84,12 @@ try {
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
   const saved = () => page.evaluate(() => JSON.parse(localStorage.getItem('voice_audio_preferences_v1')))
+  const receivesTone = () => page.waitForFunction(() => window.voiceTestAnalysers.some(analyser => {
+    if (analyser.context.state !== 'running') return false
+    const samples = new Float32Array(analyser.fftSize)
+    analyser.getFloatTimeDomainData(samples)
+    return samples.some(sample => Math.abs(sample) > 0.01)
+  }))
   const navigateToMonitor = () => page.locator('.side-nav').getByRole('menuitem', { name: '服务器监控' }).click()
   const setRange = async (locator, value) => {
     await locator.evaluate((input, value) => {
@@ -102,10 +127,32 @@ try {
   assert.equal(await page.locator('.voice-settings input[type=range]').nth(1).inputValue(), '145')
   assert.equal((await saved()).selectedInput, device)
   assert.equal((await saved()).selectedOutput, outputDevice)
+  // Listen-only never opens a capture track, avoiding Android communication routing.
+  await page.getByRole('button', { name: '只收听（不开麦克风）', exact: true }).click()
+  await page.getByRole('button', { name: '已静音 · 点击说话', exact: false }).waitFor()
+  assert.equal(counts.microphones, 0)
+  assert.equal(await page.evaluate(() => window.voiceTestTracks.length), 0)
+  await receivesTone()
+  await page.locator('.leave-button').click()
+  await page.getByRole('button', { name: '加入通话', exact: false }).waitFor()
+  // Re-enable the mic explicitly; listen-only intentionally saves the mute preference.
   await page.evaluate(() => { window.voiceTestDevicesVisible = true })
   await page.getByRole('button', { name: '加入通话', exact: false }).click()
+  await page.getByRole('button', { name: '已静音 · 点击说话', exact: false }).click()
   await page.getByRole('button', { name: '麦克风发送中 · 点击静音', exact: false }).waitFor()
   await page.waitForFunction(() => window.voiceTestTracks.some(track => track.readyState === 'live'))
+  // OS interruption must have a real user-gesture recovery path, with a fresh recorder.
+  const beforeRecovery = counts.microphones
+  await page.evaluate(async () => {
+    await Promise.all(window.voiceTestContexts.filter(c => c.state === 'running').map(c => c.suspend()))
+  })
+  await page.getByText('音频被手机系统暂停，请点击“恢复声音与麦克风”。', { exact: true }).waitFor()
+  await page.getByRole('button', { name: '恢复声音与麦克风', exact: true }).click()
+  await page.getByRole('button', { name: '恢复声音与麦克风', exact: true }).waitFor()
+  await page.getByRole('button', { name: '麦克风发送中 · 点击静音', exact: false }).waitFor()
+  assert.equal(counts.microphones, beforeRecovery + 1)
+  assert.ok(await page.evaluate(() => window.voiceTestContexts.filter(c => c.state !== 'closed').every(c => c.state === 'running')))
+  await receivesTone()
   await page.getByRole('button', { name: '加入共享房间', exact: true }).click()
   await page.getByRole('checkbox', { name: '允许成员暂停' }).uncheck()
   await page.getByRole('checkbox', { name: '等待成员加载完成' }).uncheck()

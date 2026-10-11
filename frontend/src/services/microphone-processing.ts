@@ -1,4 +1,5 @@
 import type { MicrophoneProcessingSettings, NoiseSuppressionMode } from './microphone-processing-settings'
+import { resumeVoiceAudio } from './audio-context-state.js'
 
 export interface MicrophoneProcessingStatus {
   mode: NoiseSuppressionMode | 'idle' | 'loading'
@@ -40,13 +41,26 @@ function waitForGraph(graph: AudioGraph, operation: Promise<void>, message: stri
 export class MicrophoneProcessing {
   private graph: AudioGraph | null = null
   private generation = 0
+  private unlockedContext: AudioContext | null = null
   private readonly workletUrl: string
   private readonly onStatus: (status: MicrophoneProcessingStatus) => void
+  private readonly onActivity: (speaking: boolean) => void
 
-  constructor(workletUrl: string, onStatus: (status: MicrophoneProcessingStatus) => void) {
+  constructor(workletUrl: string, onStatus: (status: MicrophoneProcessingStatus) => void, onActivity: (speaking: boolean) => void = () => {}) {
     this.workletUrl = workletUrl
     this.onStatus = onStatus
+    this.onActivity = onActivity
   }
+
+  /** Call directly from the tap, before permission/network awaits consume activation. */
+  unlock(fresh = false) {
+    try {
+      const context = (!fresh && this.graph?.context) || (this.unlockedContext ??= new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 }))
+      void context.resume().catch(() => {})
+    } catch { /* prepare reports failure and falls back to capture. */ }
+  }
+
+  get running(): boolean { return this.graph?.context.state === 'running' || !this.graph }
 
   setVolume(percent: number): boolean {
     if (!this.graph) return false
@@ -59,22 +73,28 @@ export class MicrophoneProcessing {
   }
 
   resume() {
-    return this.graph?.context.resume()
+    return this.graph ? resumeVoiceAudio(this.graph.context) : undefined
   }
 
   async prepare(stream: MediaStream, settings: MicrophoneProcessingSettings, volume: number): Promise<MediaStream> {
+    const unlocked = this.unlockedContext
+    this.unlockedContext = null
     const releasing = this.release()
     const generation = this.generation
     await releasing
-    if (generation !== this.generation) throw new Error('麦克风处理已取消')
+    if (generation !== this.generation) {
+      await unlocked?.close().catch(() => {})
+      throw new Error('麦克风处理已取消')
+    }
     const needsDenoiser = settings.mode === 'rnnoise'
     if (!needsDenoiser && volume === 100) {
+      await unlocked?.close().catch(() => {})
       this.onStatus({ mode: settings.mode, message: '' })
       return stream
     }
     let context: AudioContext | null = null
     try {
-      context = new AudioContext({ latencyHint: 'interactive', ...(needsDenoiser ? { sampleRate: 48000 } : {}) })
+      context = unlocked ?? new AudioContext({ latencyHint: 'interactive', ...(needsDenoiser ? { sampleRate: 48000 } : {}) })
       const graph: AudioGraph = {
         context,
         source: context.createMediaStreamSource(stream),
@@ -125,7 +145,10 @@ export class MicrophoneProcessing {
             if (this.graph === graph) this.onStatus({ mode: 'browser', message: '智能降噪线程中断，浏览器基础降噪恢复失败；请重新开启麦克风' })
           })
         }
-        graph.denoiser.port.onmessage = ({ data }) => { if (data?.type === 'error') fallback() }
+        graph.denoiser.port.onmessage = ({ data }) => {
+          if (data?.type === 'error') fallback()
+          if (data?.type === 'voice-activity' && this.graph === graph) this.onActivity(data.speaking === true)
+        }
         graph.denoiser.onprocessorerror = fallback
         this.onStatus({ mode: 'rnnoise', message: constraintNote })
       } else {
@@ -154,10 +177,14 @@ export class MicrophoneProcessing {
     }
   }
 
-  async release() {
+  async release(keepUnlocked = false) {
     const generation = ++this.generation
     const graph = this.graph
     this.graph = null
+    this.onActivity(false)
+    const unlocked = keepUnlocked ? null : this.unlockedContext
+    if (!keepUnlocked) this.unlockedContext = null
+    if (unlocked) await unlocked.close().catch(() => {})
     if (graph) {
       graph.cancelInitialization?.()
       graph.denoiser?.port.postMessage({ type: 'destroy' })
