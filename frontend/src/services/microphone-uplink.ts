@@ -160,7 +160,9 @@ export class MicrophoneUplink {
     if (pendingConnection) await pendingConnection.catch(() => {})
     if (!this.desired || !this.stream) return
     this.clearReconnectTimer()
-    await this.disposeConnection(true)
+    // Explicit restarts apply changed processing settings; automatic reconnects
+    // preserve their existing graph in recover()/handleDisconnect().
+    await this.disposeConnection()
     await this.connect(this.generation, true).catch((error) => {
       this.scheduleReconnect(errorMessage(error, '麦克风重连失败'))
     })

@@ -6,9 +6,9 @@
 
 界面将辅助功能折叠，保留主要通话操作；使用实际 PCM 阈值突出显示说话成员，并记忆个人收听设置和设备偏好。手机设备选择与恢复能力取决于浏览器支持。
 
-## 源码部署模型服务（Windows）
+## 源码或安装包部署模型服务（Windows）
 
-下列命令在仓库根目录执行，要求 Python 3.11 和 uv。模型服务是可选的；不安装时仍可使用本地 RNNoise。DeepFilter 的实时插件安装脚本针对 Windows x64。
+下列命令在仓库根目录或解压后的安装包根目录执行，要求宿主机安装 Python 3.11 和 uv。源码备用包及预构建安装包均包含 `scripts/audio-lab` 的运行脚本；模型服务是可选的，不安装时仍可使用本地 RNNoise。DeepFilter 的实时插件安装脚本针对 Windows x64。
 
 ```powershell
 uv venv --python 3.11 data/audio-lab/.venv
@@ -25,7 +25,7 @@ data/audio-lab/.venv/Scripts/python.exe scripts/audio-lab/server.py
 
 流式服务监听 127.0.0.1:18187，分段模型服务监听 127.0.0.1:18186。Docker 后端默认通过 host.docker.internal 访问。自定义地址可配置后端环境变量 VOICE_STREAM_WORKER_URL 和 VOICE_MODEL_WORKER_URL；Linux Docker 需配置 host-gateway 或使用合适的内部网络地址。不要公开这些本地工作服务。
 
-源码部署默认将模型、录音和输出放在仓库 data/audio-lab；解压安装包的 source/ 布局沿用安装包 data/audio-lab。可通过 POWERFUL_TS_DATA_DIR 指定私有数据目录，安装脚本和 Python 工作服务需要使用同一设置。数据目录、环境凭据和模型权重不提交到仓库。
+源码部署默认将模型、录音和输出放在仓库 data/audio-lab；安装包中的脚本默认使用安装包根目录的 data/audio-lab，兼容旧版把脚本放在 source/ 的布局。可通过 POWERFUL_TS_DATA_DIR 指定私有数据目录，安装脚本和 Python 工作服务需要使用同一设置。数据目录、环境凭据和模型权重不提交到仓库，也不打入安装包。
 
 DeepFilterNet、ClearerVoice-Studio/SpEx+、模型权重和测试音频由各自上游发布，仓库不打包这些资产；使用和再分发前应核对各自的代码、权重与音频许可证。
 

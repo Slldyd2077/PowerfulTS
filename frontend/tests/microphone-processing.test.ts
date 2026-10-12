@@ -8,6 +8,8 @@ import {
 import { DenoiseFrames } from '../src/services/denoise-frames.js'
 import { MicrophoneProcessing, type MicrophoneProcessingStatus } from '../src/services/microphone-processing.js'
 import { resumeVoiceAudio } from '../src/services/audio-context-state.js'
+import { MicrophoneModel } from '../src/services/microphone-model.js'
+import { MicrophoneUplink, type MicrophoneRecorder, type MicrophoneSocket } from '../src/services/microphone-uplink.js'
 
 test('a blocked mobile resume times out with an actionable message', async () => {
   const context = { state: 'suspended', resume: () => new Promise<void>(() => {}) } as unknown as AudioContext
@@ -122,10 +124,11 @@ test('output clips oversized samples and treats absent input as silence', () => 
 function audioHarness() {
   class Track {
     stopped = false
+    readyState: MediaStreamTrackState = 'live'
     constraints: MediaTrackConstraints = { echoCancellation: true, autoGainControl: true }
     getConstraints() { return this.constraints }
     async applyConstraints(value: MediaTrackConstraints) { this.constraints = value }
-    stop() { this.stopped = true }
+    stop() { this.stopped = true; this.readyState = 'ended' }
   }
   class Stream {
     track = new Track()
@@ -219,6 +222,76 @@ test('off and browser mode at unity gain use the original capture stream', async
     assert.equal(h.contexts.length, 0)
     assert.equal(h.processor.setVolume(20), false)
   } finally { await h.restore() }
+})
+
+for (const mode of ['off', 'browser'] as const) {
+  test(`${mode} mode applies zero volume when restarting a unity-gain microphone`, async () => {
+    const h = audioHarness()
+    let volume = 100
+    let captureRequests = 0
+    const recorded: MediaStream[] = []
+    const uplink = new MicrophoneUplink({
+      acquireStream: async () => { captureRequests++; return h.stream },
+      prepareStream: stream => h.processor.prepare(stream, { ...DEFAULT_MICROPHONE_PROCESSING, mode }, volume),
+      releasePreparedStream: () => h.processor.release(),
+      chooseMimeType: () => 'audio/webm;codecs=opus',
+      startSession: async () => ({ sessionId: 'test', uploadPath: '/test' }),
+      stopSession: async () => {},
+      createSocket: () => {
+        const socket = {
+          readyState: 0, onopen: null as MicrophoneSocket['onopen'],
+          onclose: null as MicrophoneSocket['onclose'], onerror: null as MicrophoneSocket['onerror'],
+          send() {}, close() { socket.readyState = 3 },
+        }
+        queueMicrotask(() => { socket.readyState = 1; socket.onopen?.() })
+        return socket
+      },
+      createRecorder: stream => {
+        recorded.push(stream)
+        const recorder = {
+          state: 'inactive' as RecordingState, ondataavailable: null as MicrophoneRecorder['ondataavailable'],
+          onerror: null as MicrophoneRecorder['onerror'],
+          start() { recorder.state = 'recording' }, stop() { recorder.state = 'inactive' },
+        }
+        return recorder
+      },
+      isRecoveryAllowed: () => true,
+      setTimer: () => 1, clearTimer: () => {},
+      onStateChange: () => {}, onWarning: () => {}, onError: () => {},
+    })
+    try {
+      await uplink.start()
+      assert.equal(recorded[0], h.stream)
+      volume = 0
+      assert.equal(h.processor.setVolume(volume), false)
+      await uplink.restartTransport()
+      assert.notEqual(recorded[1], h.stream, 'the replacement recorder must use an attenuated stream')
+      assert.equal(recorded[1], h.contexts[0]!.output.stream)
+      assert.equal(h.contexts[0]!.gain.gain.value, 0)
+      assert.equal(captureRequests, 1, 'volume changes reuse the authorized capture track')
+      assert.equal(h.track.stopped, false)
+      assert.equal(h.processor.setVolume(50), true)
+      assert.equal(h.contexts[0]!.gain.gain.value, 0.5)
+    } finally { await uplink.stop(); await h.restore() }
+  })
+}
+
+test('DeepFilter local bypass applies live threshold changes without restarting its output', async () => {
+  const h = audioHarness()
+  const prepareModel = MicrophoneModel.prototype.prepare
+  MicrophoneModel.prototype.prepare = async () => { throw new Error('model unavailable') }
+  try {
+    const output = await h.processor.prepare(h.stream, { ...DEFAULT_MICROPHONE_PROCESSING, mode: 'deepfilter' }, 100)
+    const settings = { ...DEFAULT_MICROPHONE_PROCESSING, mode: 'deepfilter' as const, voiceThreshold: 0.1 }
+    h.processor.configure(settings)
+    const message = h.nodes[0]!.port.messages.at(-1) as { type: string; mode: string; voiceThreshold: number }
+    assert.equal(message?.type, 'configure')
+    assert.equal(message.mode, 'voice', 'the local bypass keeps its mandatory speech gate')
+    assert.equal(message.voiceThreshold, 0.1)
+    assert.equal((output.getAudioTracks()[0] as unknown as { stopped: boolean }).stopped, false)
+    assert.equal(h.contexts.length, 2)
+    assert.equal(h.statuses.at(-1)?.mode, 'voice')
+  } finally { MicrophoneModel.prototype.prepare = prepareModel; await h.restore() }
 })
 
 test('neural stream is wired to the recorder after initialization and preserves AEC/AGC constraints', async () => {

@@ -89,6 +89,7 @@ export class MicrophoneProcessing {
   }
 
   configure(settings: MicrophoneProcessingSettings) {
+    this.bypass?.local.configure({ ...settings, mode: 'voice' })
     this.graph?.denoiser?.port.postMessage({ type: 'configure', ...settings })
   }
 

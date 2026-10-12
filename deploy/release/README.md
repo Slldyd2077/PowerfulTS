@@ -47,3 +47,9 @@ POWERFULTS_PORT=8080
 TSMusicBot 需要主动拉取 PowerfulTS 的语音/音效，`LIVE_AUDIO_PUBLIC_URL` 必须是它实际能访问的面板或后端地址，且其进程 `POWERFUL_TS_ORIGIN` 需完全相同（不带路径）。例如同宿主机 TSMusicBot 容器需要 `http://host.docker.internal:8080`，此时面板需绑定可从容器访问的地址；Linux 上游容器也需配置 `host.docker.internal:host-gateway`。远程上游需使用局域网地址或 HTTPS 域名。不要把容器内的 `127.0.0.1` 当作宿主机地址。
 
 安装包不会自动部署 TSMusicBot、TS3 或 TS6，也不会替用户创建上游账号。容器健康只确认面板初始化成功；还需验证 Query 数据、验证码注册、音乐及需要使用的网页双向语音。
+
+## 可选人声模型服务
+
+安装包包含 `scripts/audio-lab` 的运行脚本。默认通话使用本地 RNNoise；需要启用 DeepFilterNet3 或实验性目标说话人提取时，在安装包根目录按[模型服务部署说明](https://github.com/Slldyd2077/PowerfulTS/blob/main/docs/voice-enhancements.md)安装宿主机 Python 3.11、uv 和模型依赖并启动服务。DeepFilter 实时插件当前针对 Windows x64。
+
+模型和参考录音默认保存在安装目录 `data/audio-lab`，安装包不附带权重、录音或模型二进制；运行脚本不会随面板启动器自动执行。
