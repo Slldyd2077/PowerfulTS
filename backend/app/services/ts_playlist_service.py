@@ -44,6 +44,15 @@ class TsPlaylistService:
 
     # ───────────────────────── 歌单 CRUD ─────────────────────────
 
+    async def list_favorites(self, account_id: int) -> list[dict]:
+        """只读取当前用户的收藏归属，供歌曲行判断是否在任一 TS 歌单中。"""
+        rows = (await self.db.execute(
+            select(TsPlaylistSong.playlist_id, TsPlaylistSong.platform, TsPlaylistSong.song_id)
+            .join(TsPlaylist, TsPlaylist.id == TsPlaylistSong.playlist_id)
+            .where(TsPlaylist.account_id == account_id)
+        )).all()
+        return [dict(playlistId=pid, platform=platform, songId=sid) for pid, platform, sid in rows]
+
     async def _get_owned(self, account_id: int, playlist_id: int) -> TsPlaylist | None:
         p = await self.db.get(TsPlaylist, playlist_id)
         if p is None or p.account_id != account_id:

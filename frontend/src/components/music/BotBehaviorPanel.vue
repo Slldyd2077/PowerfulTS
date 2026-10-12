@@ -306,7 +306,7 @@ async function onRemoveAvatar() {
       >
         <span class="field-text">
           <span class="field-label">平衡不同歌曲的音量</span>
-          <span class="field-hint">先分析整首歌，再使用固定增益；保留曲内轻重变化，网页与原版客户端都生效。</span>
+          <span class="field-hint">边播边分析，完成后用 5 秒平滑过渡到固定增益；保留曲内轻重变化，网页与原版客户端都生效。</span>
         </span>
         <span class="switch-track"><span class="switch-knob"></span></span>
       </button>

@@ -66,13 +66,12 @@ const isTrial = computed(
   () => !!(np.value?.effectiveDuration && np.value?.duration && np.value.effectiveDuration < np.value.duration),
 )
 const statusText = computed(() =>
-  np.value?.loudnessNormalization?.state === 'analyzing' ? '正在分析歌曲响度'
-    : isPlaying.value ? '正在播放' : np.value?.paused ? '已暂停' : '空闲',
+  isPlaying.value ? '正在播放' : np.value?.paused ? '已暂停' : '空闲',
 )
 const loudnessStatusText = computed(() => {
   const status = np.value?.loudnessNormalization
-  if (status?.state === 'analyzing') return '正在分析整首歌曲，完成后开始播放。'
-  if (status?.state === 'applied') return `逐曲均衡已应用 · 整首固定 ${status.gainDb > 0 ? '+' : ''}${status.gainDb.toFixed(1)} dB`
+  if (status?.state === 'analyzing') return '后台分析歌曲响度中，不影响播放；完成后用 5 秒平滑调整音量。'
+  if (status?.state === 'applied') return `逐曲均衡 · 5 秒平滑过渡后固定 ${status.gainDb > 0 ? '+' : ''}${status.gainDb.toFixed(1)} dB`
   if (status?.state === 'failed') return '本首响度分析失败，按原始响度播放。'
   if (status?.state === 'unavailable' && music.botSettings.loudnessNormalization?.enabled) return '当前音源为实时流，未应用逐曲响度均衡。'
   return ''

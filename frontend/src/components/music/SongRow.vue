@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useTsPlaylistStore } from '@/stores/ts_playlist'
 import type { Song } from '@/api/music'
 
-defineProps<{ song: Song }>()
+const props = defineProps<{ song: Song }>()
+const ts = useTsPlaylistStore()
+const favorited = computed(() => ts.isFavorite(props.song))
 const emit = defineEmits<{
   (e: 'play', song: Song, queued: boolean): void
   (e: 'favorite', song: Song): void
@@ -44,8 +47,8 @@ function fmt(sec?: number): string {
     <span v-if="song.duration" class="song-dur mono">{{ fmt(song.duration) }}</span>
 
     <div class="song-actions">
-      <button class="act" title="收藏到 TS 歌单" @click="emit('favorite', song)">
-        <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A4.5 4.5 0 0 0 17.5 4c-1.42 0-2.6.62-3.5 1.67C13.1 4.62 11.92 4 10.5 4A4.5 4.5 0 0 0 6 8.5c0 2.29 1.51 4.04 3 5.5l5 5z"/></svg>
+      <button class="act" :class="{ 'act--favorite': favorited }" :title="favorited ? '已收藏到 TS 歌单，可继续收藏到其他歌单' : '收藏到 TS 歌单'" :aria-label="favorited ? '已收藏到 TS 歌单，可继续收藏到其他歌单' : '收藏到 TS 歌单'" :aria-pressed="favorited" @click="emit('favorite', song)">
+        <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" :fill="favorited ? 'currentColor' : 'none'" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 14.5c1.49-1.46 3-3.21 3-5.5a4.5 4.5 0 0 0-4.5-4.5c-1.42 0-2.6.62-3.5 1.67-0.9-1.05-2.08-1.67-3.5-1.67A4.5 4.5 0 0 0 4 9c0 2.29 1.51 4.04 3 5.5l5 5z"/></svg>
       </button>
       <button class="act act--play" title="播放" @click="emit('play', song, false)">
         <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>
@@ -146,11 +149,13 @@ function fmt(sec?: number): string {
   transition: opacity 0.15s;
 }
 .song-item:hover .song-actions,
+.song-item:has(.act--favorite) .song-actions,
 .song-item:has(:focus-visible) .song-actions { opacity: 1; }
 @media (hover: none) { .song-actions { opacity: 1; } }
 .act {
   width: 32px;
   height: 32px;
+  padding: 0;
   display: grid;
   place-items: center;
   border-radius: 50%;
@@ -161,6 +166,7 @@ function fmt(sec?: number): string {
   transition: color 0.15s, border-color 0.15s, background 0.15s, transform 0.12s;
 }
 .act svg { width: 15px; height: 15px; }
+.act--favorite { color: var(--color-primary); border-color: var(--color-primary); }
 .act:hover { color: var(--color-primary); border-color: var(--color-primary); }
 .act:active { transform: scale(0.92); }
 .act--play {

@@ -15,7 +15,7 @@
 services:
   backend:
     build: ./backend
-    image: powerfults-backend:${POWERFULTS_VERSION:-1.1.4}
+    image: powerfults-backend:${POWERFULTS_VERSION:-1.1.5}
     container_name: powerfults-backend
     restart: unless-stopped
     env_file:
@@ -33,7 +33,7 @@ services:
 
   frontend:
     build: ./frontend
-    image: powerfults-frontend:${POWERFULTS_VERSION:-1.1.4}
+    image: powerfults-frontend:${POWERFULTS_VERSION:-1.1.5}
     container_name: powerfults-frontend
     restart: unless-stopped
     depends_on:

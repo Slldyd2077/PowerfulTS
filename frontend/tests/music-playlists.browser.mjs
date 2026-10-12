@@ -146,6 +146,7 @@ try {
   await page.locator('.bot-trigger').click()
   await page.locator('.bot-option').filter({ hasText: '音乐机器人2' }).click()
   await page.getByText('已加入 123 首到队列', { exact: true }).waitFor()
+  await page.locator('.queue-progress').waitFor({ state: 'hidden' })
   assert.equal(queue.length, 123)
   assert.ok(queueWrites.every((write) => write.botId === 'abc-123' && write.songs.length <= 4))
 
@@ -155,6 +156,7 @@ try {
   const previousWrites = queueWrites.length
   await enqueue.click()
   await page.getByText(/处理已暂停（4\/123）/).waitFor()
+  assert.equal(await page.locator('.queue-progress').isVisible(), true)
   assert.equal(queueWrites.length - previousWrites, 2)
 
   await library.getByRole('button', { name: 'TS 歌单', exact: true }).click()

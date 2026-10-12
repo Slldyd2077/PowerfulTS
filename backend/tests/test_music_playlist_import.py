@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.core.database import Base
 from app.models import Account, TsPlaylistSong
 from app.routers.music import BotCreate, BotUpdateRequest, create_bot, update_bot
-from app.routers.ts_playlist import SongAdd, SongsAdd, _check_song_key, add_songs, add_song
+from app.routers.ts_playlist import SongAdd, SongsAdd, _check_song_key, add_songs, add_song, list_playlists
 from app.services.ts_playlist_service import TsPlaylistService
 from app.services.tsmusic_client import TSMusicClient
 
@@ -68,6 +68,26 @@ class PlaylistImportTests(IsolatedAsyncioTestCase):
             dict(platform='kugou', songId=KUGOU_ID),
         ]))
         self.assertEqual((await self.db.execute(select(TsPlaylistSong))).scalars().all(), [])
+
+    async def test_favorites_include_all_owned_playlists_and_keep_platform_identity(self):
+        pid = self.playlist['id']
+        second = await self.service.create_playlist(1, '另一个歌单', None)
+        await self.service.add_song(1, pid, dict(platform='qq', songId='same'))
+        await self.service.add_song(1, second['id'], dict(platform='qq', songId='same'))
+        await self.service.add_song(1, second['id'], dict(platform='netease', songId='same'))
+        result = await list_playlists(SimpleNamespace(id=1), self.db)
+        expected = {
+            (pid, 'qq', 'same'), (second['id'], 'qq', 'same'),
+            (second['id'], 'netease', 'same'),
+        }
+        self.assertEqual({(s['playlistId'], s['platform'], s['songId']) for s in result['favorites']}, expected)
+        # Another account cannot read these memberships, even with matching song IDs.
+        other = await list_playlists(SimpleNamespace(id=2), self.db)
+        self.assertEqual(other, dict(playlists=[], favorites=[]))
+        await self.service.remove_song(1, pid, 'qq', 'same')
+        remaining = await self.service.list_favorites(1)
+        self.assertEqual(len(remaining), 2)
+        self.assertTrue(any(s['platform'] == 'qq' and s['songId'] == 'same' for s in remaining))
 
     async def test_batch_route_skips_invalid_metadata_and_does_not_resolve_music(self):
         body = SongsAdd(songs=[

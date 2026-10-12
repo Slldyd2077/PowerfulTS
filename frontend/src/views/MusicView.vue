@@ -22,7 +22,7 @@ const music = useMusicStore()
       </div>
     </div>
 
-    <div v-if="music.enqueueProgress.total" class="queue-progress" role="status" aria-live="polite">
+    <div v-if="music.enqueueProgress.total && (music.enqueueProgress.running || music.enqueueProgress.error)" class="queue-progress" role="status" aria-live="polite">
       <progress :value="music.enqueueProgress.processed" :max="music.enqueueProgress.total"></progress>
       <span>{{ music.enqueueProgress.running ? '正在加入队列' : '队列处理' }} {{ music.enqueueProgress.processed }}/{{ music.enqueueProgress.total }} · 已添加 {{ music.enqueueProgress.enqueued }} 首<span v-if="music.enqueueProgress.failed"> · {{ music.enqueueProgress.failed }} 首失败</span></span>
       <span v-if="music.enqueueProgress.error">{{ music.enqueueProgress.error }}</span>

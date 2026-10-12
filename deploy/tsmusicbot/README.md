@@ -1,10 +1,12 @@
-本次音频功能已同步至引擎 GitHub 仓库：生产兼容源码 `9ea0a2e`，通用定制实现 `165e897`。更新到这两个提交无需重新应用补丁；版本选择与回归检查见[升级指南](../../docs/release-guide.md#上游引擎)。
+v1.1.5 的生产兼容引擎为 `48577fe57984ca3522da092e614a30f2501b6455`，包含后台快速响度测量、5 秒平滑增益和 PCM 语音避让。直接使用该提交构建，无需叠加历史补丁；版本选择与回归检查见[升级指南](../../docs/release-guide.md#上游引擎)。
 
 # Issue #15：昵称长度校验与 identity 保存修复
 
 另有基于历史提交 `453d2d1` 的[逐曲响度均衡补丁](../../docs/track-loudness-normalization.md)：机器人输出端统一不同歌曲的整体响度，同一首使用固定增益，保留曲内动态。
 
 2026-10-10 的现有生产环境采用另外的兼容移植构建，保留原 TS 连接层，见[部署记录与生产兼容补丁](../../docs/audio-deployment-2026-10-10.md)。请根据源代码基线选择补丁，不能叠加两份响度补丁。
+
+2026-10-11 的 [fast-analysis 增量补丁](track-loudness-fast-analysis.patch) 留作历史单项迁移；v1.1.5 的 [background 补丁](track-loudness-background.patch) 已包含该提速及后台播放，不要叠加两份。完整引擎应使用本文顶部固定提交。基准及行为见[响度文档](../../docs/track-loudness-normalization.md)。
 
 用户已确认这次连接失败的原因是昵称长度。PowerfulTS 的注册、发送验证码和加入
 通话入口现已校验昵称需为 3–30 个 Unicode 字符；前端同步提示并禁止提交不合规

@@ -1,7 +1,7 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "1.1.4",
+  "version": "1.1.5",
   "type": "module",
   "packageManager": "pnpm@10.27.0",
   "engines": {
@@ -15,6 +15,7 @@
     "test:voice-review-browser": "node tests/voice-review-regressions.browser.mjs",
     "test:music-browser": "node tests/music-loudness.browser.mjs",
     "test:music-playlists-browser": "node tests/music-playlists.browser.mjs",
+    "test:music-favorites-browser": "node tests/music-favorites.browser.mjs",
     "build": "node scripts/package-watch-extension.mjs && vue-tsc -b && vite build",
     "preview": "vite preview"
   },

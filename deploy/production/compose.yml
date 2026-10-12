@@ -5,7 +5,7 @@ name: powerfults-production
 
 services:
   frontend:
-    image: ghcr.io/slldyd2077/powerfults-frontend:${POWERFULTS_VERSION:-1.1.4}
+    image: ghcr.io/slldyd2077/powerfults-frontend:${POWERFULTS_VERSION:-1.1.5}
     container_name: powerfults-web
     network_mode: host
     restart: unless-stopped
