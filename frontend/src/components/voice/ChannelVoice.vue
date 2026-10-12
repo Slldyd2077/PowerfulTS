@@ -12,6 +12,7 @@ import {
   openVoiceSession,
   startVoiceDownlink,
   startVoiceMicrophone,
+  type VoiceChannelClient,
 } from '@/api/voice'
 import {
   chooseSupportedMicrophoneMimeType,
@@ -32,6 +33,7 @@ import {
 } from '@/services/microphone-processing-settings'
 import denoiseWorkletUrl from '@/workers/microphone-denoise-worklet.ts?worker&url'
 import { loadVoiceAudioPreferences, saveVoiceAudioPreferences } from '@/services/voice-preferences'
+import { prepareVoiceReference, VOICE_REFERENCE_KEY } from '@/services/microphone-model'
 
 const emit = defineEmits<{ (e: 'session-change'): void }>()
 
@@ -74,10 +76,17 @@ const audioNeedsRecovery = ref(false)
 const recoveringAudio = ref(false)
 const captureSettings = ref<MediaTrackSettings>({})
 const changingProcessing = ref(false)
+const referenceReady = ref(Boolean(localStorage.getItem(VOICE_REFERENCE_KEY)))
+const referenceBusy = ref(false)
+const targetMode = computed(() => ['spex', 'combined'].includes(microphoneProcessing.value.mode))
 const processingBusy = computed(() => changingProcessing.value
   || microphoneState.value === 'requesting' || microphoneState.value === 'connecting')
 const processingStatusText = computed(() => {
   if (processingStatus.value.mode === 'loading') return '正在加载智能降噪模型…'
+  if (processingStatus.value.mode === 'deepfilter') return 'DeepFilterNet3 · 实时人声处理'
+  if (processingStatus.value.mode === 'spex') return 'SpEx+ 目标说话人提取'
+  if (processingStatus.value.mode === 'combined') return '组合处理：SpEx+ → DeepFilterNet3'
+  if (processingStatus.value.mode === 'voice') return '人声增强运行中 · RNNoise + 语音门控'
   if (processingStatus.value.mode === 'rnnoise') return microphoneProcessing.value.keyboardSuppression
     ? 'RNNoise 智能降噪 · 键盘抑制运行中' : 'RNNoise 智能降噪运行中'
   if (processingStatus.value.mode === 'browser') return captureSettings.value.noiseSuppression === true
@@ -89,7 +98,13 @@ const decoderBackend = ref<'webcodecs' | 'wasm' | ''>('')
 
 function loadMicrophoneProcessing() {
   try {
-    return normalizeMicrophoneProcessing(JSON.parse(localStorage.getItem(MICROPHONE_PROCESSING_KEY) || 'null'))
+    const current = localStorage.getItem(MICROPHONE_PROCESSING_KEY)
+    if (current) return normalizeMicrophoneProcessing(JSON.parse(current))
+    const previous = normalizeMicrophoneProcessing(JSON.parse(localStorage.getItem('voice_microphone_processing_v1') || 'null'))
+    // Upgrade the old neural default once; retain explicitly disabled/basic modes.
+    if (previous.mode === 'rnnoise') previous.mode = 'voice'
+    localStorage.setItem(MICROPHONE_PROCESSING_KEY, JSON.stringify(previous))
+    return previous
   } catch {
     return normalizeMicrophoneProcessing(null)
   }
@@ -103,9 +118,9 @@ function saveMicrophoneProcessing() {
 
 const { roommates, refresh: refreshChannels, clearPendingChannel } = useVoiceChannels()
 
-// 每人音量按 TS 唯一昵称记，不按 clid：clid 每次重连都会变，按它记等于每次重进
-// 频道都要重设一遍。localStorage 持久化，下次进来还是你调好的样子。
+// 音量按稳定 TS 身份保存；机器人换歌改昵称、重连换 clid 都不影响设置。
 const SPEAKER_VOLUME_KEY = 'voice_speaker_volumes'
+const DEFAULT_SPEAKER_VOLUME = 125
 const speakerVolumes = ref<Record<string, number>>(loadSpeakerVolumes())
 
 function loadSpeakerVolumes(): Record<string, number> {
@@ -118,8 +133,15 @@ function loadSpeakerVolumes(): Record<string, number> {
   }
 }
 
-function speakerVolume(nickname: string): number {
-  return speakerVolumes.value[nickname] ?? 100
+function speakerVolume(client: VoiceChannelClient): number {
+  const key = client.volumeKey || client.nickname
+  if (speakerVolumes.value[key] !== undefined) return speakerVolumes.value[key]!
+  const legacy = speakerVolumes.value[client.nickname]
+  if (legacy !== undefined && client.volumeKey) {
+    speakerVolumes.value[key] = legacy
+    try { localStorage.setItem(SPEAKER_VOLUME_KEY, JSON.stringify(speakerVolumes.value)) } catch {}
+  }
+  return legacy ?? DEFAULT_SPEAKER_VOLUME
 }
 const displayName = computed(() => auth.nickname || '你')
 
@@ -132,9 +154,14 @@ watch([outputVolume, microphoneVolume, selectedInput, selectedOutput, microphone
     selectedInput: selectedInput.value, selectedOutput: selectedOutput.value,
     microphoneEnabled: microphoneEnabled.value })
 })
-// setSinkId on AudioContext is Chromium-only; hide the picker where it is absent.
-const canChooseOutput = typeof AudioContext !== 'undefined'
-  && 'setSinkId' in AudioContext.prototype
+const mobileAudioOutput = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+// Device selection must target the node that actually plays to the hardware.
+const elementCanChooseOutput = typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype
+const contextCanChooseOutput = typeof AudioContext !== 'undefined' && 'setSinkId' in AudioContext.prototype
+const canChooseOutput = mobileAudioOutput
+  ? elementCanChooseOutput || contextCanChooseOutput
+  : contextCanChooseOutput
 const compatibilityNote = computed(() => {
   if (!window.isSecureContext) return '手机浏览器必须通过 HTTPS 打开本页，才能使用麦克风。'
   if (decoderBackend.value === 'wasm') return '兼容模式已启用：当前设备使用 WASM 解码频道语音。'
@@ -154,9 +181,12 @@ const microphoneStatusText = computed(() => {
 const MAX_RECONNECT_ATTEMPTS = 5
 
 let audioContext: AudioContext | null = null
+let outputPlayer: HTMLAudioElement | null = null
+let outputStream: MediaStreamAudioDestinationNode | null = null
 let workletNode: AudioWorkletNode | null = null
 let outputGain: GainNode | null = null
 let downlinkSocket: WebSocket | null = null
+let downlinkConnecting: { generation: number; promise: Promise<void> } | null = null
 let reconnectTimer: number | null = null
 let reconnectAttempt = 0
 let listenGeneration = 0
@@ -357,6 +387,11 @@ async function ensureAudioPipeline() {
 
   // Must happen before the first await: iOS only unlocks playback while the
   // original tap still owns user activation.
+  // Where supported, establish duplex routing before microphone capture.
+  const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession
+  if (mobileAudioOutput && session) {
+    try { session.type = 'play-and-record' } catch { /* optional browser API */ }
+  }
   audioContext = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 })
   const context = audioContext
   const resumePromise = resumeVoiceAudio(context)
@@ -403,7 +438,18 @@ async function ensureAudioPipeline() {
   })
   outputGain = context.createGain()
   outputGain.gain.value = outputVolume.value / 100
-  workletNode.connect(outputGain).connect(context.destination)
+  workletNode.connect(outputGain)
+  if (mobileAudioOutput) {
+    // Media playback follows the phone's selected Bluetooth output route.
+    outputStream = audioContext.createMediaStreamDestination()
+    outputGain.connect(outputStream)
+    outputPlayer = new Audio()
+    outputPlayer.setAttribute('playsinline', '')
+    outputPlayer.srcObject = outputStream.stream
+    await outputPlayer.play()
+  } else {
+    outputGain.connect(audioContext.destination)
+  }
   if (selectedOutput.value) await applyOutputDevice()
   workletNode.port.onmessage = (event) => {
     if (event.data?.type !== 'activity') return
@@ -418,6 +464,11 @@ async function ensureAudioPipeline() {
 
 /** 断线后自动续上；失败原因写进 listenError 并让面板一直显示，不再无声重连。 */
 function scheduleReconnect(generation: number, reason: string) {
+  if (!listening.value || generation !== listenGeneration) return
+  if (reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
+    void failListening(reason)
+    return
+  }
   listenState.value = 'reconnecting'
   if (!connectionsMayRecover()) {
     listenError.value = `${reason} · 等待网络恢复或页面回到前台`
@@ -430,7 +481,7 @@ function scheduleReconnect(generation: number, reason: string) {
     reconnectTimer = null
     void connectDownlink(generation).catch((error) => {
       if (!listening.value || generation !== listenGeneration) return
-      void failListening(errorText(error, '频道语音重连失败'))
+      scheduleReconnect(generation, errorText(error, '频道语音重连失败'))
     })
   }, delay)
 }
@@ -442,7 +493,13 @@ function connectionsMayRecover(): boolean {
 }
 
 async function failListening(message: string) {
+  // A terminal downlink failure must not leave a silent identity in the channel.
+  await stopMicrophone()
   await stopListening()
+  voiceBotId.value = ''
+  await closeVoiceSession().catch(() => {})
+  clearPendingChannel()
+  emit('session-change')
   listenError.value = message
   ElMessage.error(message)
 }
@@ -462,6 +519,17 @@ async function handleNativeTsPreemption(message: string) {
  * 上游不可用会在 open 之后紧接着以 4502 关闭 —— 这条路径必须报错而不是重连。
  */
 function connectDownlink(generation: number): Promise<void> {
+  if (downlinkConnecting?.generation === generation) return downlinkConnecting.promise
+  if (downlinkSocket && downlinkSocket.readyState !== WebSocket.CLOSED) return Promise.resolve()
+  const operation = { generation, promise: Promise.resolve() }
+  operation.promise = openDownlink(generation).finally(() => {
+    if (downlinkConnecting === operation) downlinkConnecting = null
+  })
+  downlinkConnecting = operation
+  return operation.promise
+}
+
+function openDownlink(generation: number): Promise<void> {
   if (!voiceBotId.value || generation !== listenGeneration) return Promise.resolve()
   if (!connectionsMayRecover()) {
     listenState.value = 'reconnecting'
@@ -504,8 +572,10 @@ function connectDownlink(generation: number): Promise<void> {
       socket.onclose = (event) => {
         window.clearTimeout(openTimer)
         if (healthyTimer) window.clearTimeout(healthyTimer)
-        if (downlinkSocket === socket) downlinkSocket = null
-        if (generation === listenGeneration) closeDecoders()
+        if (downlinkSocket === socket) {
+          downlinkSocket = null
+          closeDecoders()
+        }
         if (!listening.value || generation !== listenGeneration) {
           if (!opened) resolve()
           return
@@ -552,6 +622,7 @@ async function stopListening() {
   listening.value = false
   listenState.value = 'idle'
   listenGeneration++
+  downlinkConnecting = null
   if (reconnectTimer) window.clearTimeout(reconnectTimer)
   reconnectTimer = null
   downlinkSocket?.close(1000, 'listener stopped')
@@ -562,6 +633,12 @@ async function stopListening() {
   workletNode = null
   outputGain = null
   audioNeedsRecovery.value = false
+  outputPlayer?.pause()
+  if (outputPlayer) outputPlayer.srcObject = null
+  outputPlayer = null
+  outputStream?.stream.getTracks().forEach(track => track.stop())
+  outputStream?.disconnect()
+  outputStream = null
   if (audioContext) await audioContext.close().catch(() => {})
   audioContext = null
 }
@@ -573,10 +650,10 @@ function setOutputVolume() {
 }
 
 /** 把某人的音量推给 worklet（增益按 clid 生效，设置按昵称保存）。 */
-function setSpeakerVolume(client: { clid: number; nickname: string }, percent: number) {
+function setSpeakerVolume(client: VoiceChannelClient, percent: number) {
   const next = { ...speakerVolumes.value }
-  if (percent === 100) delete next[client.nickname]
-  else next[client.nickname] = percent
+  const key = client.volumeKey || client.nickname
+  next[key] = percent
   speakerVolumes.value = next
   try {
     localStorage.setItem(SPEAKER_VOLUME_KEY, JSON.stringify(next))
@@ -593,7 +670,7 @@ function pushAllSpeakerGains() {
     workletNode.port.postMessage({
       type: 'gain',
       clientId: client.clid,
-      value: speakerVolume(client.nickname) / 100,
+      value: speakerVolume(client) / 100,
     })
   }
 }
@@ -652,6 +729,11 @@ async function releasePreparedMicrophoneStream() {
 }
 
 async function onProcessingChange() {
+  if (['spex', 'combined'].includes(microphoneProcessing.value.mode) && !referenceReady.value) {
+    ElMessage.warning('请先上传 2–15 秒目标人的独立讲话参考录音')
+    microphoneProcessing.value.mode = 'voice'
+    return
+  }
   saveMicrophoneProcessing()
   if (microphoneState.value === 'idle') return
   changingProcessing.value = true
@@ -667,6 +749,29 @@ async function onProcessingChange() {
 function onKeyboardSuppressionChange() {
   saveMicrophoneProcessing()
   microphoneProcessor.configure(microphoneProcessing.value)
+}
+
+async function uploadVoiceReference(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  referenceBusy.value = true
+  try {
+    localStorage.setItem(VOICE_REFERENCE_KEY, await prepareVoiceReference(file))
+    referenceReady.value = true
+    if (microphoneProcessing.value.mode === 'spex' || microphoneProcessing.value.mode === 'combined') await onProcessingChange()
+    ElMessage.success('目标参考录音已保存到当前浏览器')
+  } catch (error) { ElMessage.error(errorText(error, '参考录音加载失败')) }
+  finally { referenceBusy.value = false; input.value = '' }
+}
+
+async function clearVoiceReference() {
+  localStorage.removeItem(VOICE_REFERENCE_KEY)
+  referenceReady.value = false
+  if (microphoneProcessing.value.mode === 'spex' || microphoneProcessing.value.mode === 'combined') {
+    microphoneProcessing.value.mode = 'voice'
+    await onProcessingChange()
+  }
 }
 
 function describeMicrophoneError(error: unknown): string {
@@ -722,11 +827,40 @@ const microphoneUplink = new MicrophoneUplink({
 async function applyOutputDevice() {
   if (!canChooseOutput || !audioContext) return
   try {
-    await (audioContext as AudioContext & { setSinkId(id: string): Promise<void> })
+    const useContext = !outputPlayer || !elementCanChooseOutput
+    await ((useContext ? audioContext : outputPlayer) as (AudioContext | HTMLAudioElement) & { setSinkId(id: string): Promise<void> })
       .setSinkId(selectedOutput.value)
+    if (outputPlayer && useContext && outputGain && outputStream) {
+      // Some mobile browsers support AudioContext sinks but not media-element sinks.
+      outputGain.disconnect()
+      if (selectedOutput.value) {
+        outputPlayer.pause()
+        outputGain.connect(audioContext.destination)
+      } else {
+        outputGain.connect(outputStream)
+        await outputPlayer.play()
+      }
+    }
   } catch {
     ElMessage.warning('无法切换到该播放设备')
   }
+}
+
+async function restoreOutputPlayback() {
+  try {
+    await audioContext?.resume()
+    if (outputPlayer && (elementCanChooseOutput || !selectedOutput.value)) await outputPlayer.play()
+  } catch {
+    ElMessage.warning('播放未能恢复，请点击“恢复声音”，并检查手机的蓝牙音频输出')
+  }
+}
+
+function recoverOutputDevice() {
+  void refreshDevices().then(async () => {
+    if (!listening.value) return
+    if (canChooseOutput) await applyOutputDevice()
+    await restoreOutputPlayback()
+  })
 }
 
 // Switching devices mid-call has to rebuild the capture chain to take effect.
@@ -745,7 +879,8 @@ async function startMicrophone() {
   }
   try {
     await microphoneUplink.start()
-    if (audioContext) await resumeVoiceAudio(audioContext).catch(() => { audioNeedsRecovery.value = true })
+    // getUserMedia may switch Bluetooth from media to duplex/communication mode.
+    await restoreOutputPlayback()
     void refreshDevices()
   } catch { /* controller reports a user-actionable error and releases capture */ }
 }
@@ -753,6 +888,7 @@ async function startMicrophone() {
 async function stopMicrophone(message?: string, keepUnlocked = false) {
   await microphoneUplink.stop()
   if (!keepUnlocked) await microphoneProcessor.release()
+  if (listening.value) await restoreOutputPlayback()
   if (message) ElMessage.warning(message)
 }
 
@@ -833,10 +969,8 @@ async function toggleMicrophone() {
 
 function resumeAudioAfterForeground() {
   if (!connectionsMayRecover()) return
-  if (listening.value && audioContext) void resumeVoiceAudio(audioContext).then(() => {
-    audioNeedsRecovery.value = false
-  }).catch(() => { audioNeedsRecovery.value = true })
-  void microphoneProcessor.resume()?.catch(() => { audioNeedsRecovery.value = true })
+  if (listening.value) void restoreOutputPlayback()
+  void microphoneProcessor.resume()?.catch(() => {})
   if (listening.value && listenState.value === 'reconnecting' && !reconnectTimer && !downlinkSocket) {
     void connectDownlink(listenGeneration).catch((error) => {
       if (listening.value) scheduleReconnect(listenGeneration, errorText(error, '频道语音重连失败'))
@@ -872,6 +1006,11 @@ async function recoverCallAudio() {
   } finally { recoveringAudio.value = false }
 }
 
+function recoverAfterInteraction() {
+  if (document.visibilityState !== 'visible') return
+  resumeAudioAfterForeground()
+}
+
 // 直接关标签页时没有机会调 leaveCall，但下行 WebSocket 会随页面一起断开，
 // 后端看到断开就会在宽限期后把通话身份收回——不需要 sendBeacon（它也带不上
 // X-Session-Token 请求头，发了后端也认不出是谁）。
@@ -882,18 +1021,23 @@ onActivated(() => { void refreshDevices() })
 
 onMounted(() => {
   void refreshDevices()
-  navigator.mediaDevices?.addEventListener?.('devicechange', refreshDevices)
+  navigator.mediaDevices?.addEventListener?.('devicechange', recoverOutputDevice)
   document.addEventListener('visibilitychange', resumeAudioAfterForeground)
   window.addEventListener('pageshow', resumeAudioAfterForeground)
   window.addEventListener('online', resumeAudioAfterForeground)
+  window.addEventListener('focus', recoverAfterInteraction)
+  window.addEventListener('pageshow', recoverAfterInteraction)
 })
 
 onBeforeUnmount(() => {
   disposed = true
   navigator.mediaDevices?.removeEventListener?.('devicechange', refreshDevices)
+  navigator.mediaDevices?.removeEventListener?.('devicechange', recoverOutputDevice)
   document.removeEventListener('visibilitychange', resumeAudioAfterForeground)
   window.removeEventListener('pageshow', resumeAudioAfterForeground)
   window.removeEventListener('online', resumeAudioAfterForeground)
+  window.removeEventListener('focus', recoverAfterInteraction)
+  window.removeEventListener('pageshow', recoverAfterInteraction)
   void leaveCall()
 })
 </script>
@@ -905,12 +1049,9 @@ onBeforeUnmount(() => {
         <span /><span /><span /><span /><span />
       </div>
       <div>
-        <div class="eyebrow">CHANNEL VOICE · {{ displayName }}</div>
+        <div class="eyebrow">{{ displayName }}</div>
         <h2>网页频道通话</h2>
-        <p>
-          你会以 <b>{{ displayName }}</b> 的身份出现在频道里，挂断后自动离开服务器。
-          无需同时打开 TeamSpeak 客户端。
-        </p>
+        <p>加入频道，和朋友一起聊聊。</p>
       </div>
     </div>
 
@@ -960,7 +1101,7 @@ onBeforeUnmount(() => {
         {{ microphoneState === 'requesting' ? '等待授权' : microphoneState === 'connecting' ? '连接中'
           : microphoneState === 'verifying' ? '正在验证音频 · 点击静音'
             : microphoneState === 'reconnecting' ? '麦克风重连中 · 点击静音'
-              : microphoneLive ? '麦克风发送中 · 点击静音' : '已静音 · 点击说话' }}
+              : microphoneLive ? '静音麦克风' : '开启麦克风' }}
       </button>
     </div>
 
@@ -973,6 +1114,32 @@ onBeforeUnmount(() => {
         <span class="setting-label">麦克风音量 <b>{{ microphoneVolume }}%</b></span>
         <input v-model.number="microphoneVolume" type="range" min="0" max="200" :disabled="processingBusy" @change="setMicrophoneVolume">
       </label>
+    </div>
+
+    <fieldset class="processing-settings" :disabled="processingBusy">
+      <legend>人声处理</legend>
+      <p v-if="audioNeedsRecovery" class="setting-hint" role="alert">音频被系统暂停，请点击“恢复声音与麦克风”。</p>
+      <p v-if="microphoneLive && ['voice', 'rnnoise'].includes(processingStatus.mode)" class="setting-hint" role="status">{{ microphoneSpeaking ? '检测到人声' : '等待人声' }}</p>
+      <label class="setting" for="voice-noise-mode">
+        <span class="setting-label">背景降噪</span>
+        <el-select id="voice-noise-mode" v-model="microphoneProcessing.mode" aria-label="背景降噪" :disabled="processingBusy" @change="onProcessingChange">
+          <el-option value="voice" label="本地人声增强 · 低延迟" />
+          <el-option value="rnnoise" label="RNNoise 智能降噪" />
+          <el-option value="deepfilter" label="DeepFilterNet3 · 实时提取" />
+          <el-option value="spex" label="SpEx+ · 目标说话人" :disabled="!referenceReady" />
+          <el-option value="combined" label="组合 · 目标提取 + DeepFilter" :disabled="!referenceReady" />
+          <el-option value="browser" label="浏览器基础降噪 · 省电" />
+          <el-option value="off" label="关闭降噪" />
+        </el-select>
+      </label>
+      <p class="setting-hint" role="status">{{ processingStatusText }}</p>
+      <p v-if="processingStatus.message" class="processing-warning" role="status">{{ processingStatus.message }}</p>
+      <p v-else-if="targetMode" class="setting-hint">目标提取约增加 2 秒延迟，适合需要过滤其他人声音时使用。</p>
+    </fieldset>
+
+    <details class="audio-details">
+      <summary>音频设置 <span>设备与高级参数</span></summary>
+      <div class="details-grid">
       <label class="setting" for="voice-input-device">
         <span class="setting-label">麦克风设备</span>
         <el-select id="voice-input-device" v-model="selectedInput" aria-label="麦克风设备" :disabled="processingBusy" :empty-values="[null, undefined]" :show-arrow="false" :offset="6" @change="onInputDeviceChange">
@@ -980,43 +1147,25 @@ onBeforeUnmount(() => {
           <el-option v-for="(device, i) in inputDevices" :key="device.deviceId" :value="device.deviceId" :label="deviceLabel(device, i, '麦克风')" />
         </el-select>
       </label>
-      <label v-if="canChooseOutput" class="setting" for="voice-output-device">
+      <label class="setting" for="voice-output-device">
         <span class="setting-label">播放设备</span>
         <el-select id="voice-output-device" v-model="selectedOutput" aria-label="播放设备" :empty-values="[null, undefined]" :show-arrow="false" :offset="6" @change="applyOutputDevice">
           <el-option value="" label="系统默认" />
-          <el-option v-for="(device, i) in outputDevices" :key="device.deviceId" :value="device.deviceId" :label="deviceLabel(device, i, '扬声器')" />
+          <el-option v-for="(device, i) in outputDevices" :key="device.deviceId" :value="device.deviceId" :label="deviceLabel(device, i, '扬声器')" :disabled="!canChooseOutput && device.deviceId !== ''" />
         </el-select>
       </label>
-      <div v-else class="setting">
-        <span class="setting-label">播放设备</span>
-        <span class="system-device">由手机系统控制</span>
-      </div>
+      <p v-if="!canChooseOutput" class="setting-hint">当前浏览器未提供播放设备切换接口，只能使用系统默认。请在手机音频输出菜单选择蓝牙耳机或扬声器。</p>
       <p v-if="!inputDevices.length || !inputDevices[0].label" class="setting-hint">
         设备名称要等浏览器授予过一次麦克风权限才会显示。
       </p>
       <p v-if="compatibilityNote" class="compatibility-note" role="status">
         {{ compatibilityNote }}
       </p>
-    </div>
-
-    <fieldset class="processing-settings" :disabled="processingBusy">
-      <legend>麦克风音频增强</legend>
+      <button v-if="listening" class="restore-button" type="button" @click="restoreOutputPlayback">恢复声音</button>
+      <fieldset class="advanced-controls" :disabled="processingBusy">
       <label class="processing-switch">
         <input v-model="microphoneProcessing.voiceActivityDetection" type="checkbox" :disabled="microphoneProcessing.mode !== 'rnnoise'" @change="onKeyboardSuppressionChange">
-        <span>智能 VAD 人声检测（静音时不占用语音避让）</span>
-      </label>
-      <p v-if="microphoneLive && processingStatus.mode === 'rnnoise'" class="setting-hint" role="status">
-        {{ microphoneSpeaking ? '检测到人声' : '等待人声' }}
-      </p>
-      <p v-if="audioNeedsRecovery" class="setting-hint" role="alert">音频被手机系统暂停，请点击“恢复声音与麦克风”。</p>
-      <p class="setting-hint">只收听不会申请或占用麦克风。开启麦克风可能让 Android 切换蓝牙通话路由；静音会释放音轨。后台通话受浏览器和系统省电限制，中断后可回到页面恢复。</p>
-      <label class="setting" for="voice-noise-mode">
-        <span class="setting-label">背景降噪</span>
-        <el-select id="voice-noise-mode" v-model="microphoneProcessing.mode" aria-label="背景降噪" :disabled="processingBusy" @change="onProcessingChange">
-          <el-option value="rnnoise" label="RNNoise 智能降噪（推荐）" />
-          <el-option value="browser" label="浏览器基础降噪（省电）" />
-          <el-option value="off" label="关闭降噪" />
-        </el-select>
+        <span>独立 VAD 人声检测</span>
       </label>
       <label class="processing-switch">
         <input v-model="microphoneProcessing.echoCancellation" type="checkbox" @change="onProcessingChange">
@@ -1030,24 +1179,35 @@ onBeforeUnmount(() => {
         <input v-model="microphoneProcessing.keyboardSuppression" type="checkbox" :disabled="microphoneProcessing.mode !== 'rnnoise'" @change="onKeyboardSuppressionChange">
         <span>键盘与停顿噪声抑制</span>
       </label>
-      <label v-if="microphoneProcessing.mode === 'rnnoise' && microphoneProcessing.keyboardSuppression" class="setting">
+      <label v-if="microphoneProcessing.mode === 'voice' || (microphoneProcessing.mode === 'rnnoise' && microphoneProcessing.keyboardSuppression)" class="setting">
         <span class="setting-label">人声门限 <b>{{ Math.round(microphoneProcessing.voiceThreshold * 100) }}%</b></span>
         <input v-model.number="microphoneProcessing.voiceThreshold" aria-label="人声门限" type="range" min="0.1" max="0.9" step="0.05" @input="onKeyboardSuppressionChange">
         <span class="setting-hint">调低保留轻声，调高加强停顿噪声抑制。</span>
       </label>
-      <p class="setting-hint" role="status">{{ processingStatusText }}</p>
-      <p v-if="processingStatus.message" class="processing-warning" role="status">{{ processingStatus.message }}</p>
       <p v-if="microphoneState !== 'idle'" class="setting-hint">
         回声消除：{{ !microphoneProcessing.echoCancellation ? '已关闭' : captureSettings.echoCancellation === true ? '已启用' : '浏览器未确认支持' }} ·
         自动增益：{{ !microphoneProcessing.autoGainControl ? '已关闭' : captureSettings.autoGainControl === true ? '已启用' : '浏览器未确认支持' }}
       </p>
-      <p class="setting-hint">智能降噪在本机处理，不上传到第三方。切换降噪模式、回声或自动增益时会短暂重启麦克风；设置自动保存。</p>
-    </fieldset>
+      </fieldset>
+      </div>
+    </details>
+
+    <details class="audio-details" :open="targetMode || undefined">
+      <summary>目标说话人 <span>{{ referenceReady ? '参考已保存' : '参考录音（可选）' }}</span></summary>
+      <div class="details-grid">
+        <div class="setting">
+          <span class="setting-label">目标参考录音 {{ referenceReady ? '· 已保存' : '· 未设置' }}</span>
+          <input type="file" accept="audio/*" aria-label="目标参考录音" :disabled="referenceBusy || processingBusy" @change="uploadVoiceReference">
+          <button v-if="referenceReady" class="restore-button" type="button" :disabled="processingBusy" @click="clearVoiceReference">删除参考</button>
+        </div>
+        <p class="setting-hint">上传 2–15 秒独立清晰讲话，即可启用 SpEx+ 或组合方案。参考保存在当前浏览器，仅在使用目标提取时发送到本站。</p>
+      </div>
+    </details>
 
     <div v-if="listening" class="speaker-mixer">
       <div class="mixer-head">
-        <span class="setting-label">频道里的人</span>
-        <span class="mixer-hint">可以单独调每个人的音量</span>
+        <span class="setting-label">频道音量</span>
+        <span class="mixer-hint">分别调整成员与音乐机器人的收听音量</span>
       </div>
       <p v-if="!roommates.length" class="mixer-empty">这个频道现在只有你。</p>
       <ul v-else class="mixer-list">
@@ -1055,14 +1215,16 @@ onBeforeUnmount(() => {
           <span class="mixer-name">
             <i class="talk-dot" aria-hidden="true" />
             {{ client.nickname }}
+            <small v-if="client.isBot">· 音乐机器人</small>
           </span>
           <input
-            type="range" min="0" max="200"
-            :value="speakerVolume(client.nickname)"
+            type="range" min="0" max="200" step="5"
+            :aria-label="`${client.nickname} 收听音量`"
+            :value="speakerVolume(client)"
             @input="setSpeakerVolume(client, Number(($event.target as HTMLInputElement).value))"
           >
-          <b :class="{ muted: speakerVolume(client.nickname) === 0 }">
-            {{ speakerVolume(client.nickname) === 0 ? '静音' : speakerVolume(client.nickname) + '%' }}
+          <b :class="{ muted: speakerVolume(client) === 0 }">
+            {{ speakerVolume(client) === 0 ? '静音' : speakerVolume(client) + '%' }}
           </b>
         </li>
       </ul>
@@ -1072,10 +1234,6 @@ onBeforeUnmount(() => {
       <span>连接失败</span>{{ listenError }}
     </p>
 
-    <div class="voice-note">
-      <span>{{ microphoneProcessing.echoCancellation ? '已请求回声消除' : '回声消除已关闭' }}</span>
-      建议使用耳机；网页通话时不要让同一设备上的 TeamSpeak 客户端同时进入该频道。
-    </div>
   </section>
   <Teleport to="body">
     <aside v-if="listening && route.name !== 'Voice'" class="ongoing-call" aria-label="当前网页通话">
@@ -1197,6 +1355,7 @@ p { margin: 0; color: var(--text-secondary); font-size: .76em; line-height: 1.6;
 .setting-label { color: var(--text-muted); font-size: .64em; font-weight: 600; }
 .setting-label b { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .setting input[type="range"] { width: 100%; accent-color: var(--color-primary); }
+.setting input[type="file"] { width: 100%; min-width: 0; font-size: .72em; }
 .processing-settings {
   grid-column: 1 / -1;
   display: grid;
@@ -1249,6 +1408,15 @@ p { margin: 0; color: var(--text-secondary); font-size: .76em; line-height: 1.6;
   grid-template-columns: minmax(0, 1fr) minmax(90px, 1.1fr) 46px;
   gap: 10px;
   align-items: center;
+  min-height: 42px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  transition: background .16s ease, border-color .16s ease, color .16s ease;
+}
+.mixer-list li.talking {
+  background: rgba(var(--color-success-rgb), .16);
+  border-color: rgba(var(--color-success-rgb), .42);
 }
 .mixer-name {
   display: flex;
@@ -1263,7 +1431,14 @@ p { margin: 0; color: var(--text-secondary); font-size: .76em; line-height: 1.6;
 }
 .talk-dot { width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--border-default); transition: background .12s, box-shadow .12s; }
 .talking .talk-dot { background: var(--color-success); box-shadow: 0 0 0 3px rgba(var(--color-success-rgb), .22); }
-.talking .mixer-name { color: var(--text-primary); }
+.talking .mixer-name { color: #d8ffe5; font-weight: 700; }
+.talking .mixer-name::after {
+  content: '正在说话';
+  margin-left: 7px;
+  color: var(--color-success);
+  font-size: .82em;
+  font-weight: 700;
+}
 .mixer-list input[type="range"] { width: 100%; accent-color: var(--color-primary); }
 .mixer-list b { color: var(--text-secondary); font-size: .64em; font-variant-numeric: tabular-nums; text-align: right; }
 .mixer-list b.muted { color: var(--color-danger); }
@@ -1310,5 +1485,31 @@ p { margin: 0; color: var(--text-secondary); font-size: .76em; line-height: 1.6;
 }
 @media (prefers-reduced-motion: reduce) {
   .is-listening .voice-mark span, .live-ring { animation: none; }
+}
+/* Primary controls remain visible; technical options open on demand. */
+.voice-panel { gap: 16px; background: var(--bg-card); padding: 24px; }
+.voice-panel::after { display: none; }
+.voice-status { flex-direction: row; flex-wrap: wrap; align-items: center; }
+.voice-actions button { flex: 0 1 auto; min-width: 120px; padding: 0 20px; }
+.voice-actions .mic-toggle { order: -1; flex: 1; }
+.voice-actions .leave-button { background: rgba(var(--color-danger-rgb), .09); color: var(--color-danger); }
+.voice-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.processing-settings { grid-template-columns: minmax(0, 1fr); border: 0; padding: 0; gap: 8px; }
+.processing-settings legend { display: none; }
+.setting-label, .setting-hint { font-size: 12px; }
+.voice-panel :deep(.el-select) { width: 100%; min-width: 0; }
+.audio-details { grid-column: 1 / -1; min-width: 0; border-top: 1px solid var(--border-subtle); padding-top: 12px; }
+.audio-details summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; padding: 4px 0; }
+.audio-details summary span { float: right; color: var(--text-muted); font-size: 12px; }
+.details-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 16px 0 4px; }
+.advanced-controls { grid-column: 1 / -1; display: grid; gap: 12px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.restore-button { justify-self: start; border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 14px; background: var(--bg-elevated); color: var(--text-secondary); cursor: pointer; }
+.setting input[type="file"]::file-selector-button { border: 1px solid var(--border-subtle); border-radius: 8px; padding: 8px 10px; margin-right: 8px; background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; }
+@media (max-width: 680px) {
+  .voice-panel { padding: 18px; gap: 14px; }
+  .voice-actions { flex-wrap: nowrap; }
+  .voice-actions button { flex-basis: auto; min-width: 80px; padding: 0 12px; }
+  .details-grid { grid-template-columns: minmax(0, 1fr); }
+  .voice-status { align-items: flex-start; }
 }
 </style>

@@ -1,4 +1,4 @@
-export type NoiseSuppressionMode = 'off' | 'browser' | 'rnnoise'
+export type NoiseSuppressionMode = 'off' | 'browser' | 'rnnoise' | 'voice' | 'deepfilter' | 'spex' | 'combined'
 
 export interface MicrophoneProcessingSettings {
   mode: NoiseSuppressionMode
@@ -9,9 +9,9 @@ export interface MicrophoneProcessingSettings {
   voiceThreshold: number
 }
 
-export const MICROPHONE_PROCESSING_KEY = 'voice_microphone_processing_v1'
+export const MICROPHONE_PROCESSING_KEY = 'voice_microphone_processing_v2'
 export const DEFAULT_MICROPHONE_PROCESSING: Readonly<MicrophoneProcessingSettings> = {
-  mode: 'rnnoise',
+  mode: 'voice',
   echoCancellation: true,
   autoGainControl: true,
   keyboardSuppression: true,
@@ -24,7 +24,8 @@ export function normalizeMicrophoneProcessing(value: unknown): MicrophoneProcess
     ? value as Partial<MicrophoneProcessingSettings> : {}
   const defaults = DEFAULT_MICROPHONE_PROCESSING
   return {
-    mode: saved.mode === 'off' || saved.mode === 'browser' || saved.mode === 'rnnoise'
+    mode: saved.mode === 'off' || saved.mode === 'browser' || saved.mode === 'rnnoise' || saved.mode === 'voice'
+      || saved.mode === 'deepfilter' || saved.mode === 'spex' || saved.mode === 'combined'
       ? saved.mode : defaults.mode,
     echoCancellation: typeof saved.echoCancellation === 'boolean' ? saved.echoCancellation : defaults.echoCancellation,
     autoGainControl: typeof saved.autoGainControl === 'boolean' ? saved.autoGainControl : defaults.autoGainControl,

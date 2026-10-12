@@ -4,6 +4,10 @@ import ChannelVoice from '@/components/voice/ChannelVoice.vue'
 import ChannelBrowser from '@/components/voice/ChannelBrowser.vue'
 import EntrySoundPanel from '@/components/voice/EntrySoundPanel.vue'
 import WatchRoomPanel from '@/components/voice/WatchRoomPanel.vue'
+import ChannelAdminPanel from '@/components/voice/ChannelAdminPanel.vue'
+import { useAuthStore } from '@/stores/auth'
+
+const auth = useAuthStore()
 
 const browser = ref<InstanceType<typeof ChannelBrowser> | null>(null)
 const pageActive = ref(true)
@@ -32,11 +36,17 @@ function onSessionChange() {
     <div class="voice-body">
       <div class="voice-column">
         <ChannelVoice @session-change="onSessionChange" />
-        <WatchRoomPanel v-if="pageActive" />
-        <EntrySoundPanel v-if="pageActive" />
+        <details class="optional-panel">
+          <summary>一起看 <span>同步播放视频</span></summary>
+          <WatchRoomPanel v-if="pageActive" />
+        </details>
+        <details class="optional-panel">
+          <summary>入场音效 <span>自定义加入提示</span></summary>
+          <EntrySoundPanel v-if="pageActive" />
+        </details>
 
-        <section class="voice-guide">
-          <h2>怎么用</h2>
+        <details class="voice-guide">
+          <summary>使用帮助</summary>
           <ol>
             <li><b>加入通话</b> —— 你会以自己的昵称出现在频道里，一个按钮同时开始收听和麦克风；进去之后可以随时点「静音」只听不说。</li>
             <li><b>选频道</b> —— 在右边点一个频道就能过去，你听到的也随之切换；带 🔒 的频道会让你输密码。</li>
@@ -51,11 +61,12 @@ function onSessionChange() {
             <span>通话中会带标记</span>
             频道里的人看到你的昵称前有 <code>&lt;WEB通讯&gt;</code>，表示你是从网页接入的。挂断后自动消失。
           </p>
-        </section>
+        </details>
       </div>
 
       <div class="voice-column">
         <ChannelBrowser v-if="pageActive" ref="browser" />
+        <ChannelAdminPanel v-if="auth.isAdmin && pageActive" />
       </div>
     </div>
   </div>
@@ -115,6 +126,10 @@ function onSessionChange() {
   box-shadow: var(--shadow-card);
 }
 .voice-guide h2 { margin: 0 0 6px; color: var(--text-primary); font-size: 0.98em; letter-spacing: -0.015em; }
+.optional-panel { min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-card); padding: 14px 18px; }
+.optional-panel summary, .voice-guide summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
+.optional-panel summary span { float: right; font-size: 12px; color: var(--text-muted); }
+.optional-panel[open] summary, .voice-guide[open] summary { margin-bottom: 16px; }
 .voice-guide ol { margin: 0; padding-left: 18px; color: var(--text-secondary); font-size: 0.74em; line-height: 1.85; }
 .voice-guide ol b { color: var(--text-primary); }
 .tip {

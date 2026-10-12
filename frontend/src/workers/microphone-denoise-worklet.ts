@@ -7,7 +7,7 @@ declare class AudioWorkletProcessor {
   readonly port: MessagePort
 }
 interface DenoiseOptions {
-  processorOptions: { keyboardSuppression: boolean; voiceThreshold: number; voiceActivityDetection: boolean }
+  processorOptions: { keyboardSuppression: boolean; voiceThreshold: number; mode?: 'rnnoise' | 'voice'; voiceActivityDetection?: boolean }
 }
 declare function registerProcessor(name: string, processor: new (options: DenoiseOptions) => AudioWorkletProcessor): void
 
@@ -23,7 +23,7 @@ class MicrophoneDenoiseProcessor extends AudioWorkletProcessor {
     super()
     this.port.onmessage = ({ data }) => {
       if (data?.type === 'destroy') this.destroy()
-      if (data?.type === 'configure') this.frames?.configure(data.keyboardSuppression, data.voiceThreshold, data.voiceActivityDetection)
+      if (data?.type === 'configure') this.frames?.configure(data.keyboardSuppression, data.voiceThreshold, data.mode, data.voiceActivityDetection)
     }
     try {
       if (sampleRate !== 48000) throw new Error('RNNoise requires 48 kHz')
@@ -38,7 +38,7 @@ class MicrophoneDenoiseProcessor extends AudioWorkletProcessor {
         const probability = module._rnnoise_process_frame(this.state, this.framePointer, this.framePointer)
         frame.set(module.HEAPF32.subarray(offset, offset + 480))
         return probability
-      }, options.processorOptions.keyboardSuppression, options.processorOptions.voiceThreshold, options.processorOptions.voiceActivityDetection)
+      }, options.processorOptions.keyboardSuppression, options.processorOptions.voiceThreshold, options.processorOptions.mode, options.processorOptions.voiceActivityDetection)
       this.port.postMessage({ type: 'ready' })
     } catch (error) {
       this.port.postMessage({ type: 'error', message: String(error) })

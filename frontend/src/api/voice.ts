@@ -86,6 +86,10 @@ export interface VoiceChannelClient {
   clid: number
   nickname: string
   isBot: boolean
+  /** 当前账号自己的网页通话连接，与音乐机器人分类分开。 */
+  isSelf?: boolean
+  /** 稳定的收听音量标识，不随昵称或连接编号变化。 */
+  volumeKey?: string
 }
 
 export interface VoiceChannel {

@@ -24,7 +24,7 @@ from .voice_exclusivity import (
     kick_real_ts_client_for_account,
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('uvicorn.error.voice_bot')
 
 # 断开后多久真正把 bot 停掉。刷新页面/网络抖动会在这个窗口内重新接上。
 RELEASE_GRACE_SECONDS = 20.0
@@ -182,6 +182,7 @@ class VoiceBotManager:
             return
         self._cancel_release(account_id)
         self._release_specs[account_id] = (bot_id, destroy)
+        logger.info('Voice bot release scheduled account=%s bot=%s grace=%ss', account_id, bot_id, RELEASE_GRACE_SECONDS)
         self._release_tasks[account_id] = asyncio.create_task(
             self._release_after_grace(account_id, bot_id, destroy=destroy)
         )
@@ -250,6 +251,7 @@ class VoiceBotManager:
         task = self._release_tasks.pop(account_id, None)
         self._release_specs.pop(account_id, None)
         if task is not None and not task.done():
+            logger.info('Voice bot release canceled account=%s', account_id)
             task.cancel()
 
     async def _release_after_grace(

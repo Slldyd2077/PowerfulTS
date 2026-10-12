@@ -1,0 +1,2 @@
+FROM powerfults-backend:before-model-options
+COPY app/ /app/app/

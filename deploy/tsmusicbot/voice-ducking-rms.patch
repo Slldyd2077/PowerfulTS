@@ -1,0 +1,264 @@
+diff --git a/src/bot/instance.test.ts b/src/bot/instance.test.ts
+index 669af64..73bd7a3 100644
+--- a/src/bot/instance.test.ts
++++ b/src/bot/instance.test.ts
+@@ -235,7 +235,7 @@ describe("BotInstance voice-ducking lifecycle integration", () => {
+     });
+ 
+     expect(handleVoiceActivity).toHaveBeenCalledOnce();
+-    expect(handleVoiceActivity).toHaveBeenCalledWith(21);
++    expect(handleVoiceActivity).toHaveBeenCalledWith(21, undefined, 5);
+   });
+ 
+   it("lets a voice-bridge bot's relayed speech duck a music bot", () => {
+@@ -277,7 +277,7 @@ describe("BotInstance voice-ducking lifecycle integration", () => {
+     });
+ 
+     expect(handleVoiceActivity).toHaveBeenCalledOnce();
+-    expect(handleVoiceActivity).toHaveBeenCalledWith(25);
++    expect(handleVoiceActivity).toHaveBeenCalledWith(25, undefined, 5);
+   });
+ 
+   it("never ducks a bot that is currently bridging a web caller", () => {
+diff --git a/src/bot/instance.ts b/src/bot/instance.ts
+index 0ceb06c..c73ef97 100755
+--- a/src/bot/instance.ts
++++ b/src/bot/instance.ts
+@@ -557,7 +557,7 @@ export class BotInstance extends EventEmitter {
+       // While bridging a web caller this bot's output IS that person's voice;
+       // ducking it would attenuate them mid-sentence.
+       if (this.webVoiceBridge) return;
+-      this.voiceDucking.handleVoiceActivity(activity.clientId);
++      this.voiceDucking.handleVoiceActivity(activity.clientId, activity.data, activity.codec);
+     });
+ 
+     // React near-instantly to channel membership changes. The 30s idle
+diff --git a/src/bot/voice-ducking.test.ts b/src/bot/voice-ducking.test.ts
+index a57a709..b02d1e5 100644
+--- a/src/bot/voice-ducking.test.ts
++++ b/src/bot/voice-ducking.test.ts
+@@ -1,4 +1,7 @@
+ import { afterEach, describe, expect, it, vi } from "vitest";
++vi.mock('@discordjs/opus', () => ({ default: { OpusEncoder: class {
++  decode(data: Buffer) { const pcm = Buffer.alloc(256); pcm.fill(data[0] === 0 ? 0 : 16); return pcm; }
++} } }));
+ import { VoiceDuckingController } from "./voice-ducking.js";
+ 
+ function makeHarness(
+@@ -31,7 +34,7 @@ describe("VoiceDuckingController", () => {
+     vi.useFakeTimers();
+     const { controller, setDuckingGain, advance } = makeHarness(false);
+ 
+-    controller.handleVoiceActivity(12);
++    controller.handleVoiceActivity(12, Buffer.from([1]), 5);
+     advance(1_000);
+ 
+     expect(setDuckingGain).not.toHaveBeenCalled();
+@@ -43,11 +46,11 @@ describe("VoiceDuckingController", () => {
+     vi.useFakeTimers();
+     const { controller, setDuckingGain, advance } = makeHarness();
+ 
+-    controller.handleVoiceActivity(12);
++    controller.handleVoiceActivity(12, Buffer.from([1]), 5);
+     expect(setDuckingGain).toHaveBeenCalledWith(0.3, 50);
+ 
+     advance(60);
+-    controller.handleVoiceActivity(12);
++    controller.handleVoiceActivity(12, Buffer.from([1]), 5);
+     expect(setDuckingGain).toHaveBeenCalledTimes(1);
+ 
+     // The original t=100 sweep observes the refreshed t=160 deadline.
+@@ -64,9 +67,9 @@ describe("VoiceDuckingController", () => {
+     vi.useFakeTimers();
+     const { controller, setDuckingGain, advance } = makeHarness();
+ 
+-    controller.handleVoiceActivity(1);
++    controller.handleVoiceActivity(1, Buffer.from([1]), 5);
+     advance(50);
+-    controller.handleVoiceActivity(2);
++    controller.handleVoiceActivity(2, Buffer.from([1]), 5);
+     advance(50);
+ 
+     expect(controller.activeSpeakerCount()).toBe(1);
+@@ -82,8 +85,8 @@ describe("VoiceDuckingController", () => {
+     vi.useFakeTimers();
+     const { controller, setDuckingGain } = makeHarness();
+ 
+-    controller.handleVoiceActivity(1);
+-    controller.handleVoiceActivity(2);
++    controller.handleVoiceActivity(1, Buffer.from([1]), 5);
++    controller.handleVoiceActivity(2, Buffer.from([1]), 5);
+     controller.removeSpeaker(1);
+     expect(controller.isDucking()).toBe(true);
+     expect(controller.activeSpeakerCount()).toBe(1);
+@@ -97,7 +100,7 @@ describe("VoiceDuckingController", () => {
+     vi.useFakeTimers();
+     const { controller, setDuckingGain } = makeHarness();
+ 
+-    controller.handleVoiceActivity(7);
++    controller.handleVoiceActivity(7, Buffer.from([1]), 5);
+     controller.updateSettings({ enabled: true, volumePercent: 45 });
+     expect(setDuckingGain).toHaveBeenLastCalledWith(0.45, 50);
+ 
+@@ -111,12 +114,12 @@ describe("VoiceDuckingController", () => {
+     vi.useFakeTimers();
+     const { controller, setDuckingGain, advance } = makeHarness();
+ 
+-    controller.handleVoiceActivity(7);
++    controller.handleVoiceActivity(7, Buffer.from([1]), 5);
+     advance(100);
+     expect(setDuckingGain).toHaveBeenLastCalledWith(1, 200);
+ 
+     advance(50);
+-    controller.handleVoiceActivity(7);
++    controller.handleVoiceActivity(7, Buffer.from([1]), 5);
+     expect(controller.isDucking()).toBe(true);
+     expect(setDuckingGain).toHaveBeenLastCalledWith(0.3, 50);
+   });
+@@ -125,7 +128,7 @@ describe("VoiceDuckingController", () => {
+     vi.useFakeTimers();
+     const { controller, setDuckingGain, advance } = makeHarness();
+ 
+-    controller.handleVoiceActivity(8);
++    controller.handleVoiceActivity(8, Buffer.from([1]), 5);
+     controller.reset(true);
+     const callsAfterReset = setDuckingGain.mock.calls.length;
+     advance(1_000);
+@@ -139,11 +142,11 @@ describe("VoiceDuckingController", () => {
+     const { controller, setDuckingGain } = makeHarness();
+ 
+     for (const id of [0, -1, 1.5, Number.NaN]) {
+-      controller.handleVoiceActivity(id);
++      controller.handleVoiceActivity(id, Buffer.from([1]), 5);
+     }
+     expect(setDuckingGain).not.toHaveBeenCalled();
+ 
+-    controller.handleVoiceActivity(8);
++    controller.handleVoiceActivity(8, Buffer.from([1]), 5);
+     controller.reset(true);
+     expect(controller.isDucking()).toBe(false);
+     expect(controller.activeSpeakerCount()).toBe(0);
+diff --git a/src/bot/voice-ducking.ts b/src/bot/voice-ducking.ts
+index 2963fb4..0d70ea8 100644
+--- a/src/bot/voice-ducking.ts
++++ b/src/bot/voice-ducking.ts
+@@ -1,3 +1,11 @@
++import opus from '@discordjs/opus';
++import type { OpusEncoder as OpusDecoder } from '@discordjs/opus';
++const { OpusEncoder } = opus;
++
++// Match frontend voice-player-worklet.js, measured before playback gain.
++export const SPEAKING_START_RMS = 0.0032;
++export const SPEAKING_KEEP_RMS = 0.002;
++
+ export interface VoiceDuckingSettings {
+   enabled: boolean;
+   volumePercent: number;
+@@ -15,7 +23,7 @@ export interface VoiceDuckingTiming {
+ 
+ export const DEFAULT_VOICE_DUCKING_TIMING: Readonly<VoiceDuckingTiming> = {
+   attackMs: 50,
+-  holdMs: 700,
++  holdMs: 180,
+   releaseMs: 500,
+ };
+ 
+@@ -58,6 +66,7 @@ export class VoiceDuckingController {
+   private timerDueAt = Number.POSITIVE_INFINITY;
+   private timerGeneration = 0;
+   private ducking = false;
++  private readonly decoders = new Map<number, { codec: number; decoder: OpusDecoder; lastSeen: number }>();
+ 
+   constructor(
+     private readonly target: VoiceDuckingGainTarget,
+@@ -73,10 +82,41 @@ export class VoiceDuckingController {
+     this.now = options.now ?? (() => performance.now());
+   }
+ 
+-  handleVoiceActivity(clientId: number): void {
++  handleVoiceActivity(clientId: number, data: Buffer, codec: number): void {
+     if (!this.settings.enabled || !Number.isInteger(clientId) || clientId <= 0) return;
+ 
+     const now = this.now();
++    // Packet presence is not speech: continuous silence must never refresh ducking.
++    if (!data?.length || (codec !== 4 && codec !== 5)) return;
++    for (const [id, state] of this.decoders) {
++      if (now - state.lastSeen > 5000) this.decoders.delete(id);
++    }
++    let state = this.decoders.get(clientId);
++    if (!state || state.codec !== codec) {
++      state = { codec, decoder: new OpusEncoder(48000, codec === 5 ? 2 : 1), lastSeen: now };
++      this.decoders.set(clientId, state);
++    }
++    state.lastSeen = now;
++    let pcm: Buffer;
++    try { pcm = state.decoder.decode(data); }
++    catch { this.decoders.delete(clientId); return; }
++    const threshold = (this.activeUntil.get(clientId) ?? -Infinity) > now
++      ? SPEAKING_KEEP_RMS : SPEAKING_START_RMS;
++    // Match the page's 128-frame AudioWorklet measurement windows.
++    const windowBytes = 128 * (codec === 5 ? 2 : 1) * 2;
++    let aboveThreshold = false;
++    for (let start = 0; start < pcm.length; start += windowBytes) {
++      const end = Math.min(pcm.length, start + windowBytes);
++      let energy = 0;
++      let count = 0;
++      for (let offset = start; offset + 1 < end; offset += 2) {
++        const sample = pcm.readInt16LE(offset) / 32768;
++        energy += sample * sample;
++        count++;
++      }
++      if (count && Math.sqrt(energy / count) >= threshold) aboveThreshold = true;
++    }
++    if (!aboveThreshold) return;
+     this.activeUntil.set(clientId, now + this.timing.holdMs);
+ 
+     if (!this.ducking) {
+@@ -88,6 +128,7 @@ export class VoiceDuckingController {
+   }
+ 
+   removeSpeaker(clientId: number): void {
++    this.decoders.delete(clientId);
+     if (!this.activeUntil.delete(clientId)) return;
+     if (this.activeUntil.size === 0) {
+       this.cancelTimer();
+@@ -100,6 +141,7 @@ export class VoiceDuckingController {
+     this.settings = normalizeSettings(settings);
+ 
+     if (!this.settings.enabled) {
++      this.decoders.clear();
+       this.activeUntil.clear();
+       this.cancelTimer();
+       this.release();
+@@ -117,6 +159,7 @@ export class VoiceDuckingController {
+   /** Clear all activity. Disconnects use an immediate reset; disabling the
+    * feature uses updateSettings(), which returns smoothly over releaseMs. */
+   reset(immediate = true): void {
++    this.decoders.clear();
+     this.activeUntil.clear();
+     this.cancelTimer();
+     this.ducking = false;
+diff --git a/src/ts-protocol/client.ts b/src/ts-protocol/client.ts
+index adfe128..d623f1a 100644
+--- a/src/ts-protocol/client.ts
++++ b/src/ts-protocol/client.ts
+@@ -78,9 +78,9 @@ export interface TS3VoiceFrame {
+   data: Buffer;
+ }
+ 
+-/** Lightweight voice-packet signal used for activity detection. The encoded
+- * payload is intentionally not forwarded beyond this protocol wrapper. */
++/** Voice packet signal; payload permits PCM-based speech detection. */
+ export interface TS3VoiceActivity {
++  data: Buffer;
+   clientId: number;
+   codec: number;
+   /** Stable TeamSpeak identity when the sender is present in the client view. */
+@@ -316,6 +316,7 @@ export class TS3Client extends EventEmitter {
+       if (voice.clientId === this.clientId) return;
+       const clientUid = this.visibleClientUids.get(voice.clientId);
+       const activity: TS3VoiceActivity = {
++        data: Buffer.from(voice.data),
+         clientId: voice.clientId,
+         codec: voice.codec,
+         ...(clientUid ? { clientUid } : {}),

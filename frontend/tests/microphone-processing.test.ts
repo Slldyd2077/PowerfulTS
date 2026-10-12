@@ -22,6 +22,7 @@ test('invalid saved preferences restore safe defaults and clamp the voice thresh
   assert.equal(normalizeMicrophoneProcessing({ voiceThreshold: -1 }).voiceThreshold, 0.1)
   assert.equal(normalizeMicrophoneProcessing({ voiceThreshold: NaN }).voiceThreshold, 0.6)
   assert.equal(normalizeMicrophoneProcessing({ mode: 'off', keyboardSuppression: false }).mode, 'off')
+  assert.equal(normalizeMicrophoneProcessing({ mode: 'voice' }).mode, 'voice')
 })
 
 test('VAD gates neural non-speech even when optional keyboard suppression is disabled', () => {
@@ -94,6 +95,20 @@ test('keyboard suppression closes for noise, retains speech tails and opens smoo
   dsp.configure(false, 0.6)
   for (let i = 0; i < 5; i++) dsp.process(input, output)
   assert.ok(output[479]! > 0.49)
+})
+
+test('voice enhancement gates non-speech even when optional keyboard suppression is off', () => {
+  let probability = 0
+  const dsp = new DenoiseFrames(() => probability, false, 0.6, 'voice')
+  const input = new Float32Array(480).fill(0.5)
+  const output = new Float32Array(480)
+  dsp.process(input, output)
+  dsp.process(input, output)
+  assert.ok(output[479]! < 0.001)
+  probability = 1
+  dsp.process(input, output)
+  dsp.process(input, output)
+  assert.ok(output[479]! > 0.4)
 })
 
 test('output clips oversized samples and treats absent input as silence', () => {
@@ -212,7 +227,7 @@ test('neural stream is wired to the recorder after initialization and preserves 
     const output = await h.processor.prepare(h.stream, { ...DEFAULT_MICROPHONE_PROCESSING }, 80)
     const graph = h.contexts[0]!
     assert.equal(output, graph.output.stream)
-    assert.equal(h.statuses.at(-1)?.mode, 'rnnoise')
+    assert.equal(h.statuses.at(-1)?.mode, 'voice')
     assert.deepEqual(h.track.constraints, { echoCancellation: true, autoGainControl: true, noiseSuppression: false })
     assert.equal(graph.source.connections[0], h.nodes[0])
     assert.equal(h.nodes[0]!.connections[0], graph.gain)
@@ -287,7 +302,7 @@ test('unsupported constraints are visible and do not interrupt neural audio', as
   try {
     h.failConstraints()
     assert.notEqual(await h.processor.prepare(h.stream, { ...DEFAULT_MICROPHONE_PROCESSING }, 100), h.stream)
-    assert.equal(h.statuses.at(-1)?.mode, 'rnnoise')
+    assert.equal(h.statuses.at(-1)?.mode, 'voice')
     assert.ok(h.statuses.at(-1)?.message.includes('未允许'))
     h.nodes[0]!.port.onmessage?.({ data: { type: 'error' } })
     await new Promise<void>((resolve) => setImmediate(resolve))

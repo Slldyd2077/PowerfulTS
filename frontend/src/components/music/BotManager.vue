@@ -8,6 +8,10 @@ import { getFriends, type Friend } from '@/api/social'
 import BotBehaviorPanel from './BotBehaviorPanel.vue'
 import { usePolling } from '@/composables/usePolling'
 import { tsNicknameError } from '@/services/ts-nickname'
+import { useAuthStore } from '@/stores/auth'
+const auth = useAuthStore()
+const showChannelAdmin = ref(false)
+import ChannelAdminPanel from '@/components/voice/ChannelAdminPanel.vue'
 
 const music = useMusicStore()
 
@@ -236,7 +240,11 @@ onMounted(() => {
         <h2 class="panel-title">TS Bot</h2>
         <span class="panel-sub label-mono">INSTANCES</span>
       </div>
+      <button v-if="auth.isAdmin" class="mini-btn" @click="showChannelAdmin = true">频道管理 · 所有机器人</button>
     </div>
+    <el-dialog v-if="auth.isAdmin" v-model="showChannelAdmin" title="管理员频道管理" width="min(640px, 94vw)" append-to-body destroy-on-close>
+      <ChannelAdminPanel v-if="showChannelAdmin" />
+    </el-dialog>
 
     <!-- active 选择器（自建下拉，避免原生 <select> 弹层古老） -->
     <div v-if="hasBots" class="active-select">

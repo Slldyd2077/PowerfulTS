@@ -1,0 +1,6 @@
+deepfilternet==0.5.6
+numpy==1.26.4
+soundfile==0.14.0
+torch==2.5.1
+torchaudio==2.5.1
+websockets==16.0

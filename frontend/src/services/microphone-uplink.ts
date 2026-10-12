@@ -88,6 +88,7 @@ export class MicrophoneUplink {
   private recorder: MicrophoneRecorder | null = null
   private sessionId = ''
   private preparedStreamActive = false
+  private preparedStream: MediaStream | null = null
   private reconnectAttempt = 0
   private reconnectTimer: TimerHandle | null = null
   private firstChunkTimer: TimerHandle | null = null
@@ -146,7 +147,7 @@ export class MicrophoneUplink {
     if (this.disconnecting) await this.disconnecting
     if (!this.desired) return
     if (this.isHealthy() || this.connecting || this.reconnectTimer) return
-    await this.disposeConnection()
+    await this.disposeConnection(true)
     if (!this.desired) return
     await this.connect(this.generation, true).catch((error) => {
       this.scheduleReconnect(errorMessage(error, '麦克风重连失败'))
@@ -159,7 +160,7 @@ export class MicrophoneUplink {
     if (pendingConnection) await pendingConnection.catch(() => {})
     if (!this.desired || !this.stream) return
     this.clearReconnectTimer()
-    await this.disposeConnection()
+    await this.disposeConnection(true)
     await this.connect(this.generation, true).catch((error) => {
       this.scheduleReconnect(errorMessage(error, '麦克风重连失败'))
     })
@@ -190,7 +191,7 @@ export class MicrophoneUplink {
       await operation
     } catch (error) {
       if (this.desired && generation === this.generation) {
-        await this.disposeConnection()
+        await this.disposeConnection(reconnecting)
       }
       throw error
     } finally {
@@ -204,10 +205,11 @@ export class MicrophoneUplink {
     if (!mimeType) throw new Error('浏览器没有可用的实时音频编码器')
     // The processor can allocate a graph before its asynchronous model load finishes.
     this.preparedStreamActive = true
-    const preparedStream = await this.dependencies.prepareStream(this.stream!)
+    const preparedStream = this.preparedStream ?? await this.dependencies.prepareStream(this.stream!)
     if (!this.desired || generation !== this.generation) {
       return
     }
+    this.preparedStream = preparedStream
     const session = await this.dependencies.startSession(mimeType)
     if (!this.desired || generation !== this.generation) {
       await this.dependencies.stopSession(session.sessionId)
@@ -306,7 +308,7 @@ export class MicrophoneUplink {
     if (this.disconnecting) return this.disconnecting
     const generation = this.generation
     const operation = (async () => {
-      await this.disposeConnection()
+      await this.disposeConnection(true)
       if (!this.desired || generation !== this.generation) return
       this.dependencies.onWarning(reason)
       this.scheduleReconnect(reason)
@@ -340,7 +342,7 @@ export class MicrophoneUplink {
     this.dependencies.onError(message)
   }
 
-  private async disposeConnection(): Promise<void> {
+  private async disposeConnection(preserveProcessing = false): Promise<void> {
     this.clearFirstChunkTimer()
     const recorder = this.recorder
     const socket = this.socket
@@ -359,8 +361,9 @@ export class MicrophoneUplink {
       socket.onerror = null
       socket.close(1000, 'microphone reconnecting')
     }
-    if (this.preparedStreamActive) {
+    if (this.preparedStreamActive && !preserveProcessing) {
       this.preparedStreamActive = false
+      this.preparedStream = null
       await this.dependencies.releasePreparedStream?.()
     }
     if (sessionId) await this.dependencies.stopSession(sessionId).catch(() => {})

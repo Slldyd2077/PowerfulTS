@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.config import get_settings
 from ..core.database import get_db
 from ..deps import AccountDep, AdminDep, TsmusicDep, VoiceAccountDep, get_current_account
-from ..models import Account, BotOwnership, BotShare, EntrySound, Friend
+from ..models import Account, BotOwnership, BotShare, EntrySound, Friend, VoiceBot
 from ..services import bot_mover
 from ..services.auth_service import AuthService
 from ..services.entry_sound import (
@@ -417,15 +417,14 @@ async def upload_live_audio(websocket: WebSocket, session_id: str):
             if not await relay.push(session_id, chunk):
                 await websocket.close(code=4410, reason="实时音频消费者已断开")
                 break
-    except WebSocketDisconnect:
-        pass
+    except WebSocketDisconnect as error:
+        logging.getLogger('uvicorn.error.live_audio').info(
+            'Live audio upload disconnected bot=%s code=%s', session.bot_id, error.code,
+        )
     finally:
-        closed = await relay.close(session_id)
-        if closed is not None:
-            try:
-                await websocket.app.state.tsmusic.stop(bot_id=closed.bot_id)
-            except Exception:
-                logger.warning("停止实时音频 bot 失败: %s", closed.bot_id, exc_info=True)
+        # Closing this HTTP stream makes its FFmpeg consumer finish. A bot-wide
+        # stop here can kill a replacement stream already started by reconnect.
+        await relay.close(session_id, reason='browser_upload_ended')
 
 
 @router.get("/live/stream/{session_id}")
@@ -453,9 +452,9 @@ async def stop_live_audio(
         return {"ok": True, "stopped": False}
     if session.account_id != account.id:
         raise HTTPException(status_code=403, detail="无权停止此直播")
-    closed = await request.app.state.live_audio.close(session_id)
-    if closed is not None:
-        await tsmusic.stop(bot_id=closed.bot_id)
+    # Ending this HTTP stream stops its consumer. A bot-wide stop could instead
+    # stop a replacement stream opened while this request was in flight.
+    closed = await request.app.state.live_audio.close(session_id, reason='explicit_stop')
     return {"ok": True, "stopped": closed is not None}
 
 
@@ -847,7 +846,14 @@ async def voice_channels(
         await _sync_ts3_snapshot(request)
     bid = await request.app.state.voice_bots.current_bot_id(db, account.id)
     bot_clid = await tsmusic.get_bot_client_id(bid) if bid else None
-    overview = request.app.state.ts3_monitor.get_voice_overview(bot_clid)
+    music_ids = set(await db.scalars(select(BotOwnership.bot_id)))
+    web_ids = set(await db.scalars(select(VoiceBot.bot_id)))
+    music_clids = await asyncio.gather(
+        *(tsmusic.get_bot_client_id(bot_id) for bot_id in music_ids - web_ids),
+    )
+    overview = request.app.state.ts3_monitor.get_voice_overview(
+        bot_clid, music_client_ids={clid for clid in music_clids if clid is not None},
+    )
     overview["botOnline"] = bot_clid is not None
     return overview
 

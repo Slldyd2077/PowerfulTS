@@ -14,22 +14,25 @@ export class DenoiseFrames {
   private hold = 0
   private gain = 0
   private keyboardSuppression: boolean
+  private enhancementMode: 'rnnoise' | 'voice'
   private threshold: number
   private vad: boolean
   private readonly denoise: (frame: Float32Array) => number
 
-  constructor(denoise: (frame: Float32Array) => number, keyboardSuppression: boolean, threshold: number, vad = false) {
+  constructor(denoise: (frame: Float32Array) => number, keyboardSuppression: boolean, threshold: number, enhancementMode: 'rnnoise' | 'voice' | boolean = 'rnnoise', vad = false) {
     this.denoise = denoise
     this.keyboardSuppression = keyboardSuppression
     this.threshold = threshold
-    this.vad = vad
+    this.enhancementMode = typeof enhancementMode === 'boolean' ? 'rnnoise' : enhancementMode
+    this.vad = typeof enhancementMode === 'boolean' ? enhancementMode : vad
   }
 
   get speaking() { return this.hold > 0 }
 
-  configure(keyboardSuppression: boolean, threshold: number, vad = this.vad) {
+  configure(keyboardSuppression: boolean, threshold: number, enhancementMode: 'rnnoise' | 'voice' = this.enhancementMode, vad = this.vad) {
     this.keyboardSuppression = keyboardSuppression
     this.threshold = threshold
+    this.enhancementMode = enhancementMode
     this.vad = vad
   }
 
@@ -43,13 +46,15 @@ export class DenoiseFrames {
       const probability = this.denoise(this.frame)
       if (probability >= this.threshold) this.hold = HOLD_FRAMES
       else this.hold = Math.max(0, this.hold - 1)
-      const gated = this.keyboardSuppression || this.vad
-      const target = !gated || this.hold > 0 ? 1 : 0
+      // Voice enhancement always gates non-speech. RNNoise mode keeps the
+      // existing optional keyboard/paused-noise suppression behavior.
+      const gateEnabled = this.enhancementMode === 'voice' || this.keyboardSuppression || this.vad
+      const target = !gateEnabled || this.hold > 0 ? 1 : 0
       const smoothing = target > this.gain ? ATTACK : RELEASE
       for (let j = 0; j < FRAME_SIZE; j++) {
         this.gain += (target - this.gain) * smoothing
         const sample = this.frame[j]! / PCM_SCALE
-        this.output[j] = Math.max(-1, Math.min(1, sample * (gated ? this.gain : 1)))
+        this.output[j] = Math.max(-1, Math.min(1, sample * (gateEnabled ? this.gain : 1)))
       }
       this.inputCount = 0
       this.outputIndex = 0

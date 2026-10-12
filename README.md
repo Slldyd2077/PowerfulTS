@@ -654,3 +654,7 @@ python -m unittest discover -s scripts/tests -v
 | [QQMusicApi](https://github.com/jsososo/QQMusicApi) | QQ 音乐 API 项目 |
 | [@sansenjian/qq-music-api](https://github.com/sansenjian/qq-music-api) | QQ 音乐 API 活跃维护版本 |
 | [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect) | 哔哩哔哩 API 文档 |
+
+### 网页语音增强与频道管理
+
+可选人声模型、故障旁路、频道成员管理与音乐避让补丁的部署和限制见 [语音增强指南](docs/voice-enhancements.md)。

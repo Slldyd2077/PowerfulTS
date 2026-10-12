@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>人声提取试验</title>
+<style>
+body{font:16px/1.6 system-ui,sans-serif;background:#101820;color:#e7edf4;margin:auto;max-width:850px;padding:28px}
+h1{font-size:28px}h2{font-size:20px}section{background:#1b2733;border:1px solid #324455;border-radius:16px;padding:22px;margin:20px 0}
+p{color:#b9c9d8}audio{width:100%;margin:8px 0 16px}label{display:block;margin:14px 0}button,select,input{font:inherit;max-width:100%}
+button{background:#80e0b3;border:0;border-radius:8px;padding:10px 20px;cursor:pointer}button:disabled{opacity:.5}select{padding:8px}#status{white-space:pre-wrap}a{color:#80e0b3}
+</style>
+<h1>人声提取 · 本机试听</h1>
+<p>比较 DeepFilterNet3 的噪声抑制和 SpEx+ 的指定说话人提取。试验处理保存在本机，与当前网页通话独立。</p>
+<section><h2>1 · DeepFilterNet3</h2><p>同一段公开语音加入合成白噪声，比较处理前后。</p>
+<label>带噪输入<audio controls src="/audio/noise-input.wav"></audio></label>
+<label>增强输出<audio controls src="/audio/deepfilter-output.wav"></audio></label>
+</section>
+<section><h2>2 · SpEx+ 目标说话人提取</h2><p>两人声音重叠；参考录音与混合音频使用不同句子。更换参考可以指定保留哪位说话人。输出为 8 kHz。</p>
+<label>两人混合<audio controls src="/audio/two-speakers-input.wav"></audio></label>
+<label>指定说话人 1<audio controls src="/audio/spex-target-output.wav"></audio></label>
+<label>指定说话人 2<audio controls src="/audio/spex-other-output.wav"></audio></label>
+</section>
+<section><h2>用自己的录音试验</h2><p>输入最长 30 秒。目标提取需要同一个人的独立清晰参考录音，长度 2–15 秒。首轮含模型初始化，耗时较长。</p>
+<label>算法 <select id="mode"><option value="deepfilter">DeepFilterNet3 · 语音增强</option><option value="spex">SpEx+ · 指定说话人</option></select></label>
+<label>待处理录音 <input id="input" type="file" accept="audio/*"></label>
+<label>目标人的参考录音（仅 SpEx+ 需要） <input id="reference" type="file" accept="audio/*"></label>
+<button id="run">处理录音</button><p id="status" role="status"></p><audio id="result" controls hidden></audio>
+</section>
+<script>
+async function wav(file){
+ if(!file)throw Error('请选择录音文件');
+ const ctx=new AudioContext();
+ try{
+  const decoded=await ctx.decodeAudioData(await file.arrayBuffer());
+  if(decoded.duration>30)throw Error('录音不能超过30秒');
+  const offline=new OfflineAudioContext(1,Math.ceil(decoded.duration*48000),48000);
+  const source=offline.createBufferSource();source.buffer=decoded;source.connect(offline.destination);source.start();
+  const data=(await offline.startRendering()).getChannelData(0);
+  const buffer=new ArrayBuffer(44+data.length*2),v=new DataView(buffer);
+  const str=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i))};
+  str(0,'RIFF');v.setUint32(4,36+data.length*2,true);str(8,'WAVE');str(12,'fmt ');v.setUint32(16,16,true);
+  v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,48000,true);v.setUint32(28,96000,true);
+  v.setUint16(32,2,true);v.setUint16(34,16,true);str(36,'data');v.setUint32(40,data.length*2,true);
+  for(let i=0;i<data.length;i++)v.setInt16(44+i*2,Math.max(-1,Math.min(1,data[i]))*32767,true);
+  const bytes=new Uint8Array(buffer);let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+  return btoa(binary);
+ }finally{await ctx.close()}
+}
+document.querySelector('#run').onclick=async()=>{
+ const button=document.querySelector('#run'),status=document.querySelector('#status');button.disabled=true;status.textContent='正在处理…';
+ try{
+  const mode=document.querySelector('#mode').value;
+  const body={mode,input:await wav(document.querySelector('#input').files[0])};
+  if(mode==='spex')body.reference=await wav(document.querySelector('#reference').files[0]);
+  const response=await fetch('/process',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const result=await response.json();if(!response.ok)throw Error(result.error);
+  const player=document.querySelector('#result');player.src=result.url+'?t='+Date.now();player.hidden=false;
+  status.textContent=`完成：${result.duration.toFixed(2)}秒录音，处理耗时${result.seconds.toFixed(2)}秒（含首轮初始化）。`;
+ }catch(e){status.textContent=e.message}finally{button.disabled=false}
+};
+</script></html>

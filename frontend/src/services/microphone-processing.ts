@@ -1,5 +1,6 @@
 import type { MicrophoneProcessingSettings, NoiseSuppressionMode } from './microphone-processing-settings'
 import { resumeVoiceAudio } from './audio-context-state.js'
+import { MicrophoneModel } from './microphone-model.js'
 
 export interface MicrophoneProcessingStatus {
   mode: NoiseSuppressionMode | 'idle' | 'loading'
@@ -9,10 +10,22 @@ export interface MicrophoneProcessingStatus {
 interface AudioGraph {
   context: AudioContext
   source: MediaStreamAudioSourceNode
+  compressor: DynamicsCompressorNode | null
   gain: GainNode
   output: MediaStreamAudioDestinationNode
   denoiser?: AudioWorkletNode
   cancelInitialization?: () => void
+}
+
+interface ModelBypass {
+  context: AudioContext
+  local: MicrophoneProcessing
+  localSource: MediaStreamAudioSourceNode
+  modelSource?: MediaStreamAudioSourceNode
+  localGain: GainNode
+  modelGain: GainNode
+  gain: GainNode
+  output: MediaStreamAudioDestinationNode
 }
 
 async function setBrowserSuppression(stream: MediaStream, enabled: boolean) {
@@ -42,6 +55,8 @@ export class MicrophoneProcessing {
   private graph: AudioGraph | null = null
   private generation = 0
   private unlockedContext: AudioContext | null = null
+  private model: MicrophoneModel | null = null
+  private bypass: ModelBypass | null = null
   private readonly workletUrl: string
   private readonly onStatus: (status: MicrophoneProcessingStatus) => void
   private readonly onActivity: (speaking: boolean) => void
@@ -63,6 +78,11 @@ export class MicrophoneProcessing {
   get running(): boolean { return this.graph?.context.state === 'running' || !this.graph }
 
   setVolume(percent: number): boolean {
+    if (this.bypass) {
+      this.bypass.gain.gain.setTargetAtTime(percent / 100, this.bypass.context.currentTime, .015)
+      return true
+    }
+    if (this.model) return this.model.setVolume(percent)
     if (!this.graph) return false
     this.graph.gain.gain.setTargetAtTime(percent / 100, this.graph.context.currentTime, 0.015)
     return true
@@ -72,8 +92,11 @@ export class MicrophoneProcessing {
     this.graph?.denoiser?.port.postMessage({ type: 'configure', ...settings })
   }
 
-  resume() {
-    return this.graph ? resumeVoiceAudio(this.graph.context) : undefined
+  resume(): Promise<void> | undefined {
+    if (this.bypass) return Promise.all([
+      resumeVoiceAudio(this.bypass.context), this.bypass.local.resume(), this.model?.resume(),
+    ]).then(() => {})
+    return this.model ? this.model.resume() : this.graph ? resumeVoiceAudio(this.graph.context) : undefined
   }
 
   async prepare(stream: MediaStream, settings: MicrophoneProcessingSettings, volume: number): Promise<MediaStream> {
@@ -86,7 +109,22 @@ export class MicrophoneProcessing {
       await unlocked?.close().catch(() => {})
       throw new Error('麦克风处理已取消')
     }
-    const needsDenoiser = settings.mode === 'rnnoise'
+    if (settings.mode === 'deepfilter') return this.prepareWithBypass(stream, settings, volume, generation, unlocked)
+    if (settings.mode === 'spex' || settings.mode === 'combined') {
+      await unlocked?.close().catch(() => {})
+      const model = this.model = new MicrophoneModel(this.onStatus)
+      try {
+        const output = await model.prepare(stream, settings.mode, volume)
+        if (generation !== this.generation) throw new Error('麦克风处理已取消')
+        await setBrowserSuppression(stream, false).catch(() => {})
+        return output
+      } catch (error) {
+        await model.release()
+        if (this.model === model) this.model = null
+        throw error
+      }
+    }
+    const needsDenoiser = settings.mode === 'rnnoise' || settings.mode === 'voice'
     if (!needsDenoiser && volume === 100) {
       await unlocked?.close().catch(() => {})
       this.onStatus({ mode: settings.mode, message: '' })
@@ -98,12 +136,26 @@ export class MicrophoneProcessing {
       const graph: AudioGraph = {
         context,
         source: context.createMediaStreamSource(stream),
+        compressor: typeof context.createDynamicsCompressor === 'function'
+          ? context.createDynamicsCompressor()
+          : null,
         gain: context.createGain(),
         output: context.createMediaStreamDestination(),
       }
       this.graph = graph
       graph.gain.gain.value = volume / 100
       graph.gain.connect(graph.output)
+      // Keep speech intelligible on variable mobile microphones without
+      // aggressively changing dynamics or increasing background noise.
+      if (graph.compressor) {
+        graph.compressor.threshold.value = settings.mode === 'voice' ? -30 : -35
+        graph.compressor.knee.value = 18
+        graph.compressor.ratio.value = settings.mode === 'voice' ? 3 : 2
+        graph.compressor.attack.value = 0.008
+        graph.compressor.release.value = 0.12
+        graph.compressor.connect(graph.gain)
+      }
+      const processingTarget = graph.compressor ?? graph.gain
       await waitForGraph(graph, context.resume(), '音频处理线程启动超时', 5000)
       if (generation !== this.generation) throw new Error('麦克风处理已取消')
       if (context.state !== 'running') throw new Error('音频处理线程未运行')
@@ -130,14 +182,14 @@ export class MicrophoneProcessing {
           constraintNote = '浏览器未允许关闭基础降噪，智能降噪仍在运行'
         })
         if (generation !== this.generation) throw new Error('麦克风处理已取消')
-        graph.source.connect(graph.denoiser).connect(graph.gain)
+        graph.source.connect(graph.denoiser).connect(processingTarget)
         const fallback = () => {
           if (this.graph !== graph || !graph.denoiser) return
           graph.source.disconnect()
           graph.denoiser.port.postMessage({ type: 'destroy' })
           graph.denoiser.disconnect()
           graph.denoiser = undefined
-          graph.source.connect(graph.gain)
+          graph.source.connect(processingTarget)
           this.onStatus({ mode: 'browser', message: '智能降噪线程中断，已回退到浏览器基础降噪' })
           void setBrowserSuppression(stream, true).then(() => {
             if (this.graph === graph) this.onStatus({ mode: 'browser', message: '智能降噪线程中断，已回退到浏览器基础降噪' })
@@ -150,9 +202,9 @@ export class MicrophoneProcessing {
           if (data?.type === 'voice-activity' && this.graph === graph) this.onActivity(data.speaking === true)
         }
         graph.denoiser.onprocessorerror = fallback
-        this.onStatus({ mode: 'rnnoise', message: constraintNote })
+        this.onStatus({ mode: settings.mode, message: constraintNote })
       } else {
-        graph.source.connect(graph.gain)
+        graph.source.connect(processingTarget)
         this.onStatus({ mode: settings.mode, message: '' })
       }
       if (generation !== this.generation) throw new Error('麦克风处理已取消')
@@ -177,8 +229,97 @@ export class MicrophoneProcessing {
     }
   }
 
+  private async prepareWithBypass(stream: MediaStream, settings: MicrophoneProcessingSettings,
+    volume: number, generation: number, unlocked: AudioContext | null = null): Promise<MediaStream> {
+    let available = false
+    let localMode: MicrophoneProcessingStatus['mode'] = 'voice'
+    let modelMessage = '人声模型启动中'
+    const report = () => {
+      if (generation !== this.generation) return
+      this.onStatus(available ? { mode: 'deepfilter', message: '' } : {
+        mode: localMode,
+        message: `${modelMessage || '人声模型缓冲中'}，已使用本地音频旁路，通话保持连接`,
+      })
+    }
+    const context = unlocked ?? new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
+    const local = new MicrophoneProcessing(this.workletUrl, status => {
+      if (status.mode !== 'loading' && status.mode !== 'idle') localMode = status.mode
+      report()
+    })
+    const output = context.createMediaStreamDestination()
+    const localGain = context.createGain()
+    const modelGain = context.createGain()
+    const gain = context.createGain()
+    const bypass: ModelBypass = {
+      context, local, output, localGain, modelGain, gain,
+      // Assigned after local initialization; stored early for cancellation.
+      localSource: context.createMediaStreamSource(stream),
+    }
+    this.bypass = bypass
+    localGain.gain.value = 1
+    modelGain.gain.value = 0
+    gain.gain.value = volume / 100
+    localGain.connect(gain)
+    modelGain.connect(gain)
+    gain.connect(output)
+    try {
+      await context.resume()
+      const localStream = await local.prepare(stream, { ...settings, mode: 'voice' }, 100)
+      if (generation !== this.generation) throw new Error('麦克风处理已取消')
+      bypass.localSource.disconnect()
+      bypass.localSource = context.createMediaStreamSource(localStream)
+      bypass.localSource.connect(localGain)
+      const model = this.model = new MicrophoneModel(status => {
+        modelMessage = status.message
+        report()
+      }, next => {
+        if (generation !== this.generation || this.bypass !== bypass || available === next) return
+        available = next
+        // Complementary crossfade: stable recorder track, no uplink restart.
+        const now = context.currentTime
+        localGain.gain.cancelScheduledValues(now)
+        modelGain.gain.cancelScheduledValues(now)
+        localGain.gain.setTargetAtTime(next ? 0 : 1, now, .008)
+        modelGain.gain.setTargetAtTime(next ? 1 : 0, now, .008)
+        report()
+      })
+      try {
+        const modelStream = await model.prepare(stream, 'deepfilter', 100)
+        if (generation !== this.generation) throw new Error('麦克风处理已取消')
+        bypass.modelSource = context.createMediaStreamSource(modelStream)
+        bypass.modelSource.connect(modelGain)
+      } catch (error) {
+        if (generation !== this.generation) throw error
+        modelMessage = '人声模型暂不可用'
+        await model.release()
+        if (this.model === model) this.model = null
+        report()
+      }
+      return output.stream
+    } catch (error) {
+      if (generation === this.generation) await this.release()
+      throw error
+    }
+  }
+
   async release(keepUnlocked = false) {
     const generation = ++this.generation
+    const model = this.model
+    this.model = null
+    const bypass = this.bypass
+    this.bypass = null
+    await model?.release()
+    if (bypass) {
+      await bypass.local.release()
+      bypass.localSource.disconnect()
+      bypass.modelSource?.disconnect()
+      bypass.localGain.disconnect()
+      bypass.modelGain.disconnect()
+      bypass.gain.disconnect()
+      bypass.output.stream.getTracks().forEach(track => track.stop())
+      bypass.output.disconnect()
+      await bypass.context.close().catch(() => {})
+    }
     const graph = this.graph
     this.graph = null
     this.onActivity(false)
@@ -190,6 +331,7 @@ export class MicrophoneProcessing {
       graph.denoiser?.port.postMessage({ type: 'destroy' })
       graph.denoiser?.disconnect()
       graph.source.disconnect()
+      graph.compressor?.disconnect()
       graph.gain.disconnect()
       graph.output.disconnect()
       graph.output.stream.getTracks().forEach((track) => track.stop())

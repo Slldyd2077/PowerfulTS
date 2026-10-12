@@ -10,7 +10,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from ..core.config import Settings
 from .bot_mover import bot_nickname_matches
@@ -19,7 +19,7 @@ from .ts3_query import TS3QueryClient
 if TYPE_CHECKING:
     from .tsmusic_client import TSMusicClient
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('uvicorn.error.bot_idle_manager')
 
 DEFAULT_POLL_INTERVAL = 30
 
@@ -44,16 +44,22 @@ def channel_human_count(
     cid: int,
     bot_nicknames: set[str],
     bot_client_ids: set[int] | None = None,
+    web_user_client_ids: set[int] | None = None,
 ) -> int:
     """Count non-bot regular TS clients in a channel."""
     known_bot_client_ids = bot_client_ids or set()
+    web_user_ids = web_user_client_ids or set()
     count = 0
     for client in clients:
         if not _is_regular_client(client):
             continue
         if _int_or_none(client.get("cid")) != cid:
             continue
-        if _int_or_none(client.get("clid")) in known_bot_client_ids:
+        client_id = _int_or_none(client.get("clid"))
+        if client_id in web_user_ids:
+            count += 1
+            continue
+        if client_id in known_bot_client_ids:
             continue
         nick = _norm_nickname(client.get("client_nickname"))
         if any(bot_nickname_matches(nick, configured) for configured in bot_nicknames):
@@ -122,11 +128,13 @@ class BotIdleManager:
         tsmusic: TSMusicClient | Callable[[], TSMusicClient],
         poll_interval: int = DEFAULT_POLL_INTERVAL,
         clock: Callable[[], float] = time.monotonic,
+        web_user_bot_ids: Callable[[], Awaitable[set[str]]] | None = None,
     ) -> None:
         self._settings = settings
         self._tsmusic_provider = tsmusic if callable(tsmusic) else lambda: tsmusic
         self._poll_interval = max(5, poll_interval)
         self._clock = clock
+        self._web_user_bot_ids = web_user_bot_ids
         self._task: asyncio.Task | None = None
         self._idle_since: dict[str, float] = {}
         self._unknown_since: dict[str, float] = {}
@@ -280,6 +288,17 @@ class BotIdleManager:
         clients = await asyncio.to_thread(fetch_ts_clients, self._settings)
         bot_nicks = set(bot_nick_by_id.values())
         bot_client_ids = set(bot_client_id_by_id.values())
+        # Resolve authoritative account-owned voice bridges, not nickname hints.
+        # Failure propagates: never treat unknown web users as an empty room.
+        web_bot_ids = await self._web_user_bot_ids() if self._web_user_bot_ids else set()
+        web_client_ids = {
+            client_id for bot_id, client_id in bot_client_id_by_id.items()
+            if bot_id in web_bot_ids
+        }
+        music_nicks = {
+            nick for bot_id, nick in bot_nick_by_id.items() if bot_id not in web_bot_ids
+        }
+        music_client_ids = bot_client_ids - web_client_ids
         channels_by_client_id = bot_channel_map_by_client_id(clients, bot_client_ids)
         channels_by_nick = bot_channel_map(clients, bot_nicks)
         now = self._clock()
@@ -303,7 +322,20 @@ class BotIdleManager:
                 self._set_unknown(bot_id, nick or str(bot.get("name") or bot_id), "bot_not_visible_in_serverquery")
                 continue
 
-            humans = channel_human_count(clients, cid, bot_nicks, bot_client_ids)
+            humans = channel_human_count(clients, cid, music_nicks, music_client_ids, web_client_ids)
+            if bot_id in web_bot_ids:
+                self._idle_since.pop(bot_id, None)
+                self._unknown_since.pop(bot_id, None)
+                self._bot_status[bot_id] = {
+                    "label": nick or str(bot.get("name") or bot_id),
+                    "state": "active",
+                    "channelId": cid,
+                    "humanCount": humans,
+                    "reason": "web_voice_user",
+                }
+                if bot_id in self._auto_paused:
+                    await self._resume_auto_paused(tsmusic, bot_id)
+                continue
             if humans > 0:
                 self._idle_since.pop(bot_id, None)
                 self._unknown_since.pop(bot_id, None)
