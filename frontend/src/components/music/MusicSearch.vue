@@ -82,7 +82,10 @@ function onGlobalKey(e: KeyboardEvent) {
     focusSearch()
   }
 }
-onMounted(() => window.addEventListener('keydown', onGlobalKey))
+onMounted(() => {
+  window.addEventListener('keydown', onGlobalKey)
+  ts.fetchPlaylists()
+})
 onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
 </script>
 
@@ -192,8 +195,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
         </div>
 
         <div class="song-actions">
-          <button class="act" title="收藏到 TS 歌单" @click="ts.openFavorite(song)">
-            <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A4.5 4.5 0 0 0 17.5 4c-1.42 0-2.6.62-3.5 1.67C13.1 4.62 11.92 4 10.5 4A4.5 4.5 0 0 0 6 8.5c0 2.29 1.51 4.04 3 5.5l5 5z"/></svg>
+          <button class="act" :class="{ 'act--favorite': ts.isFavorite(song) }" :title="ts.isFavorite(song) ? '已收藏到 TS 歌单，可继续收藏到其他歌单' : '收藏到 TS 歌单'" :aria-label="ts.isFavorite(song) ? '已收藏到 TS 歌单，可继续收藏到其他歌单' : '收藏到 TS 歌单'" :aria-pressed="ts.isFavorite(song)" @click="ts.openFavorite(song)">
+            <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" :fill="ts.isFavorite(song) ? 'currentColor' : 'none'" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 14.5c1.49-1.46 3-3.21 3-5.5a4.5 4.5 0 0 0-4.5-4.5c-1.42 0-2.6.62-3.5 1.67-0.9-1.05-2.08-1.67-3.5-1.67A4.5 4.5 0 0 0 4 9c0 2.29 1.51 4.04 3 5.5l5 5z"/></svg>
           </button>
           <button class="act act--play" title="播放" @click="handlePlay(song, false)">
             <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>
@@ -524,6 +527,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
   transition: opacity 0.15s;
 }
 .song-item:hover .song-actions,
+.song-item:has(.act--favorite) .song-actions,
 .song-item:has(:focus-visible) .song-actions {
   opacity: 1;
 }
@@ -536,6 +540,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
 .act {
   width: 32px;
   height: 32px;
+  padding: 0;
   display: grid;
   place-items: center;
   border-radius: 50%;
@@ -549,6 +554,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
   width: 15px;
   height: 15px;
 }
+.act--favorite { color: var(--color-primary); border-color: var(--color-primary); }
 .act:hover {
   color: var(--color-primary);
   border-color: var(--color-primary);

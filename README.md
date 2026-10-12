@@ -36,7 +36,7 @@ https://github.com/user-attachments/assets/3761cb43-a68d-4768-b6d0-dd5860de7902
 
 其中**网页通话**让成员不装 TeamSpeak 客户端也能直接在浏览器里收听频道并发言。
 
-> 🍴 **TSMusicBot 专用分支**：本项目的音乐引擎与网页通话中继依赖 [Slldyd2077/teamspeak-music-bot](https://github.com/Slldyd2077/teamspeak-music-bot) 的专用定制分支 [`merge/upstream-v1.12`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/merge/upstream-v1.12)。**部署时须使用 [含逐曲响度均衡的生产兼容固定提交 `5b19d35`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/5b19d35213da516769a9c5efa6aed1972af54af8) 构建**，详见[安装与适配说明](docs/release-guide.md#上游引擎)。PowerfulTS 依赖该 fork 的 per-bot 多实例架构、双向 Opus 语音中继与语音闪避（含网页通话触发）；原版上游不能直接替换。
+> 🍴 **TSMusicBot 专用分支**：本项目的音乐引擎与网页通话中继依赖 [Slldyd2077/teamspeak-music-bot](https://github.com/Slldyd2077/teamspeak-music-bot) 的专用定制分支 [`merge/upstream-v1.12`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/merge/upstream-v1.12)。**部署时须使用 [含逐曲响度均衡的生产兼容固定提交 `48577fe`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/48577fe57984ca3522da092e614a30f2501b6455) 构建**，详见[安装与适配说明](docs/release-guide.md#上游引擎)。PowerfulTS 依赖该 fork 的 per-bot 多实例架构、双向 Opus 语音中继与语音闪避（含网页通话触发）；原版上游不能直接替换。
 
 > 💡 **跨平台 Release**：从 [Releases](https://github.com/Slldyd2077/PowerfulTS/releases) 下载 x64 或 ARM64 安装包，解压、配置后启动。预构建包无需 Git / Python / Node.js，需要 Docker Engine 与 Compose v2；支持 Windows、macOS、Linux 和支持 Docker 的 NAS。详见 [安装与升级指南](docs/release-guide.md)。
 
@@ -242,7 +242,7 @@ docker compose -f docker-compose.nas.yml up -d
 
 - 已安装 [Docker](https://docs.docker.com/get-docker/) 与 [Docker Compose](https://docs.docker.com/compose/install/)（Docker Desktop 自带）
 - 上游服务已就绪（见 [🔌 接入上游服务](#-接入上游服务)）：
-  - **TSMusicBot**（音乐 / 点播引擎，默认 :3000；须使用 [含逐曲响度均衡的生产兼容固定提交 `5b19d35`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/5b19d35213da516769a9c5efa6aed1972af54af8) 构建，详见[安装与适配说明](docs/release-guide.md#上游引擎)）
+  - **TSMusicBot**（音乐 / 点播引擎，默认 :3000；须使用 [含逐曲响度均衡的生产兼容固定提交 `48577fe`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/48577fe57984ca3522da092e614a30f2501b6455) 构建，详见[安装与适配说明](docs/release-guide.md#上游引擎)）
   - **TS3 或 TS6 服务端**（TS3 raw Query 通常 TCP :10011；TS6 开启 SSH Query，通常 TCP :10022；机器人语音通常 UDP :9987）
 
 #### 2. 配置环境变量
@@ -413,7 +413,7 @@ PowerfulTS 本身不含 TeamSpeak 服务端与音乐引擎，需接入两个上�
 ### TSMusicBot（音乐 / 点播引擎）
 
 - 项目：[Slldyd2077/teamspeak-music-bot 专用分支 `merge/upstream-v1.12`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/merge/upstream-v1.12) —— PowerfulTS 定制的 TS3/TS6 多平台音乐机器人（网易云 / QQ / B 站）
-- 使用 [含逐曲响度均衡的生产兼容固定提交 `5b19d35`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/5b19d35213da516769a9c5efa6aed1972af54af8) 构建并部署，将 `TSMUSIC_URL` 指向其地址，并填入账号密码与 bot id。原版上游不能直接替换，接口要求见[安装与适配说明](docs/release-guide.md#上游引擎)
+- 使用 [含逐曲响度均衡的生产兼容固定提交 `48577fe`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/48577fe57984ca3522da092e614a30f2501b6455) 构建并部署，将 `TSMUSIC_URL` 指向其地址，并填入账号密码与 bot id。原版上游不能直接替换，接口要求见[安装与适配说明](docs/release-guide.md#上游引擎)
 - 该兼容提交已包含逐曲响度均衡，无需重复应用响度补丁。连接层与 Issue #15 修复的版本差异见[升级指南](docs/release-guide.md#上游引擎)；只更新 PowerfulTS 不会更新独立部署的 TSMusicBot
 - 它同时提供音乐搜索、播放控制与 **B 站点播**（PowerfulTS 的 `/api/bili/*` 即委托其 `platform=bilibili` 能力）
 

@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { ElMessage } from 'element-plus'
 import {
@@ -13,7 +13,7 @@ import {
   removeSongFromTsPlaylist,
   updateTsPlaylistSong,
 } from '@/api/ts_playlist'
-import type { TsPlaylist, TsPlaylistSong } from '@/api/ts_playlist'
+import type { TsFavoriteMembership, TsPlaylist, TsPlaylistSong } from '@/api/ts_playlist'
 import { useMusicStore } from './music'
 import type { Song } from '@/api/music'
 
@@ -23,15 +23,26 @@ import type { Song } from '@/api/music'
  */
 export const useTsPlaylistStore = defineStore('ts-playlist', () => {
   const playlists = ref<TsPlaylist[]>([])
+  const favoriteMemberships = ref<TsFavoriteMembership[]>([])
+  const favoriteKeys = computed(() => new Set(
+    favoriteMemberships.value.map((s) => JSON.stringify([s.platform, s.songId])),
+  ))
+  function isFavorite(song: Song): boolean {
+    return favoriteKeys.value.has(JSON.stringify([song.platform, String(song.id)]))
+  }
   /** playlistId -> 歌曲列表（展开时按需加载） */
   const currentSongs = ref<Record<number, TsPlaylistSong[]>>({})
   const expandedId = ref<number | null>(null)
   const loadingSongs = ref<Record<number, boolean>>({})
+  let playlistRequest = 0
 
   async function fetchPlaylists() {
+    const request = ++playlistRequest
     try {
       const res = await getTsPlaylists()
+      if (request !== playlistRequest) return
       playlists.value = res.playlists || []
+      favoriteMemberships.value = res.favorites || []
     } catch {
       /* 静默 */
     }
@@ -51,7 +62,9 @@ export const useTsPlaylistStore = defineStore('ts-playlist', () => {
 
   async function deletePlaylist(id: number) {
     await deleteTsPlaylist(id)
+    playlistRequest++ // 使删除前发出的列表请求失效，避免旧响应恢复收藏标记
     playlists.value = playlists.value.filter((x) => x.id !== id)
+    favoriteMemberships.value = favoriteMemberships.value.filter((s) => s.playlistId !== id)
     delete currentSongs.value[id]
     if (expandedId.value === id) expandedId.value = null
   }
@@ -86,6 +99,9 @@ export const useTsPlaylistStore = defineStore('ts-playlist', () => {
   /** 收藏一首歌到指定歌单。返回 {success,message}（重复收藏后端 409 → axios 抛错，调用方 catch）。 */
   async function addSong(playlistId: number, song: Song) {
     const res = await addSongToTsPlaylist(playlistId, song)
+    if (song.platform) {
+      favoriteMemberships.value.push({ playlistId, platform: song.platform, songId: String(song.id) })
+    }
     await fetchPlaylists() // 刷新歌单 count
     if (expandedId.value === playlistId) await fetchSongs(playlistId)
     return res
@@ -115,6 +131,9 @@ export const useTsPlaylistStore = defineStore('ts-playlist', () => {
 
   async function removeSong(playlistId: number, platform: string, songId: string) {
     await removeSongFromTsPlaylist(playlistId, platform, songId)
+    favoriteMemberships.value = favoriteMemberships.value.filter(
+      (s) => !(s.playlistId === playlistId && s.platform === platform && s.songId === songId),
+    )
     await fetchPlaylists()
     const arr = currentSongs.value[playlistId]
     if (arr) {
@@ -200,6 +219,7 @@ export const useTsPlaylistStore = defineStore('ts-playlist', () => {
 
   return {
     playlists,
+    isFavorite,
     currentSongs,
     expandedId,
     loadingSongs,

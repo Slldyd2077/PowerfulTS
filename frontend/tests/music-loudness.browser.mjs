@@ -43,7 +43,7 @@ try {
   page.on('console', (message) => { if (message.type() === 'warning' || message.type() === 'error') console.error(message.text()) })
   page.on('pageerror', (error) => { errors.push(error.message); console.error(error.message) })
   await page.goto(`${origin}/music`)
-  await page.getByText('逐曲均衡已应用 · 整首固定 -9.0 dB', { exact: true }).waitFor()
+  await page.getByText('逐曲均衡 · 5 秒平滑过渡后固定 -9.0 dB', { exact: true }).waitFor()
   await page.getByRole('button', { name: /机器人行为/ }).click()
   const toggle = page.getByRole('switch', { name: '逐曲响度均衡', exact: true })
   await toggle.waitFor()
@@ -56,6 +56,11 @@ try {
   await page.reload()
   await page.getByRole('button', { name: /机器人行为/ }).click()
   assert.equal(await toggle.getAttribute('aria-checked'), 'true')
+  status = 'analyzing'
+  await page.reload()
+  await page.getByText('后台分析歌曲响度中，不影响播放；完成后用 5 秒平滑调整音量。', { exact: true }).waitFor()
+  await page.getByText('正在播放', { exact: true }).waitFor()
+  assert.equal(await page.getByText('正在分析整首歌曲，完成后开始播放。', { exact: true }).count(), 0)
   supported = false
   status = 'failed'
   await page.reload()

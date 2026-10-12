@@ -24,7 +24,13 @@ export interface TsPlaylistSong extends Song {
 
 // ── 歌单 CRUD ──
 
-export async function getTsPlaylists(): Promise<{ playlists: TsPlaylist[] }> {
+export interface TsFavoriteMembership {
+  playlistId: number
+  platform: string
+  songId: string
+}
+
+export async function getTsPlaylists(): Promise<{ playlists: TsPlaylist[]; favorites: TsFavoriteMembership[] }> {
   const { data } = await apiClient.get('/ts-playlists')
   return data
 }

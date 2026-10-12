@@ -1,0 +1,134 @@
+diff --git a/src/audio/track-loudness.test.ts b/src/audio/track-loudness.test.ts
+index f01b5ca..2f5a558 100644
+--- a/src/audio/track-loudness.test.ts
++++ b/src/audio/track-loudness.test.ts
+@@ -25,9 +25,14 @@ describe("track loudness normalization", () => {
+     expect(calculateTrackGainDb({ integratedLufs: -60, truePeakDb: -50 }, -18)).toBe(12);
+     expect(calculateTrackGainDb({ integratedLufs: -Infinity, truePeakDb: -Infinity }, -18)).toBe(0);
+   });
+-  it("parses measured input loudness, not loudnorm's dynamically adjusted output", () => {
+-    expect(parseLoudnessMeasurement('log\n{"input_i":"-25.2","input_tp":"-6.3","output_i":"-18"}')).toEqual({ integratedLufs: -25.2, truePeakDb: -6.3 });
+-    expect(() => parseLoudnessMeasurement('{"input_i":"NaN","input_tp":"0"}')).toThrow();
++  it("parses only the final full-programme summary, including true rather than sample peaks", () => {
++    const summary = 'Summary:\n Integrated loudness:\n I: -25.2 LUFS\n Sample peak:\n Peak: -9.1 dBFS\n True peak:\n Peak: -6.3 dBFS';
++    expect(parseLoudnessMeasurement(`Summary:\n Integrated loudness:\n I: -70.0 LUFS\n True peak:\n Peak: -inf dBFS\n${summary}`)).toEqual({ integratedLufs: -25.2, truePeakDb: -6.3 });
++    expect(() => parseLoudnessMeasurement(summary.replace('-25.2', 'NaN'))).toThrow();
++    expect(() => parseLoudnessMeasurement(summary.replace('True peak:', 'Other peak:'))).toThrow();
++    expect(() => parseLoudnessMeasurement(summary.replace('-25.2', '-70.0'))).toThrow();
++    expect(() => parseLoudnessMeasurement(`${summary}\nSummary:\n incomplete`)).toThrow();
++    expect(parseLoudnessMeasurement('Summary:\n Integrated loudness:\n I: -70.0 LUFS\n True peak:\n Peak: -inf dBFS')).toEqual({ integratedLufs: -Infinity, truePeakDb: -Infinity });
+     expect(() => parseLoudnessMeasurement('missing measurement')).toThrow();
+   });
+   it("analyzes the full stereo programme without seeking and discards the analysis audio", () => {
+@@ -35,7 +40,8 @@ describe("track loudness normalization", () => {
+     expect(args).not.toContain('-ss');
+     expect(args).not.toContain('-reconnect_at_eof');
+     expect(args.slice(-3)).toEqual(['-f', 'null', '-']);
+-    expect(args[args.indexOf('-af') + 1]).toContain('loudnorm');
++    expect(args[args.indexOf('-af') + 1]).toContain('ebur128=peak=true');
++    expect(args.join(' ')).not.toContain('loudnorm');
+     expect(args[args.indexOf('-af') + 1]).toContain('channel_layouts=stereo');
+   });
+   it("uses only a constant volume filter during playback, including seeking", () => {
+@@ -177,6 +183,44 @@ it('finishes full-file HTTP loudness analysis at EOF without replaying the sourc
+     const analyzer = new TrackLoudnessAnalyzer();
+     const measured = await analyzer.measure(getFfmpegCommand(), url, buildFfmpegArgs(url, 0), AbortSignal.timeout(8000));
+     expect(Number.isFinite(measured.integratedLufs)).toBe(true);
++    expect(await analyzer.measure(getFfmpegCommand(), url, buildFfmpegArgs(url, 0), AbortSignal.timeout(8000))).toEqual(measured);
+     expect(requests).toBe(1);
+   } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+ }, 10_000);
++
++it('measures intersample peaks and leaves real silence at zero gain', async () => {
++  const dir = mkdtempSync(join(tmpdir(), 'tsmusic-peak-test-'));
++  const command = getFfmpegCommand();
++  const analyzer = new TrackLoudnessAnalyzer();
++  try {
++    for (const silent of [false, true]) {
++      const wave = join(dir, `${silent}.wav`);
++      // At 12 kHz the samples miss the waveform peaks by about 3 dB.
++      const source = silent ? 'anullsrc=r=48000:cl=stereo' : 'aevalsrc=0.5*sin(2*PI*12000*t+PI/4)|0.5*sin(2*PI*12000*t+PI/4):s=48000';
++      expect(spawnSync(command, ['-v', 'error', '-f', 'lavfi', '-i', source, '-t', '2', '-y', wave], { stdio: 'ignore' }).status).toBe(0);
++      const measured = await analyzer.measure(command, wave, buildFfmpegArgs(wave, 0), AbortSignal.timeout(8000));
++      if (silent) {
++        expect(measured).toEqual({ integratedLufs: -Infinity, truePeakDb: -Infinity });
++        expect(calculateTrackGainDb(measured, -18)).toBe(0);
++      } else {
++        expect(measured.truePeakDb).toBeGreaterThan(-7);
++        expect(measured.truePeakDb).toBeLessThan(-5);
++      }
++    }
++  } finally { rmSync(dir, { recursive: true, force: true }); }
++}, 10_000);
++
++it.each([44100, 48000, 96000])('matches reference measurements for a steady mono source at %i Hz', async (rate) => {
++  const dir = mkdtempSync(join(tmpdir(), 'tsmusic-reference-test-'));
++  const command = getFfmpegCommand();
++  const wave = join(dir, 'steady.wav');
++  try {
++    expect(spawnSync(command, ['-v', 'error', '-f', 'lavfi', '-i', `sine=frequency=1000:sample_rate=${rate}:duration=4`, '-y', wave], { stdio: 'ignore' }).status).toBe(0);
++    const measured = await new TrackLoudnessAnalyzer().measure(command, wave, buildFfmpegArgs(wave, 0), AbortSignal.timeout(8000));
++    const reference = spawnSync(command, ['-nostats', '-i', wave, '-af', 'aformat=sample_rates=48000:channel_layouts=stereo,loudnorm=I=-18:TP=-1:LRA=11:print_format=json', '-f', 'null', '-'], { encoding: 'utf8' });
++    expect(reference.status).toBe(0);
++    const legacy = JSON.parse(reference.stderr.match(/\{\s*"input_i"[^}]+\}/)![0]);
++    expect(Math.abs(measured.integratedLufs - Number(legacy.input_i))).toBeLessThan(0.15);
++    expect(Math.abs(measured.truePeakDb - Number(legacy.input_tp))).toBeLessThan(0.15);
++  } finally { rmSync(dir, { recursive: true, force: true }); }
++}, 10_000);
+diff --git a/src/audio/track-loudness.ts b/src/audio/track-loudness.ts
+index 0184c40..db86f20 100644
+--- a/src/audio/track-loudness.ts
++++ b/src/audio/track-loudness.ts
+@@ -22,20 +22,22 @@ export function calculateTrackGainDb(measured: LoudnessMeasurement, targetLufs:
+ }
+ 
+ export function parseLoudnessMeasurement(stderr: string): LoudnessMeasurement {
+-  const json = stderr.match(/\{\s*"input_i"[^}]+\}/g)?.at(-1);
+-  if (!json) throw new Error("Track loudness measurement missing");
+-  const data = JSON.parse(json) as Record<string, unknown>;
+-  if (![data.input_i, data.input_tp].every((value) => typeof value === "string" || typeof value === "number")) {
+-    throw new Error("Invalid track loudness measurement");
++  // Only the final summary describes the complete programme, not a frame log
++  // or the empty summary emitted when the filter is initialized.
++  const summary = stderr.slice(stderr.lastIndexOf("Summary:"));
++  const integrated = summary.match(/Integrated loudness:\s+I:\s+(-?\d+(?:\.\d+)?|-inf)\s+LUFS/);
++  const peak = summary.match(/True peak:\s+Peak:\s+(-?\d+(?:\.\d+)?|-inf)\s+dBFS/);
++  if (!integrated || !peak) throw new Error("Track loudness measurement missing");
++  // ebur128 reports the absolute gate (-70 LUFS) for an all-silent programme.
++  if (peak[1] === "-inf" && (integrated[1] === "-inf" || Number(integrated[1]) === -70)) {
++    return { integratedLufs: -Infinity, truePeakDb: -Infinity };
+   }
+   const measured = {
+-    integratedLufs: Number(data.input_i),
+-    truePeakDb: Number(data.input_tp),
++    integratedLufs: Number(integrated[1]),
++    truePeakDb: Number(peak[1]),
+   };
+-  // FFmpeg prints silent programmes as "-inf", which Number does not parse.
+-  if (data.input_i === "-inf" && data.input_tp === "-inf") {
+-    return { integratedLufs: -Infinity, truePeakDb: -Infinity };
+-  }
++  // Too-short or below-gate non-silent audio has no valid integrated reading.
++  if (measured.integratedLufs <= -70) throw new Error("Invalid track loudness measurement");
+   calculateTrackGainDb(measured, -18);
+   return measured;
+ }
+@@ -45,13 +47,15 @@ export function buildLoudnessAnalysisArgs(playbackArgs: string[]): string[] {
+   if (outputStart < 0) throw new Error("Playback output format missing");
+   const input = playbackArgs.slice(0, outputStart);
+   // Analysis must finish at the real EOF. Playback's CDN recovery policy can
+-  // otherwise keep reconnecting after a complete file and suppress the JSON summary.
++  // otherwise keep reconnecting after a complete file and suppress the summary.
+   const reconnectAtEof = input.indexOf("-reconnect_at_eof");
+   if (reconnectAtEof >= 0) input.splice(reconnectAtEof, 2);
+   return [
+-    "-nostdin", ...input,
++    "-nostdin", "-hide_banner", "-nostats", "-loglevel", "info", ...input,
+     "-vn", "-sn", "-dn", "-map", "0:a:0",
+-    "-af", "aformat=sample_rates=48000:channel_layouts=stereo,loudnorm=I=-18:TP=-1:LRA=11:print_format=json",
++    // Measure only: loudnorm also normalizes discarded output at 192 kHz.
++    // ebur128 retains BS.1770 gating and oversampled true-peak measurement.
++    "-af", "aformat=sample_rates=48000:channel_layouts=stereo,ebur128=peak=true:framelog=verbose",
+     "-f", "null", "-",
+   ];
+ }

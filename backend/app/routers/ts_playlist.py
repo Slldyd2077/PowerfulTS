@@ -80,7 +80,11 @@ class SongUpdate(BaseModel):
 
 @router.get("")
 async def list_playlists(account: AccountDep, db: DbDep):
-    return {"playlists": await TsPlaylistService(db).list_playlists(account.id)}
+    service = TsPlaylistService(db)
+    return {
+        "playlists": await service.list_playlists(account.id),
+        "favorites": await service.list_favorites(account.id),
+    }
 
 
 @router.post("", status_code=201)
