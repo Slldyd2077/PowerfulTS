@@ -18,6 +18,12 @@ TEMPLATES = (
     "compose.yml", "powerfults.ps1", "powerfults.sh", "start.cmd", "stop.cmd",
     "start.sh", "stop.sh", "README.md",
 )
+MODEL_SERVICE_FILES = (
+    "scripts/audio-lab/requirements.txt", "scripts/audio-lab/install-stream-runtime.ps1",
+    "scripts/audio-lab/stream_server.py", "scripts/audio-lab/stream_runtime.py",
+    "scripts/audio-lab/server.py", "scripts/audio-lab/experiment.py",
+    "scripts/audio-lab/paths.py", "scripts/audio-lab/index.html",
+)
 SOURCE_FILES = (
     "backend/Dockerfile", "backend/requirements.txt", "backend/requirements.lock.txt", "frontend/Dockerfile",
     "frontend/package.json", "frontend/pnpm-lock.yaml", "frontend/nginx.conf",
@@ -108,6 +114,9 @@ def payload(root: Path, version: str, images: Path | None, arch: str) -> dict[st
     for key, value in defaults.items():
         config = re.sub(rf"^{key}=.*$", f"{key}={value}", config, flags=re.MULTILINE)
     files["backend.env.example"] = config.replace("\r\n", "\n").encode()
+    # Optional host-side speech services are needed in prebuilt installers too.
+    # Enumerate runtime inputs so recordings, weights and local scripts stay out.
+    files.update({name: checked_file(root / name) for name in MODEL_SERVICE_FILES})
     if images:
         files["images.tar"] = checked_file(images)
         validate_images(images, version, arch)

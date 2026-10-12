@@ -136,6 +136,7 @@ function createHarness() {
   const warnings: string[] = []
   const errors: string[] = []
   let preparedReleases = 0
+  let prepareCalls = 0
   let sessionStarts = 0
   let captureRequests = 0
   let recoveryAllowed = true
@@ -149,6 +150,7 @@ function createHarness() {
       return stream as unknown as MediaStream
     },
     prepareStream: async (raw) => {
+      prepareCalls++
       if (!pendingPrepare) return raw
       return new Promise((resolve) => { pendingPrepare = resolve })
     },
@@ -193,6 +195,7 @@ function createHarness() {
     warnings,
     errors,
     get preparedReleases() { return preparedReleases },
+    get prepareCalls() { return prepareCalls },
     get captureRequests() { return captureRequests },
     get sessionStarts() { return sessionStarts },
     setRecoveryAllowed(value: boolean) { recoveryAllowed = value },
@@ -262,6 +265,10 @@ test('recovers a transient socket close without requesting microphone permission
   assert.equal(harness.uplink.state, 'live')
   assert.equal(harness.captureRequests, 1)
   assert.equal(harness.sessionStarts, 2)
+  assert.equal(harness.prepareCalls, 1, 'transport recovery preserves the processing graph')
+  assert.equal(harness.preparedReleases, 0)
+  await harness.uplink.stop()
+  assert.equal(harness.preparedReleases, 1)
 })
 
 test('defers reconnect attempts while hidden or offline and resumes on foreground', async () => {
@@ -435,6 +442,23 @@ test('releases prepared capture when stopped during async stream preparation', a
   assert.equal(harness.stream.track.stopCalls, 1)
   assert.equal(harness.preparedReleases, 1)
   assert.deepEqual(harness.stoppedSessions, [])
+})
+
+test('a canceled preparation is not reused by a later call', async () => {
+  const harness = createHarness()
+  harness.holdPrepare()
+  const starting = harness.uplink.start()
+  await waitFor(() => harness.prepareCalls === 1)
+  await harness.uplink.stop()
+  harness.releasePrepare()
+  await starting
+  harness.stream.track.readyState = 'live'
+  const restarting = harness.uplink.start()
+  await waitFor(() => harness.sockets.length === 1)
+  harness.sockets[0]!.open()
+  await restarting
+  assert.equal(harness.prepareCalls, 2)
+  await harness.uplink.stop()
 })
 
 test('a canceled neural initialization does not surface a microphone failure', async () => {

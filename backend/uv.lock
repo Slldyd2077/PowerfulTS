@@ -594,7 +594,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.0" },
     { name = "uvicorn", specifier = ">=0.30.0" },
-    { name = "websockets", specifier = ">=13.0" },
+    { name = "websockets", specifier = ">=15.0" },
 ]
 
 [[package]]

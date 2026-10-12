@@ -8,6 +8,8 @@ import {
 import { DenoiseFrames } from '../src/services/denoise-frames.js'
 import { MicrophoneProcessing, type MicrophoneProcessingStatus } from '../src/services/microphone-processing.js'
 import { resumeVoiceAudio } from '../src/services/audio-context-state.js'
+import { MicrophoneModel } from '../src/services/microphone-model.js'
+import { MicrophoneUplink, type MicrophoneRecorder, type MicrophoneSocket } from '../src/services/microphone-uplink.js'
 
 test('a blocked mobile resume times out with an actionable message', async () => {
   const context = { state: 'suspended', resume: () => new Promise<void>(() => {}) } as unknown as AudioContext
@@ -22,6 +24,7 @@ test('invalid saved preferences restore safe defaults and clamp the voice thresh
   assert.equal(normalizeMicrophoneProcessing({ voiceThreshold: -1 }).voiceThreshold, 0.1)
   assert.equal(normalizeMicrophoneProcessing({ voiceThreshold: NaN }).voiceThreshold, 0.6)
   assert.equal(normalizeMicrophoneProcessing({ mode: 'off', keyboardSuppression: false }).mode, 'off')
+  assert.equal(normalizeMicrophoneProcessing({ mode: 'voice' }).mode, 'voice')
 })
 
 test('VAD gates neural non-speech even when optional keyboard suppression is disabled', () => {
@@ -96,6 +99,20 @@ test('keyboard suppression closes for noise, retains speech tails and opens smoo
   assert.ok(output[479]! > 0.49)
 })
 
+test('voice enhancement gates non-speech even when optional keyboard suppression is off', () => {
+  let probability = 0
+  const dsp = new DenoiseFrames(() => probability, false, 0.6, 'voice')
+  const input = new Float32Array(480).fill(0.5)
+  const output = new Float32Array(480)
+  dsp.process(input, output)
+  dsp.process(input, output)
+  assert.ok(output[479]! < 0.001)
+  probability = 1
+  dsp.process(input, output)
+  dsp.process(input, output)
+  assert.ok(output[479]! > 0.4)
+})
+
 test('output clips oversized samples and treats absent input as silence', () => {
   const dsp = new DenoiseFrames((frame) => { frame.fill(65536); return 1 }, false, 0.6)
   dsp.process(undefined, new Float32Array(480))
@@ -107,10 +124,11 @@ test('output clips oversized samples and treats absent input as silence', () => 
 function audioHarness() {
   class Track {
     stopped = false
+    readyState: MediaStreamTrackState = 'live'
     constraints: MediaTrackConstraints = { echoCancellation: true, autoGainControl: true }
     getConstraints() { return this.constraints }
     async applyConstraints(value: MediaTrackConstraints) { this.constraints = value }
-    stop() { this.stopped = true }
+    stop() { this.stopped = true; this.readyState = 'ended' }
   }
   class Stream {
     track = new Track()
@@ -206,13 +224,83 @@ test('off and browser mode at unity gain use the original capture stream', async
   } finally { await h.restore() }
 })
 
+for (const mode of ['off', 'browser'] as const) {
+  test(`${mode} mode applies zero volume when restarting a unity-gain microphone`, async () => {
+    const h = audioHarness()
+    let volume = 100
+    let captureRequests = 0
+    const recorded: MediaStream[] = []
+    const uplink = new MicrophoneUplink({
+      acquireStream: async () => { captureRequests++; return h.stream },
+      prepareStream: stream => h.processor.prepare(stream, { ...DEFAULT_MICROPHONE_PROCESSING, mode }, volume),
+      releasePreparedStream: () => h.processor.release(),
+      chooseMimeType: () => 'audio/webm;codecs=opus',
+      startSession: async () => ({ sessionId: 'test', uploadPath: '/test' }),
+      stopSession: async () => {},
+      createSocket: () => {
+        const socket = {
+          readyState: 0, onopen: null as MicrophoneSocket['onopen'],
+          onclose: null as MicrophoneSocket['onclose'], onerror: null as MicrophoneSocket['onerror'],
+          send() {}, close() { socket.readyState = 3 },
+        }
+        queueMicrotask(() => { socket.readyState = 1; socket.onopen?.() })
+        return socket
+      },
+      createRecorder: stream => {
+        recorded.push(stream)
+        const recorder = {
+          state: 'inactive' as RecordingState, ondataavailable: null as MicrophoneRecorder['ondataavailable'],
+          onerror: null as MicrophoneRecorder['onerror'],
+          start() { recorder.state = 'recording' }, stop() { recorder.state = 'inactive' },
+        }
+        return recorder
+      },
+      isRecoveryAllowed: () => true,
+      setTimer: () => 1, clearTimer: () => {},
+      onStateChange: () => {}, onWarning: () => {}, onError: () => {},
+    })
+    try {
+      await uplink.start()
+      assert.equal(recorded[0], h.stream)
+      volume = 0
+      assert.equal(h.processor.setVolume(volume), false)
+      await uplink.restartTransport()
+      assert.notEqual(recorded[1], h.stream, 'the replacement recorder must use an attenuated stream')
+      assert.equal(recorded[1], h.contexts[0]!.output.stream)
+      assert.equal(h.contexts[0]!.gain.gain.value, 0)
+      assert.equal(captureRequests, 1, 'volume changes reuse the authorized capture track')
+      assert.equal(h.track.stopped, false)
+      assert.equal(h.processor.setVolume(50), true)
+      assert.equal(h.contexts[0]!.gain.gain.value, 0.5)
+    } finally { await uplink.stop(); await h.restore() }
+  })
+}
+
+test('DeepFilter local bypass applies live threshold changes without restarting its output', async () => {
+  const h = audioHarness()
+  const prepareModel = MicrophoneModel.prototype.prepare
+  MicrophoneModel.prototype.prepare = async () => { throw new Error('model unavailable') }
+  try {
+    const output = await h.processor.prepare(h.stream, { ...DEFAULT_MICROPHONE_PROCESSING, mode: 'deepfilter' }, 100)
+    const settings = { ...DEFAULT_MICROPHONE_PROCESSING, mode: 'deepfilter' as const, voiceThreshold: 0.1 }
+    h.processor.configure(settings)
+    const message = h.nodes[0]!.port.messages.at(-1) as { type: string; mode: string; voiceThreshold: number }
+    assert.equal(message?.type, 'configure')
+    assert.equal(message.mode, 'voice', 'the local bypass keeps its mandatory speech gate')
+    assert.equal(message.voiceThreshold, 0.1)
+    assert.equal((output.getAudioTracks()[0] as unknown as { stopped: boolean }).stopped, false)
+    assert.equal(h.contexts.length, 2)
+    assert.equal(h.statuses.at(-1)?.mode, 'voice')
+  } finally { MicrophoneModel.prototype.prepare = prepareModel; await h.restore() }
+})
+
 test('neural stream is wired to the recorder after initialization and preserves AEC/AGC constraints', async () => {
   const h = audioHarness()
   try {
     const output = await h.processor.prepare(h.stream, { ...DEFAULT_MICROPHONE_PROCESSING }, 80)
     const graph = h.contexts[0]!
     assert.equal(output, graph.output.stream)
-    assert.equal(h.statuses.at(-1)?.mode, 'rnnoise')
+    assert.equal(h.statuses.at(-1)?.mode, 'voice')
     assert.deepEqual(h.track.constraints, { echoCancellation: true, autoGainControl: true, noiseSuppression: false })
     assert.equal(graph.source.connections[0], h.nodes[0])
     assert.equal(h.nodes[0]!.connections[0], graph.gain)
@@ -287,7 +375,7 @@ test('unsupported constraints are visible and do not interrupt neural audio', as
   try {
     h.failConstraints()
     assert.notEqual(await h.processor.prepare(h.stream, { ...DEFAULT_MICROPHONE_PROCESSING }, 100), h.stream)
-    assert.equal(h.statuses.at(-1)?.mode, 'rnnoise')
+    assert.equal(h.statuses.at(-1)?.mode, 'voice')
     assert.ok(h.statuses.at(-1)?.message.includes('未允许'))
     h.nodes[0]!.port.onmessage?.({ data: { type: 'error' } })
     await new Promise<void>((resolve) => setImmediate(resolve))

@@ -17,6 +17,13 @@ spec = importlib.util.spec_from_file_location("build_release", SCRIPT)
 release = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(release)
 
+MODEL_SERVICE_FILES = (
+    "scripts/audio-lab/requirements.txt", "scripts/audio-lab/install-stream-runtime.ps1",
+    "scripts/audio-lab/stream_server.py", "scripts/audio-lab/stream_runtime.py",
+    "scripts/audio-lab/server.py", "scripts/audio-lab/experiment.py",
+    "scripts/audio-lab/paths.py", "scripts/audio-lab/index.html",
+)
+
 
 class ReleaseTests(unittest.TestCase):
     def setUp(self):
@@ -58,7 +65,12 @@ class ReleaseTests(unittest.TestCase):
             "frontend/node_modules/private.js": "dependency\n",
             "frontend/public/private.db": "database\n",
             ".release/old.zip": "old release\n",
+            "scripts/audio-lab/private.py": "private maintenance script\n",
+            "scripts/audio-lab/models/private.pt": "private weights\n",
+            "scripts/audio-lab/samples/reference.wav": "private voice\n",
+            "data/audio-lab/reference.wav": "private voice\n",
         })
+        paths.update({name: f"model service fixture: {name}\n" for name in MODEL_SERVICE_FILES})
         for name, value in paths.items():
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -98,6 +110,26 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(zipped.read("powerfults-1.2.3/images.tar"), images.read_bytes())
             self.assertEqual(zipped.read("powerfults-1.2.3/.release-arch"), b"arm64\n")
             self.assertFalse(any("/backend/app/" in name for name in zipped.namelist()))
+
+    def test_all_release_formats_include_only_distributable_model_service_files(self):
+        for flavor, images in (("source", None), ("prebuilt", self.create_images())):
+            with self.subTest(flavor=flavor):
+                artifacts = release.build_release(self.root, self.output / flavor, images=images, arch="arm64")
+                for archive in artifacts[:2]:
+                    with self.subTest(archive=archive.name):
+                        if archive.suffix == ".zip":
+                            with zipfile.ZipFile(archive) as zipped:
+                                contents = {name.split("/", 1)[1]: zipped.read(name) for name in zipped.namelist()}
+                        else:
+                            with tarfile.open(archive) as tarred:
+                                contents = {item.name.split("/", 1)[1]: tarred.extractfile(item).read()
+                                            for item in tarred.getmembers() if item.isfile()}
+                        for name in MODEL_SERVICE_FILES:
+                            self.assertIn(name, set(contents))
+                            self.assertEqual(contents[name], (self.root / name).read_bytes())
+                        model_paths = {name for name in contents if name.startswith("scripts/audio-lab/")}
+                        self.assertEqual(model_paths, set(MODEL_SERVICE_FILES))
+                        self.assertFalse(any(name.startswith("data/") for name in contents))
 
     def create_images(self, arch="arm64", version="1.2.3"):
         images = Path(self.tmp.name) / "images.tar"

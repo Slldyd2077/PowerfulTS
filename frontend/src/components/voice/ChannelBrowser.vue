@@ -13,7 +13,7 @@ const {
 
 const switching = ref<number | null>(null)
 
-const totalListeners = computed(() => currentChannel.value?.clients.length ?? 0)
+const totalListeners = computed(() => currentChannel.value?.clients.filter((c) => !c.isBot).length ?? 0)
 
 function errorText(error: unknown, fallback: string): string {
   if (axios.isAxiosError(error)) {
@@ -115,14 +115,15 @@ defineExpose({ refresh })
           <span class="channel-action">
             <template v-if="switching === channel.cid">切换中…</template>
             <template v-else-if="channel.cid === botCid">你在这里</template>
-            <template v-else-if="channel.clients.length">{{ channel.clients.length }} 人</template>
+            <template v-else-if="channel.clients.length">{{ channel.clients.filter((c) => !c.isBot).length }} 人</template>
           </span>
         </button>
 
         <ul v-if="channel.clients.length" class="member-list" :style="{ paddingLeft: `${26 + channel.depth * 16}px` }">
-          <li v-for="client in channel.clients" :key="client.nickname" :class="{ bot: client.isBot }">
+          <li v-for="client in channel.clients" :key="client.clid" :class="{ bot: client.isBot }">
             <i class="dot" aria-hidden="true" />{{ client.nickname }}
             <span v-if="client.isBot" class="tag">机器人</span>
+            <span v-else-if="client.isSelf" class="tag">你</span>
           </li>
         </ul>
       </li>

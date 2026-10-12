@@ -162,6 +162,47 @@ class BotIdleManagerTests(unittest.TestCase):
 
 
 class BotIdleManagerAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_web_voice_user_alone_is_not_paused_or_retired(self) -> None:
+        clock = FakeClock()
+        tsmusic = FakeTSMusic(timeout=1, auto_pause=True, playing=True)
+        async def web_ids():
+            return {'bot-1'}
+        manager = BotIdleManager(test_settings(), tsmusic, clock=clock, web_user_bot_ids=web_ids)
+        clients = [{'client_type': '0', 'clid': '42', 'client_nickname': 'Alice', 'cid': '10'}]
+        with patch('app.services.bot_idle_manager.fetch_ts_clients', return_value=clients):
+            await manager.poll_once()
+            clock.now = 600
+            await manager.poll_once()
+        self.assertEqual(tsmusic.stop_calls, [])
+        self.assertEqual(tsmusic.pause_calls, [])
+        self.assertEqual(manager.snapshot()['bots'][0]['reason'], 'web_voice_user')
+        self.assertEqual(manager.snapshot()['bots'][0]['humanCount'], 1)
+
+    async def test_web_voice_user_counts_as_listener_for_music(self) -> None:
+        clock = FakeClock()
+        tsmusic = FakeTSMusic(timeout=1, auto_pause=True, playing=True)
+        tsmusic.bots.append({'id': 'voice-1', 'name': 'Alice', 'status': 'connected'})
+        async def nickname(bot_id):
+            return 'Alice' if bot_id == 'voice-1' else 'MusicBot'
+        async def client_id(bot_id):
+            return 43 if bot_id == 'voice-1' else 42
+        async def web_ids():
+            return {'voice-1'}
+        tsmusic.get_bot_nickname = nickname
+        tsmusic.get_bot_client_id = client_id
+        manager = BotIdleManager(test_settings(), tsmusic, clock=clock, web_user_bot_ids=web_ids)
+        clients = [
+            {'client_type': '0', 'clid': '42', 'client_nickname': 'MusicBot', 'cid': '10'},
+            {'client_type': '0', 'clid': '43', 'client_nickname': 'Alice', 'cid': '10'},
+        ]
+        with patch('app.services.bot_idle_manager.fetch_ts_clients', return_value=clients):
+            await manager.poll_once()
+            clock.now = 600
+            await manager.poll_once()
+        self.assertEqual(tsmusic.stop_calls, [])
+        self.assertEqual(tsmusic.pause_calls, [])
+        self.assertTrue(all(item['humanCount'] == 1 for item in manager.snapshot()['bots']))
+
     async def test_empty_channel_reaches_checked_stop_after_timeout(self) -> None:
         clock = FakeClock()
         tsmusic = FakeTSMusic(timeout=1)

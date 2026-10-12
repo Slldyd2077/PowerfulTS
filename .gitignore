@@ -63,3 +63,9 @@ backend/uvicorn.out.log
 
 # Isolated release builds, test environments and generated archives
 .release/
+
+# Local credentials, voice references, model weights and experiment recordings
+backend.env
+backend.env.*
+!backend.env.example
+data/

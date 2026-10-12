@@ -4,11 +4,13 @@ from __future__ import annotations
 import asyncio
 import secrets
 import time
+import logging
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Callable
 
 
 _END = object()
+logger = logging.getLogger('uvicorn.error.live_audio')
 
 
 @dataclass(frozen=True)
@@ -118,7 +120,7 @@ class LiveAudioRelay:
             return True
         except TimeoutError:
             # A stalled consumer must not let an unbounded live upload exhaust RAM.
-            await self.close(session_id)
+            await self.close(session_id, reason='consumer_backpressure_timeout')
             return False
 
     async def stream(self, session_id: str) -> AsyncIterator[bytes]:
@@ -150,7 +152,7 @@ class LiveAudioRelay:
                 )
                 yield item.payload
         finally:
-            await self.close(session_id)
+            await self.close(session_id, reason='consumer_stream_ended')
 
     async def status_for_bot(self, bot_id: str) -> dict:
         """Return bounded queue telemetry without exposing capability ids."""
@@ -199,15 +201,19 @@ class LiveAudioRelay:
             "maxQueueDwellMs": 0,
         }
 
-    async def close(self, session_id: str) -> LiveAudioSession | None:
+    async def close(self, session_id: str, *, reason: str = 'explicit_stop') -> LiveAudioSession | None:
         async with self._lock:
-            return self._close_unlocked(session_id)
+            return self._close_unlocked(session_id, reason=reason)
 
-    def _close_unlocked(self, session_id: str) -> LiveAudioSession | None:
+    def _close_unlocked(self, session_id: str, *, reason: str = 'superseded') -> LiveAudioSession | None:
         session = self._sessions.pop(session_id, None)
         if session is None:
             return None
         session.closed = True
+        logger.info('Live audio closed bot=%s reason=%s age=%.1fs consumer=%s pushed=%s streamed=%s queued=%s max_dwell_ms=%s',
+            session.bot_id, reason, self._monotonic_fn() - session.created_at,
+            session.consumer_connected, session.chunks_pushed, session.chunks_streamed,
+            session.queued_chunks, session.max_queue_dwell_ms)
         if self._by_bot.get(session.bot_id) == session_id:
             self._by_bot.pop(session.bot_id, None)
         try:

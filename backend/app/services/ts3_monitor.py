@@ -610,7 +610,7 @@ class TS3Monitor:
             channels = [dict(channel) for channel in self.channel_tree]
         return {"channels": channels, "count": len(channels)}
 
-    def get_voice_overview(self, bot_clid: int | None) -> dict:
+    def get_voice_overview(self, bot_clid: int | None, *, music_client_ids: set[int] | None = None) -> dict:
         """网页通话用：频道树 + 每个频道的在场成员 + bot 当前所在频道。
 
         bot 用 clid 定位而不是昵称：昵称会随「正在播放的歌」和 <WEB通讯> 标记变化，
@@ -622,16 +622,21 @@ class TS3Monitor:
             needs_password = dict(self.channel_password)
             members: dict[int, list[dict]] = {}
             bot_cid: int | None = None
-            for entry in self.client_data.values():
+            for uid, entry in self.client_data.items():
                 if now - entry["last_seen"] > ONLINE_WINDOW:
                     continue
-                is_bot = bot_clid is not None and entry.get("clid") == bot_clid
-                if is_bot:
+                is_self = bot_clid is not None and entry.get("clid") == bot_clid
+                if is_self:
                     bot_cid = entry["cid"]
+                nickname = strip_web_voice_marker(entry["nickname"])
+                is_web_user = nickname != entry["nickname"]
+                is_bot = (entry.get("clid") in (music_client_ids or set())
+                          and not is_self and not is_web_user)
                 # clid 要透出去：下行语音包按 clid 标记说话人，前端靠它把
                 # 「谁在说话」和「这条音频流」对上，才能给每个人单独调音量。
                 members.setdefault(entry["cid"], []).append(
-                    {"clid": entry.get("clid", 0), "nickname": entry["nickname"], "isBot": is_bot}
+                    {"clid": entry.get("clid", 0), "nickname": nickname, "volumeKey": f"ts:{uid}",
+                     "isBot": is_bot, "isSelf": is_self}
                 )
         channels = [
             {

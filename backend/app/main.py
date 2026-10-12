@@ -20,7 +20,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from ._version import __version__
 from .core.config import get_settings
 from .core.database import AsyncSessionLocal, dispose_db, init_db
-from .routers import admin, auth, bilibili, friends, intro_music, monitor, music, steam, theme, ts_playlist, watch
+from .routers import admin, auth, bilibili, friends, intro_music, monitor, music, steam, theme, ts_playlist, watch, channel_admin
+from .routers import voice_processing
 from .services.netease import NeteaseClient
 from .services.napcat_client import NapCatClient
 from .services.steam_client import SteamClient
@@ -203,7 +204,16 @@ async def lifespan(app: FastAPI):
     guest_cleanup_task = asyncio.create_task(_cleanup_expired_guests_loop(app))
     # Resolve the client lazily: admin hot reload replaces app.state.tsmusic.
     # Capturing the object here would leave the idle manager using a closed client.
-    app.state.bot_idle_manager = BotIdleManager(settings, lambda: app.state.tsmusic)
+    async def web_user_bot_ids() -> set[str]:
+        from sqlalchemy import select
+        from .models import VoiceBot
+        async with AsyncSessionLocal() as session:
+            rows = await session.scalars(select(VoiceBot.bot_id))
+            return {bot_id for bot_id in rows if bot_id}
+
+    app.state.bot_idle_manager = BotIdleManager(
+        settings, lambda: app.state.tsmusic, web_user_bot_ids=web_user_bot_ids,
+    )
     app.state.bot_idle_manager.start()
     # 预加载播放跟随开关到单例（保证重启后关闭态生效；失败不阻断启动）
     try:
@@ -260,11 +270,13 @@ app.add_middleware(
 
 # 音乐通道：TSMusicBot 多平台音乐引擎（网易云 / QQ / B 站）
 app.include_router(music.router, prefix="/api")
+app.include_router(voice_processing.router, prefix="/api")
 app.include_router(watch.router, prefix="/api")
 # B 站通道：搜索/点播 (TSMusicBot 多平台) + 图片代理
 app.include_router(bilibili.router, prefix="/api")
 # 原生监控：/api/stats、/api/channels (从 TS3 ServerQuery 直读)
 app.include_router(monitor.router, prefix="/api")
+app.include_router(channel_admin.router, prefix="/api")
 # 原生认证：/api/auth/* (TS 身份认证)
 app.include_router(auth.router, prefix="/api")
 # 原生好友：/api/friends/*

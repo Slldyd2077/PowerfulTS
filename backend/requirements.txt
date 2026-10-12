@@ -1,7 +1,7 @@
 fastapi>=0.115.0
 uvicorn>=0.30.0
-# >=13 起才有 websockets.asyncio.client（频道语音下行连 TSMusicBot 用），12.x 会 ImportError
-websockets>=13.0
+# >=15 provides the proxy=None option used by the local speech worker bridge.
+websockets>=15.0
 httpx>=0.27.0
 mutagen>=1.47.0
 Pillow>=10.0.0

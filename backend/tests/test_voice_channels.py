@@ -74,9 +74,33 @@ class VoiceOverviewTests(unittest.TestCase):
             client
             for channel in overview["channels"]
             for client in channel["clients"]
-            if client["isBot"]
+            if client["isSelf"]
         ]
         self.assertEqual([c["nickname"] for c in bot_entries], ["♪ 某首歌 - 点歌姬"])
+        self.assertFalse(bot_entries[0]['isBot'])
+
+    def test_web_users_have_clean_names_and_music_is_separate(self) -> None:
+        monitor = _monitor_with(
+            clients=[
+                {'nickname': '<WEB通讯> Alice', 'clid': 11, 'cid': 1},
+                {'nickname': '<WEB通讯> Bob', 'clid': 12, 'cid': 1},
+                {'nickname': 'MusicBot', 'clid': 13, 'cid': 1},
+            ],
+            channels=[{'cid': 1, 'pid': 0, 'depth': 0, 'name': '大厅'}],
+        )
+        overview = monitor.get_voice_overview(11, music_client_ids={13})
+        users = {c['nickname']: c for c in overview['channels'][0]['clients']}
+        self.assertEqual(set(users), {'Alice', 'Bob', 'MusicBot'})
+        self.assertTrue(users['Alice']['isSelf'])
+        self.assertFalse(users['Alice']['isBot'])
+        self.assertFalse(users['Bob']['isSelf'])
+        self.assertFalse(users['Bob']['isBot'])
+        self.assertTrue(users['MusicBot']['isBot'])
+        self.assertEqual(users['MusicBot']['volumeKey'], 'ts:uid-13')
+        monitor.client_data['uid-13'].update(nickname='另一首歌', clid=99)
+        updated = monitor.get_voice_overview(11, music_client_ids={99})
+        music = next(c for c in updated['channels'][0]['clients'] if c['isBot'])
+        self.assertEqual(music['volumeKey'], users['MusicBot']['volumeKey'])
 
     def test_offline_bot_reports_no_channel_and_marks_nobody(self) -> None:
         overview = self._overview(bot_clid=None)

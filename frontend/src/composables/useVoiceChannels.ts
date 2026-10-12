@@ -78,12 +78,12 @@ async function refresh(fresh = false): Promise<void> {
   return inFlight
 }
 
-/** 当前所在频道，以及频道里的人（不含你自己的通话身份）。 */
+/** 当前频道中可独立调节的音源：其他用户和音乐机器人，排除自己。 */
 const currentChannel = computed(
   () => channels.value.find((c) => c.cid === botCid.value) || null,
 )
 const roommates = computed(
-  () => (currentChannel.value?.clients ?? []).filter((c) => !c.isBot),
+  () => (currentChannel.value?.clients ?? []).filter((c) => !c.isSelf),
 )
 
 export function useVoiceChannels() {

@@ -1,5 +1,6 @@
 import asyncio
 from contextlib import suppress
+from unittest.mock import patch
 
 from app.services.live_audio import LiveAudioRelay
 
@@ -32,7 +33,26 @@ def test_new_session_for_same_bot_invalidates_previous_capability():
         assert first.closed is True
         assert await relay.get(first.id) is None
         assert await relay.get(second.id) is second
+        # A late cleanup from the old upload must not touch the replacement.
+        assert await relay.close(first.id, reason='browser_upload_ended') is None
+        assert await relay.push(second.id, b'new audio') is True
 
+    asyncio.run(scenario())
+
+
+def test_consumer_close_logs_reason_without_capability():
+    async def scenario():
+        relay = LiveAudioRelay()
+        session = await relay.create(1, 'bot-a', 'audio/webm')
+        await relay.push(session.id, b'audio')
+        stream = relay.stream(session.id)
+        assert await anext(stream) == b'audio'
+        with patch('app.services.live_audio.logger.info') as log:
+            await stream.aclose()
+        args = log.call_args.args
+        assert args[2] == 'consumer_stream_ended'
+        assert session.id not in str(args)
+        assert await relay.get(session.id) is None
     asyncio.run(scenario())
 
 
