@@ -26,6 +26,7 @@ from ..core.database import get_db
 from ..deps import AccountDep, AdminDep, TsmusicDep, VoiceAccountDep, get_current_account
 from ..models import Account, BotOwnership, BotShare, EntrySound, Friend, VoiceBot
 from ..services import bot_mover
+from ..services import app_setting
 from ..services.auth_service import AuthService
 from ..services.entry_sound import (
     EntrySoundValidationError,
@@ -1244,7 +1245,7 @@ def _check_bot_id(bot_id: str) -> None:
 class BotCreate(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     nickname: str | None = Field(default=None, max_length=64)
-    serverAddress: str = Field(default="127.0.0.1", min_length=1, description="TS 服务器地址")
+    serverAddress: str | None = Field(default=None, min_length=1, description="TS 服务器地址；省略时使用系统设置")
     serverPort: int = Field(default=9987, ge=1, le=65535)
     defaultChannel: str = ""
     channelPassword: str = ""
@@ -1280,6 +1281,13 @@ async def _check_bot_accessible(db: AsyncSession, account_id: int, bot_id: str) 
     accessible = await _accessible_bot_ids(db, account_id)
     if bot_id not in accessible:
         raise HTTPException(status_code=403, detail="无权操作该 Bot（不属于你，也未共享给你）")
+
+
+@router.get("/bots/defaults")
+async def get_bot_defaults(_account: AccountDep, db: AsyncSession = Depends(get_db)):
+    """新建机器人的默认主机；语音端口独立于 ServerQuery 端口。"""
+    host = await app_setting.get_setting(db, "sys.ts3_host", "")
+    return {"serverAddress": host.strip() or settings.ts3_host, "serverPort": 9987}
 
 
 @router.get("/bots")
@@ -1330,6 +1338,8 @@ async def create_bot(body: BotCreate, tsmusic: TsmusicDep, account: AccountDep, 
     if error := ts_nickname_error(name):
         raise HTTPException(status_code=400, detail=error.replace("TS 昵称", "Bot 名称"))
     payload = {**body.model_dump(), "name": name, "nickname": name}
+    if not body.serverAddress or not body.serverAddress.strip():
+        payload["serverAddress"] = (await get_bot_defaults(account, db))["serverAddress"]
     try:
         result = await tsmusic.create_bot(payload)
     except (httpx.HTTPError, ValueError):
