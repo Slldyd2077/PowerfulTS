@@ -36,7 +36,7 @@ https://github.com/user-attachments/assets/3761cb43-a68d-4768-b6d0-dd5860de7902
 
 其中**网页通话**让成员不装 TeamSpeak 客户端也能直接在浏览器里收听频道并发言。
 
-> 🍴 **TSMusicBot 专用分支**：本项目的音乐引擎与网页通话中继依赖 [Slldyd2077/teamspeak-music-bot](https://github.com/Slldyd2077/teamspeak-music-bot) 的专用定制分支 [`merge/upstream-v1.12`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/merge/upstream-v1.12)。**部署时须使用 [含逐曲响度均衡的生产兼容固定提交 `48577fe`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/48577fe57984ca3522da092e614a30f2501b6455) 构建**，详见[安装与适配说明](docs/release-guide.md#上游引擎)。PowerfulTS 依赖该 fork 的 per-bot 多实例架构、双向 Opus 语音中继与语音闪避（含网页通话触发）；原版上游不能直接替换。
+> 🍴 **TSMusicBot 专用分支**：本项目的音乐引擎与网页通话中继依赖 [Slldyd2077/teamspeak-music-bot](https://github.com/Slldyd2077/teamspeak-music-bot) 的专用定制分支 [`merge/upstream-v1.12`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/merge/upstream-v1.12)。**Docker 部署使用本 fork 的 [`scripts/docker/docker-compose.yml`](https://github.com/Slldyd2077/teamspeak-music-bot/blob/main/scripts/docker/docker-compose.yml)，默认拉取 `ghcr.io/slldyd2077/teamspeak-music-bot:latest`；固定版本可用 `:1.12.3`**，详见[安装与适配说明](docs/release-guide.md#上游引擎)。PowerfulTS 依赖该 fork 的 per-bot 多实例架构、双向 Opus 语音中继与语音闪避（含网页通话触发）；原版上游不能直接替换。
 
 > 💡 **跨平台 Release**：从 [Releases](https://github.com/Slldyd2077/PowerfulTS/releases) 下载 x64 或 ARM64 安装包，解压、配置后启动。预构建包无需 Git / Python / Node.js，需要 Docker Engine 与 Compose v2；支持 Windows、macOS、Linux 和支持 Docker 的 NAS。详见 [安装与升级指南](docs/release-guide.md)。
 
@@ -242,7 +242,7 @@ docker compose -f docker-compose.nas.yml up -d
 
 - 已安装 [Docker](https://docs.docker.com/get-docker/) 与 [Docker Compose](https://docs.docker.com/compose/install/)（Docker Desktop 自带）
 - 上游服务已就绪（见 [🔌 接入上游服务](#-接入上游服务)）：
-  - **TSMusicBot**（音乐 / 点播引擎，默认 :3000；须使用 [含逐曲响度均衡的生产兼容固定提交 `48577fe`](https://github.com/Slldyd2077/teamspeak-music-bot/tree/48577fe57984ca3522da092e614a30f2501b6455) 构建，详见[安装与适配说明](docs/release-guide.md#上游引擎)）
+  - **TSMusicBot**（音乐 / 点播引擎，默认 :3000；使用 `ghcr.io/slldyd2077/teamspeak-music-bot:1.12.3` 定制镜像，详见[安装与适配说明](docs/release-guide.md#上游引擎)）
   - **TS3 或 TS6 服务端**（TS3 raw Query 通常 TCP :10011；TS6 开启 SSH Query，通常 TCP :10022；机器人语音通常 UDP :9987）
 
 #### 2. 配置环境变量

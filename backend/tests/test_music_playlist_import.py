@@ -175,14 +175,15 @@ class QueueImportTests(IsolatedAsyncioTestCase):
 
 
 class BotCreationTests(IsolatedAsyncioTestCase):
-    async def test_name_is_the_ts_nickname_and_server_defaults_to_loopback(self):
+    async def test_name_is_the_ts_nickname_and_server_uses_saved_setting(self):
         body = BotCreate(name='音乐机器人', nickname='旧的分离昵称')
         client = SimpleNamespace(create_bot=AsyncMock(return_value={'id': 'new-bot'}))
         db = SimpleNamespace(add=lambda value: None, commit=AsyncMock())
-        await create_bot(body, client, SimpleNamespace(id=1), db)
+        with patch('app.services.app_setting.get_setting', AsyncMock(return_value='ts.example.com')):
+            await create_bot(body, client, SimpleNamespace(id=1), db)
         payload = client.create_bot.call_args.args[0]
         self.assertEqual(payload['name'], payload['nickname'])
-        self.assertEqual(payload['serverAddress'], '127.0.0.1')
+        self.assertEqual(payload['serverAddress'], 'ts.example.com')
 
     async def test_rename_keeps_both_names_equal_including_legacy_nickname_updates(self):
         client = SimpleNamespace(update_bot=AsyncMock(return_value={}))

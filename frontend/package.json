@@ -1,7 +1,7 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "1.1.5",
+  "version": "1.1.6",
   "type": "module",
   "packageManager": "pnpm@10.27.0",
   "engines": {
@@ -13,6 +13,7 @@
     "test:voice-browser": "node tests/microphone-processing.browser.mjs",
     "test:voice-session-browser": "node tests/voice-session.browser.mjs",
     "test:voice-review-browser": "node tests/voice-review-regressions.browser.mjs",
+    "test:music-bot-defaults-browser": "node tests/music-bot-defaults.browser.mjs",
     "test:music-browser": "node tests/music-loudness.browser.mjs",
     "test:music-playlists-browser": "node tests/music-playlists.browser.mjs",
     "test:music-favorites-browser": "node tests/music-favorites.browser.mjs",

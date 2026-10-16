@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useMusicStore } from '@/stores/music'
 import type { BotInfo, BotCreate } from '@/api/music'
-import { shareBot, unshareBot, getMyShares, updateBot, getBotConfig, type MyShare } from '@/api/music'
+import { shareBot, unshareBot, getMyShares, updateBot, getBotConfig, getBotDefaults, type MyShare } from '@/api/music'
 import { getFriends, type Friend } from '@/api/social'
 import BotBehaviorPanel from './BotBehaviorPanel.vue'
 import { usePolling } from '@/composables/usePolling'
@@ -20,10 +20,11 @@ const hasBots = computed(() => bots.value.length > 0)
 
 const showCreate = ref(false)
 const creating = ref(false)
+const loadingDefaults = ref(false)
 const form = ref<BotCreate>({
   name: '',
   nickname: '',
-  serverAddress: '127.0.0.1',
+  serverAddress: '',
   serverPort: 9987,
   defaultChannel: '',
   channelPassword: '',
@@ -51,8 +52,25 @@ async function chooseBot(id: string) {
 
 function resetForm() {
   form.value = {
-    name: '', nickname: '', serverAddress: '127.0.0.1',
+    name: '', nickname: '', serverAddress: '',
     serverPort: 9987, defaultChannel: '', channelPassword: '', serverPassword: '',
+  }
+}
+
+async function openCreate() {
+  if (loadingDefaults.value) return
+  loadingDefaults.value = true
+  try {
+    const defaults = await getBotDefaults()
+    resetForm()
+    errors.value = {}
+    form.value.serverAddress = defaults.serverAddress
+    form.value.serverPort = defaults.serverPort
+    showCreate.value = true
+  } catch {
+    ElMessage.error('读取 TS 服务器默认设置失败，请重试')
+  } finally {
+    loadingDefaults.value = false
   }
 }
 
@@ -324,8 +342,8 @@ onMounted(() => {
     </div>
 
     <!-- 新建 -->
-    <button v-if="hasBots && !showCreate" class="add-btn" @click="showCreate = true">+ 新建 Bot</button>
-    <button v-else-if="!hasBots && !showCreate" class="add-btn" @click="showCreate = true">+ 新建第一个 Bot</button>
+    <button v-if="hasBots && !showCreate" class="add-btn" :disabled="loadingDefaults" @click="openCreate">+ 新建 Bot</button>
+    <button v-else-if="!hasBots && !showCreate" class="add-btn" :disabled="loadingDefaults" @click="openCreate">+ 新建第一个 Bot</button>
 
     <form v-if="showCreate" class="create-form" autocomplete="off" @submit.prevent="submitCreate">
       <div class="field">
@@ -338,7 +356,8 @@ onMounted(() => {
         <summary>高级设置</summary>
       <div class="field">
         <label>TS 服务器地址 *</label>
-        <input v-model="form.serverAddress" name="music-bot-host" autocomplete="off" :class="{ err: errors.serverAddress }" placeholder="127.0.0.1" />
+        <input v-model="form.serverAddress" name="music-bot-host" autocomplete="off" :class="{ err: errors.serverAddress }" placeholder="ts.example.com" />
+        <small class="field-hint">默认使用系统设置中的 TS 主机，可单独修改。Docker 中 127.0.0.1 指向机器人所在容器，请确认机器人能访问此地址。</small>
       </div>
       <div class="field">
         <label>语音端口（UDP）</label>

@@ -232,6 +232,12 @@ export async function getBots(): Promise<{ bots: BotInfo[] }> {
   return data
 }
 
+/** 读取新建 bot 的默认 TS 地址和语音端口 */
+export async function getBotDefaults(): Promise<Pick<BotCreate, 'serverAddress' | 'serverPort'>> {
+  const { data } = await apiClient.get('/music/bots/defaults')
+  return data
+}
+
 /** 创建 bot（identity 自动生成，不自动连接） */
 export async function createBot(payload: BotCreate): Promise<BotInfo> {
   const { data } = await apiClient.post('/music/bots', payload)

@@ -18,6 +18,10 @@
 
 ## 上游引擎
 
+新增安装推荐使用 [本 fork 的 Compose](https://github.com/Slldyd2077/teamspeak-music-bot/blob/main/scripts/docker/docker-compose.yml)，默认镜像 `ghcr.io/slldyd2077/teamspeak-music-bot:latest`，正式部署可固定 `:1.12.3`。该版本整合通用定制分支及后台响度分析、5 秒平滑增益和 PCM 语音闪避。下载最新 Compose 后执行 `docker compose pull && docker compose up -d`；旧 Compose 中的 `ghcr.io/zhangtianyao1/...` 必须先替换。原数据卷保留即可。
+
+PowerfulTS v1.1.6 新建音乐机器人读取系统设置中保存的 TS 主机，每次打开表单重新读取，并允许高级设置单独覆盖。默认语音端口 9987，与 Query 的 10011/10022 分开；Docker 中请使用机器人容器可访问的 TS 地址。以下固定提交记录供历史生产部署回退。
+
 PowerfulTS 的安装包不捆绑 TS3 / TS6 服务端或 TSMusicBot。需预先部署：
 
 - TS3 / TS6：开启 ServerQuery，配置读取频道 / 客户端、验证码私聊以及所需频道写操作权限。TS3 raw TCP 通常 10011，TS6 SSH 通常 10022，TS6 官方配置默认关闭 SSH Query，需要 `TSSERVER_QUERY_SSH_ENABLED=true`。限制 Query 端口访问范围；SSH 模式需核验可信主机公钥。完整步骤见 [TS6 指南](ts6-server.md)。
