@@ -20,7 +20,17 @@ try {
     if (NativeDecoder) window.AudioDecoder = class extends NativeDecoder {
       static isConfigSupported(config) { return NativeDecoder.isConfigSupported(config) }
       constructor(options) { super(options); this.voiceTestError = options.error }
+      get decodeQueueSize() {
+        if (window.voiceTestBacklogPackets > 0) {
+          window.voiceTestBacklogReads++
+          // Production reads the queue twice per dropped packet.
+          if (window.voiceTestBacklogReads % 2 === 0) window.voiceTestBacklogPackets--
+          return 25
+        }
+        return super.decodeQueueSize
+      }
       decode(chunk) {
+        window.voiceTestNativeDecodeCalls = (window.voiceTestNativeDecodeCalls || 0) + 1
         if (window.voiceTestFailDecoder) {
           window.voiceTestFailDecoder = false
           this.close()
@@ -148,8 +158,37 @@ try {
   assert.equal(counts.microphones, 0)
   assert.equal(await page.evaluate(() => window.voiceTestTracks.length), 0)
   await receivesTone()
+  const beforeBacklog = { ...counts }
+  await page.evaluate(() => {
+    window.voiceTestNativeDecodeCalls = 0
+    window.voiceTestBacklogReads = 0
+    window.voiceTestBacklogPackets = 7
+  })
+  await page.waitForFunction(() => window.voiceTestBacklogPackets === 0)
+  await page.waitForFunction(() => window.voiceTestNativeDecodeCalls > 0)
+  await receivesTone()
+  assert.equal(await page.getByText('兼容模式已启用：当前设备使用 WASM 解码频道语音。', { exact: true }).count(), 0)
+  await page.evaluate(() => {
+    window.voiceTestBacklogReads = 0
+    window.voiceTestBacklogPackets = Infinity
+  })
+  await page.getByText('兼容模式已启用：当前设备使用 WASM 解码频道语音。', { exact: true }).waitFor({ state: 'attached' })
+  assert.ok(await page.evaluate(() => window.voiceTestBacklogReads >= 16), 'fallback requires eight consecutive backlogged packets after recovery')
+  // Flush residual native PCM before checking fresh WASM output.
+  await page.waitForTimeout(1000)
+  await receivesTone()
+  assert.equal(counts.joins, beforeBacklog.joins)
+  assert.equal(counts.downlinks, beforeBacklog.downlinks)
+  assert.equal(counts.downlinkCloses, beforeBacklog.downlinkCloses)
+  assert.equal(counts.microphones, 0)
+  console.log('PASS transient backlog stays native; sustained backlog switches to WASM with fresh audible PCM and no reconnect')
+  await page.locator('.leave-button').click()
+  await page.getByRole('button', { name: '加入通话', exact: false }).waitFor()
+  await page.evaluate(() => { window.voiceTestBacklogPackets = 0 })
+  await page.getByRole('button', { name: '只收听（不开麦克风）', exact: true }).click()
+  await receivesTone()
   await page.evaluate(() => { window.voiceTestFailDecoder = true })
-  await page.getByText('兼容模式已启用：当前设备使用 WASM 解码频道语音。', { exact: true }).waitFor()
+  await page.getByText('兼容模式已启用：当前设备使用 WASM 解码频道语音。', { exact: true }).waitFor({ state: 'attached' })
   await receivesTone()
   console.log('PASS runtime WebCodecs failure falls back to WASM and audible decoded PCM continues')
   await page.locator('.leave-button').click()
