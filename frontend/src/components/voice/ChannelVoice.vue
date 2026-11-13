@@ -23,6 +23,7 @@ import {
 } from '@/services/microphone-uplink'
 import {
   resolveVoiceDownlinkCloseAction,
+  trackDecoderBacklog,
 } from '@/services/voice-downlink-policy'
 import { MicrophoneProcessing, type MicrophoneProcessingStatus } from '@/services/microphone-processing'
 import { resumeVoiceAudio, voiceAudioTimeout } from '@/services/audio-context-state'
@@ -42,6 +43,8 @@ type NativeSpeakerDecoder = {
   decoder: AudioDecoder
   timestamp: number
   lastSeen: number
+  /** 连续解码积压的包数，用于判定解码器是否已经卡死。 */
+  backlogStrikes: number
 }
 
 type WasmSpeakerDecoder = {
@@ -283,7 +286,7 @@ function getSpeakerDecoder(clientId: number): SpeakerDecoder {
   })
   decoder.configure({ codec: 'opus', sampleRate: 48000, numberOfChannels: 2 })
   const speaker: NativeSpeakerDecoder = {
-    kind: 'webcodecs', decoder, timestamp: 0, lastSeen: performance.now(),
+    kind: 'webcodecs', decoder, timestamp: 0, lastSeen: performance.now(), backlogStrikes: 0,
   }
   decoders.set(clientId, speaker)
   return speaker
@@ -361,8 +364,18 @@ function decodeVoicePacket(buffer: ArrayBuffer) {
   }
   if (speaker.decoder.decodeQueueSize > 24) {
     speaker.timestamp += duration
+    // 解码器卡死时只会持续积压、不会触发 error；继续丢包就是整场通话静音。
+    const backlog = trackDecoderBacklog(speaker.decoder.decodeQueueSize, speaker.backlogStrikes)
+    speaker.backlogStrikes = backlog.strikes
+    if (backlog.fallback) {
+      console.warn(
+        `TS voice decoder ${clientId} stalled (queue ${speaker.decoder.decodeQueueSize}), switching to WASM`,
+      )
+      void useWasmAfterDecoderFailure()
+    }
     return
   }
+  speaker.backlogStrikes = 0
   speaker.decoder.decode(new EncodedAudioChunk({
     type: 'key',
     timestamp: speaker.timestamp,
